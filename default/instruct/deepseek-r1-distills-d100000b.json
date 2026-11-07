@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "DeepSeek R1 (distills)",
+  "systemPrefix": "<｜User｜>",
+  "systemSuffix": "",
+  "userPrefix": "<｜User｜>",
+  "userSuffix": "",
+  "modelPrefix": "<｜Assistant｜>",
+  "modelSuffix": "<｜end▁of▁sentence｜>",
+  "systemSameAsUser": true,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<｜end▁of▁sentence｜>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "<think>\n",
+    "suffix": "</think>",
+    "opensReply": true
+  }
+}

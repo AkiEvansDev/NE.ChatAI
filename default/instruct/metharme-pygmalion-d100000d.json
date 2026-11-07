@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "Metharme (Pygmalion)",
+  "systemPrefix": "<|system|>",
+  "systemSuffix": "",
+  "userPrefix": "<|user|>",
+  "userSuffix": "",
+  "modelPrefix": "<|model|>",
+  "modelSuffix": "",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "</s>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

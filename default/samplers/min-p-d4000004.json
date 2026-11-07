@@ -1,0 +1,48 @@
+{
+  "format": 1,
+  "name": "Min-P",
+  "replyLength": 1024,
+  "temperature": 1.25,
+  "topP": 1,
+  "topK": 0,
+  "minP": 0.1,
+  "typicalP": 1,
+  "tfs": 1,
+  "topA": 0,
+  "repetitionPenalty": 1,
+  "repetitionPenaltyRange": 0,
+  "repetitionPenaltySlope": 1,
+  "presencePenalty": 0,
+  "frequencyPenalty": 0,
+  "dry": {
+    "multiplier": 0,
+    "base": 1.75,
+    "allowedLength": 2,
+    "penaltyRange": 0,
+    "sequenceBreakers": [
+      "\n",
+      ":",
+      "\"",
+      "*"
+    ]
+  },
+  "xtc": {
+    "threshold": 0.1,
+    "probability": 0
+  },
+  "smoothingFactor": 0,
+  "nSigma": 0,
+  "samplerOrder": [
+    5,
+    6,
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "seed": {
+    "mode": "perChat",
+    "value": -1
+  }
+}

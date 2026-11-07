@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "name": "Gemma 3",
+  "systemPrefix": "<start_of_turn>user\n",
+  "systemSuffix": "<end_of_turn>\n",
+  "userPrefix": "<start_of_turn>user\n",
+  "userSuffix": "<end_of_turn>\n",
+  "modelPrefix": "<start_of_turn>model\n",
+  "modelSuffix": "<end_of_turn>\n",
+  "systemSameAsUser": true,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<end_of_turn>",
+    "<start_of_turn>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

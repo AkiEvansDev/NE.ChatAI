@@ -1,0 +1,47 @@
+using System.Collections.Generic;
+using System.Reflection;
+
+namespace NE.ChatAI;
+
+/// <summary>The glyphs the application draws, named for what they stand for; the platform registers exactly these.</summary>
+internal static class AppIcons
+{
+    public const string Chats = MaterialIcons.Forum;
+    public const string Generation = MaterialIcons.Tune;
+    public const string Settings = MaterialIcons.Settings;
+    public const string Previous = MaterialIcons.ChevronLeft;
+    public const string Next = MaterialIcons.ChevronRight;
+    public const string Regenerate = MaterialIcons.Refresh;
+    public const string Continue = MaterialIcons.ReadMore;
+    public const string Variant = MaterialIcons.SwapHoriz;
+    public const string DeleteFrom = MaterialIcons.DeleteSweep;
+    public const string Branch = MaterialIcons.CallSplit;
+    public const string Persona = MaterialIcons.AccountCircle;
+    public const string Phrases = MaterialIcons.Quickreply;
+    public const string AuthorNotes = MaterialIcons.EditNote;
+    public const string Impersonate = MaterialIcons.RecordVoiceOver;
+    public const string Tags = MaterialIcons.Sell;
+    public const string Statistics = MaterialIcons.BarChart;
+    public const string Prompt = MaterialIcons.Code;
+    public const string Connect = MaterialIcons.Sync;
+    public const string Info = MaterialIcons.Info;
+    public const string Scenarios = MaterialIcons.AccountTree;
+    public const string Run = MaterialIcons.PlayArrow;
+
+    public static string Outline(string icon)
+        => MaterialIcons.Outlined(icon);
+
+    /// <summary>Every glyph above, filled and outlined, for the host's registration.</summary>
+    public static string[] All()
+    {
+        List<string> icons = [];
+
+        foreach (FieldInfo field in typeof(AppIcons).GetFields(BindingFlags.Public | BindingFlags.Static))
+        {
+            if (field.IsLiteral && field.GetRawConstantValue() is string icon && !icons.Contains(icon))
+                icons.Add(icon);
+        }
+
+        return [.. icons];
+    }
+}

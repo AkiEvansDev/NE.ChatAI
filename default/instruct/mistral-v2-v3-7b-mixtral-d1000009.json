@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "name": "Mistral V2 & V3 (7B, Mixtral)",
+  "systemPrefix": "[INST] ",
+  "systemSuffix": "[/INST]",
+  "userPrefix": "[INST] ",
+  "userSuffix": "[/INST]",
+  "modelPrefix": " ",
+  "modelSuffix": "</s>",
+  "lastModelPrefix": "",
+  "systemSameAsUser": true,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "</s>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

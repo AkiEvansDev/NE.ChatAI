@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "ChatML",
+  "systemPrefix": "<|im_start|>system\n",
+  "systemSuffix": "<|im_end|>\n",
+  "userPrefix": "<|im_start|>user\n",
+  "userSuffix": "<|im_end|>\n",
+  "modelPrefix": "<|im_start|>assistant\n",
+  "modelSuffix": "<|im_end|>\n",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<|im_end|>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

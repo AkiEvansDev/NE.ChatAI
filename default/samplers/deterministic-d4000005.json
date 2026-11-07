@@ -1,0 +1,48 @@
+{
+  "format": 1,
+  "name": "Deterministic",
+  "replyLength": 1024,
+  "temperature": 0,
+  "topP": 1,
+  "topK": 1,
+  "minP": 0,
+  "typicalP": 1,
+  "tfs": 1,
+  "topA": 0,
+  "repetitionPenalty": 1,
+  "repetitionPenaltyRange": 0,
+  "repetitionPenaltySlope": 1,
+  "presencePenalty": 0,
+  "frequencyPenalty": 0,
+  "dry": {
+    "multiplier": 0,
+    "base": 1.75,
+    "allowedLength": 2,
+    "penaltyRange": 0,
+    "sequenceBreakers": [
+      "\n",
+      ":",
+      "\"",
+      "*"
+    ]
+  },
+  "xtc": {
+    "threshold": 0.1,
+    "probability": 0
+  },
+  "smoothingFactor": 0,
+  "nSigma": 0,
+  "samplerOrder": [
+    6,
+    0,
+    1,
+    3,
+    4,
+    2,
+    5
+  ],
+  "seed": {
+    "mode": "fixed",
+    "value": 0
+  }
+}

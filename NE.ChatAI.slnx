@@ -1,0 +1,21 @@
+<!-- Copied to the mirror's root as NE.ChatAI.slnx; its paths only resolve there, not from here. -->
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NE.ChatAI.Core/NE.ChatAI.Core.csproj" />
+    <Project Path="src/NE.ChatAI.UI/NE.ChatAI.UI.csproj" />
+    <Project Path="src/NE.ChatAI.Web/NE.ChatAI.Web.csproj" />
+  </Folder>
+
+  <Folder Name="/solution/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="ChatAI.cmd" />
+    <File Path="chatai.sh" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="nuget.config" />
+    <File Path="README.md" />
+  </Folder>
+</Solution>

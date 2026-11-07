@@ -1,0 +1,135 @@
+{
+  "format": 1,
+  "name": "Impersonate",
+  "system": true,
+  "enabled": false,
+  "order": 4,
+  "trigger": {
+    "kind": "manual",
+    "share": 0.5
+  },
+  "sheet": {
+    "nodes": [
+      {
+        "id": "prompt",
+        "type": "chat.prompt",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "id": "persona",
+        "type": "chat.persona",
+        "x": 0,
+        "y": 128
+      },
+      {
+        "id": "character",
+        "type": "chat.character",
+        "x": 0,
+        "y": 320
+      },
+      {
+        "id": "world",
+        "type": "chat.world",
+        "x": 0,
+        "y": 544
+      },
+      {
+        "id": "messages",
+        "type": "chat.messages",
+        "x": 0,
+        "y": 768
+      },
+      {
+        "id": "instruction",
+        "type": "graph.text",
+        "x": 0,
+        "y": 1024,
+        "values": {
+          "Value": "Write {{user}}'s next message in the conversation, staying true to {{user}}'s persona, voice and perspective. Write only as {{user}} — never speak, act or react for {{char}}."
+        }
+      },
+      {
+        "id": "collector",
+        "type": "chat.collector",
+        "x": 320,
+        "y": 384
+      },
+      {
+        "id": "model",
+        "type": "chat.model-call",
+        "x": 608,
+        "y": 384,
+        "values": {
+          "Thinking": "Off"
+        }
+      },
+      {
+        "id": "draft",
+        "type": "chat.draft",
+        "x": 928,
+        "y": 384
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "fromNode": "prompt",
+        "fromPin": "Prompt",
+        "toNode": "collector",
+        "toPin": "Prompt"
+      },
+      {
+        "id": "e2",
+        "fromNode": "persona",
+        "fromPin": "Persona",
+        "toNode": "collector",
+        "toPin": "Persona"
+      },
+      {
+        "id": "e3",
+        "fromNode": "character",
+        "fromPin": "Character",
+        "toNode": "collector",
+        "toPin": "Character"
+      },
+      {
+        "id": "e4",
+        "fromNode": "world",
+        "fromPin": "World",
+        "toNode": "collector",
+        "toPin": "World"
+      },
+      {
+        "id": "e5",
+        "fromNode": "messages",
+        "fromPin": "Slice",
+        "toNode": "collector",
+        "toPin": "Messages"
+      },
+      {
+        "id": "e6",
+        "fromNode": "instruction",
+        "fromPin": "Result",
+        "toNode": "collector",
+        "toPin": "Instruction"
+      },
+      {
+        "id": "e7",
+        "fromNode": "collector",
+        "fromPin": "Blocks",
+        "toNode": "model",
+        "toPin": "Prompt"
+      },
+      {
+        "id": "e8",
+        "fromNode": "model",
+        "fromPin": "Text",
+        "toNode": "draft",
+        "toPin": "Text"
+      }
+    ],
+    "groups": [],
+    "parameters": []
+  }
+}

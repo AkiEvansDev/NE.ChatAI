@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "name": "Sectioned",
+  "storyString": "{{#if system}}{{system}}\n\n{{/if}}{{#if wiBefore}}{{wiBefore}}\n\n{{/if}}{{#if description}}## {{char}}\n{{description}}\n\n{{/if}}{{#if personality}}## {{char}}'s personality\n{{personality}}\n\n{{/if}}{{#if scenario}}## Scenario\n{{scenario}}\n\n{{/if}}{{#if wiAfter}}{{wiAfter}}\n\n{{/if}}{{#if persona}}## {{user}}\n{{persona}}\n\n{{/if}}{{#if mesExamples}}## How {{char}} speaks\n{{mesExamples}}\n\n{{/if}}{{trim}}",
+  "exampleSeparator": "***",
+  "chatStart": "",
+  "thoughts": {
+    "show": "folded",
+    "keepInHistory": false
+  }
+}

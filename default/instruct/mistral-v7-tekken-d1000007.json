@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "Mistral V7-Tekken",
+  "systemPrefix": "[SYSTEM_PROMPT]",
+  "systemSuffix": "[/SYSTEM_PROMPT]",
+  "userPrefix": "[INST]",
+  "userSuffix": "[/INST]",
+  "modelPrefix": "",
+  "modelSuffix": "</s>",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "</s>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

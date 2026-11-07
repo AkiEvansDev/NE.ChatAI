@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NE.ChatAI.Tests" />
+  </ItemGroup>
+
+  <!-- The base set of presets (DefaultDocuments): the repository's default/ folder, each file under its kind's folder name. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\default\**\*.json" LogicalName="default/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

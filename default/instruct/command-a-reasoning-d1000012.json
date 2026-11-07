@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "name": "Command A (reasoning)",
+  "systemPrefix": "<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>",
+  "systemSuffix": "<|END_OF_TURN_TOKEN|>",
+  "userPrefix": "<|START_OF_TURN_TOKEN|><|USER_TOKEN|>",
+  "userSuffix": "<|END_OF_TURN_TOKEN|>",
+  "modelPrefix": "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>",
+  "modelSuffix": "<|END_OF_TURN_TOKEN|>",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<|END_OF_TURN_TOKEN|>",
+    "<|END_RESPONSE|>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "<|START_THINKING|>",
+    "suffix": "<|END_THINKING|>",
+    "opensReply": true
+  }
+}

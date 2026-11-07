@@ -1,0 +1,123 @@
+# Runs in the public mirror when a release tag is pushed by the private repository's sync, or by hand.
+# Builds self-contained win-x64 and linux-x64 archives and publishes the GitHub Release with the launchers.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 1.0.0 or 1.0.0-rc.1.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RAW_VERSION: ${{ inputs.version || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify version and tag
+        id: meta
+        run: |
+          version="${RAW_VERSION#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '$RAW_VERSION' (expected X.Y.Z or X.Y.Z-prerelease)." >&2
+            exit 1
+          fi
+          tag="v$version"
+          existing=$(git rev-parse -q --verify "refs/tags/$tag^{commit}" || true)
+          if [ -n "$existing" ] && [ "$existing" != "$GITHUB_SHA" ]; then
+            echo "Tag $tag is already on $existing, not on $GITHUB_SHA" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Publish win-x64 and linux-x64 archives
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          dotnet publish src/NE.ChatAI.Web/NE.ChatAI.Web.csproj \
+            --configuration Release \
+            --runtime win-x64 \
+            --self-contained true \
+            -p:Version="$VERSION" \
+            --output ./artifacts/win-x64/app
+          rm -rf ./artifacts/win-x64/app/data
+          cp ChatAI.cmd ./artifacts/win-x64/ChatAI.cmd
+          printf '%s\r\n' "$TAG" > ./artifacts/win-x64/.version
+          (cd ./artifacts/win-x64 && zip -qr ../NE.ChatAI-win-x64.zip ChatAI.cmd .version app)
+
+          dotnet publish src/NE.ChatAI.Web/NE.ChatAI.Web.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            -p:Version="$VERSION" \
+            --output ./artifacts/linux-x64/app
+          rm -rf ./artifacts/linux-x64/app/data
+          chmod +x ./artifacts/linux-x64/app/NE.ChatAI.Web
+          cp chatai.sh ./artifacts/linux-x64/chatai.sh
+          chmod +x ./artifacts/linux-x64/chatai.sh
+          printf '%s\n' "$TAG" > ./artifacts/linux-x64/.version
+          tar -C ./artifacts/linux-x64 -czf ./artifacts/NE.ChatAI-linux-x64.tar.gz chatai.sh .version app
+
+      - name: Create tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          existing=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)
+          if [ -z "$existing" ]; then
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "$TAG"
+          fi
+          prerelease=""
+          if [ "${VERSION#*-}" != "$VERSION" ]; then
+            prerelease="--prerelease"
+          fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" \
+              ChatAI.cmd \
+              chatai.sh \
+              ./artifacts/NE.ChatAI-win-x64.zip \
+              ./artifacts/NE.ChatAI-linux-x64.tar.gz \
+              --clobber
+          else
+            gh release create "$TAG" \
+              ChatAI.cmd \
+              chatai.sh \
+              ./artifacts/NE.ChatAI-win-x64.zip \
+              ./artifacts/NE.ChatAI-linux-x64.tar.gz \
+              --title "$TAG" \
+              --generate-notes \
+              $prerelease
+          fi

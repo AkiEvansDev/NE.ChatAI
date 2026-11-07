@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "name": "GLM-4.5 / 4.6",
+  "systemPrefix": "<|system|>\n",
+  "systemSuffix": "",
+  "userPrefix": "<|user|>\n",
+  "userSuffix": "",
+  "modelPrefix": "<|assistant|>\n",
+  "modelSuffix": "",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<|user|>",
+    "<|observation|>",
+    "<|endoftext|>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": false,
+    "prefix": "<think>",
+    "suffix": "</think>",
+    "opensReply": false
+  }
+}

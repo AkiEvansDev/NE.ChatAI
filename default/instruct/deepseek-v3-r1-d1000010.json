@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "name": "DeepSeek V3 / R1",
+  "systemPrefix": "",
+  "systemSuffix": "",
+  "userPrefix": "<｜User｜>",
+  "userSuffix": "",
+  "modelPrefix": "<｜Assistant｜>",
+  "modelSuffix": "<｜end▁of▁sentence｜>",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<｜end▁of▁sentence｜>",
+    "<｜User｜>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": false,
+    "prefix": "<think>\n",
+    "suffix": "</think>",
+    "opensReply": true
+  }
+}

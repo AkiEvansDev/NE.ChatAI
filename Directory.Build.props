@@ -1,0 +1,18 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AnalysisMode>AllEnabledByDefault</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <IsPackable>false</IsPackable>
+    <!-- Core, UI and Web share one namespace tree: NE.ChatAI.Prompts in Core, NE.ChatAI.Views in UI. -->
+    <RootNamespace Condition="$(MSBuildProjectName.StartsWith('NE.ChatAI.')) and !$(MSBuildProjectName.EndsWith('.Tests'))">NE.ChatAI</RootNamespace>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "Phi-4 (reasoning)",
+  "systemPrefix": "<|im_start|>system<|im_sep|>",
+  "systemSuffix": "<|im_end|>",
+  "userPrefix": "<|im_start|>user<|im_sep|>",
+  "userSuffix": "<|im_end|>",
+  "modelPrefix": "<|im_start|>assistant<|im_sep|>",
+  "modelSuffix": "<|im_end|>",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<|im_end|>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "<think>\n",
+    "suffix": "</think>",
+    "opensReply": true
+  }
+}

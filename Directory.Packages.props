@@ -1,0 +1,31 @@
+<Project>
+
+  <PropertyGroup>
+    <NEStandardVersion>2.5.2</NEStandardVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="NE.Standard.UI" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Icons.Material" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.CodeInput" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Charts" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Graph" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Web" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Web.Renderers" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Extensions" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Web.Icons.Material" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Web.CodeInput" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Web.Charts" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Web.Graph" Version="$(NEStandardVersion)" />
+    <PackageVersion Include="NE.Standard.UI.Testing" Version="$(NEStandardVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.13" />
+  </ItemGroup>
+
+</Project>

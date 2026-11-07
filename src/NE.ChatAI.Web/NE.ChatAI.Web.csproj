@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- The web platform alone: the ASP.NET Core host, the renderers and the web halves of the icons and the code input. -->
+  <ItemGroup>
+    <PackageReference Include="NE.Standard.UI.Web" />
+    <PackageReference Include="NE.Standard.UI.Web.Renderers" />
+    <PackageReference Include="NE.Standard.UI.Web.Icons.Material" />
+    <PackageReference Include="NE.Standard.UI.Web.CodeInput" />
+    <PackageReference Include="NE.Standard.UI.Web.Charts" />
+    <PackageReference Include="NE.Standard.UI.Web.Graph" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Client\macros.js" LogicalName="NE.ChatAI.Web.Client.macros.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NE.ChatAI.UI\NE.ChatAI.UI.csproj" />
+  </ItemGroup>
+
+</Project>

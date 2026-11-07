@@ -1,0 +1,48 @@
+{
+  "format": 1,
+  "name": "Precise",
+  "replyLength": 1024,
+  "temperature": 0.6,
+  "topP": 0.95,
+  "topK": 40,
+  "minP": 0.05,
+  "typicalP": 1,
+  "tfs": 1,
+  "topA": 0,
+  "repetitionPenalty": 1.05,
+  "repetitionPenaltyRange": 2048,
+  "repetitionPenaltySlope": 1,
+  "presencePenalty": 0,
+  "frequencyPenalty": 0,
+  "dry": {
+    "multiplier": 0,
+    "base": 1.75,
+    "allowedLength": 2,
+    "penaltyRange": 0,
+    "sequenceBreakers": [
+      "\n",
+      ":",
+      "\"",
+      "*"
+    ]
+  },
+  "xtc": {
+    "threshold": 0.1,
+    "probability": 0
+  },
+  "smoothingFactor": 0,
+  "nSigma": 0,
+  "samplerOrder": [
+    6,
+    0,
+    1,
+    3,
+    4,
+    2,
+    5
+  ],
+  "seed": {
+    "mode": "perChat",
+    "value": -1
+  }
+}

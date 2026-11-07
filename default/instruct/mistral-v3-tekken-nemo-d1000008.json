@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "Mistral V3-Tekken (Nemo)",
+  "systemPrefix": "[INST]",
+  "systemSuffix": "[/INST]",
+  "userPrefix": "[INST]",
+  "userSuffix": "[/INST]",
+  "modelPrefix": "",
+  "modelSuffix": "</s>",
+  "systemSameAsUser": true,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "</s>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

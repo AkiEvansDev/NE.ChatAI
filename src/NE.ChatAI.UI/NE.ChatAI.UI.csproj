@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The application as the framework sees it: views, controllers, routes, words and services. No platform: the web host
+       (NE.ChatAI.Web) adds the renderers, and another platform would add its own over the same library. -->
+  <ItemGroup>
+    <PackageReference Include="NE.Standard.UI" />
+    <PackageReference Include="NE.Standard.UI.Extensions" />
+    <PackageReference Include="NE.Standard.UI.Icons.Material" />
+    <PackageReference Include="NE.Standard.UI.CodeInput" />
+    <PackageReference Include="NE.Standard.UI.Charts" />
+    <PackageReference Include="NE.Standard.UI.Graph" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NE.ChatAI.Core\NE.ChatAI.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NE.ChatAI.Web" />
+    <InternalsVisibleTo Include="NE.ChatAI.Tests" />
+  </ItemGroup>
+
+</Project>

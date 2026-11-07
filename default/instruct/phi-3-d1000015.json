@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "name": "Phi-3",
+  "systemPrefix": "<|system|>\n",
+  "systemSuffix": "<|end|>\n",
+  "userPrefix": "<|user|>\n",
+  "userSuffix": "<|end|>\n",
+  "modelPrefix": "<|assistant|>\n",
+  "modelSuffix": "<|end|>\n",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<|end|>",
+    "<|endoftext|>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

@@ -1,0 +1,37 @@
+# Runs in the public mirror. Tests live in the private repository and are not mirrored, so this proves
+# that what users get compiles and is formatted.
+name: Build
+
+on:
+  # Branches only: a sync pushes the tag too, and an unfiltered push would build the same commit twice.
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release

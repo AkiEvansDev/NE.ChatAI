@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "name": "Llama 4",
+  "systemPrefix": "<|header_start|>system<|header_end|>\n\n",
+  "systemSuffix": "<|eot|>",
+  "userPrefix": "<|header_start|>user<|header_end|>\n\n",
+  "userSuffix": "<|eot|>",
+  "modelPrefix": "<|header_start|>assistant<|header_end|>\n\n",
+  "modelSuffix": "<|eot|>",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<|eot|>",
+    "<|eom|>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}

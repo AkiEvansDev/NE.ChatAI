@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "name": "Gemma 4",
+  "systemPrefix": "<|turn>system\n",
+  "systemSuffix": "<turn|>\n",
+  "userPrefix": "<|turn>user\n",
+  "userSuffix": "<turn|>\n",
+  "modelPrefix": "<|turn>model\n",
+  "modelSuffix": "<turn|>\n",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<turn|>",
+    "<|turn>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": false,
+    "prefix": "<|channel>thought\n",
+    "suffix": "<channel|>",
+    "systemMark": "<|think|>\n",
+    "opensReply": false
+  }
+}

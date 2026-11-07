@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "name": "Llama 3",
+  "systemPrefix": "<|start_header_id|>system<|end_header_id|>\n\n",
+  "systemSuffix": "<|eot_id|>",
+  "userPrefix": "<|start_header_id|>user<|end_header_id|>\n\n",
+  "userSuffix": "<|eot_id|>",
+  "modelPrefix": "<|start_header_id|>assistant<|end_header_id|>\n\n",
+  "modelSuffix": "<|eot_id|>",
+  "systemSameAsUser": false,
+  "wrap": false,
+  "namesBehavior": "force",
+  "stopSequences": [
+    "<|eot_id|>"
+  ],
+  "sequencesAsStop": true,
+  "thought": {
+    "enabled": true,
+    "prefix": "",
+    "suffix": "",
+    "opensReply": false
+  }
+}
