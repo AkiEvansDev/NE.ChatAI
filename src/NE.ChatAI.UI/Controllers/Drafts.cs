@@ -204,6 +204,9 @@ internal sealed partial class PromptDraft : RecursiveObservable, IDocumentDraft<
     public partial string ChatStart { get; set; } = string.Empty;
 
     [RecursiveMember]
+    public partial bool IncludeNames { get; set; }
+
+    [RecursiveMember]
     public partial string ThoughtShow { get; set; } = nameof(ThoughtDisplay.Folded);
 
     [RecursiveMember]
@@ -215,6 +218,7 @@ internal sealed partial class PromptDraft : RecursiveObservable, IDocumentDraft<
         StoryString = prompt.StoryString;
         ExampleSeparator = prompt.ExampleSeparator;
         ChatStart = prompt.ChatStart;
+        IncludeNames = prompt.IncludeNames;
         ThoughtShow = prompt.Thoughts.Show.ToString();
         KeepThoughts = prompt.Thoughts.KeepInHistory;
     }
@@ -226,6 +230,7 @@ internal sealed partial class PromptDraft : RecursiveObservable, IDocumentDraft<
             StoryString = StoryString,
             ExampleSeparator = ExampleSeparator,
             ChatStart = ChatStart,
+            IncludeNames = IncludeNames,
             Thoughts = new ThoughtHandling
             {
                 Show = Enum.TryParse(ThoughtShow, out ThoughtDisplay show) ? show : kept.Thoughts.Show,

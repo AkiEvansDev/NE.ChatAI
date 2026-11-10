@@ -59,9 +59,6 @@ internal sealed partial class ScenarioController : ShellController
     public partial string? ScenarioId { get; set; }
 
     [RecursiveMember]
-    public partial bool ScenarioSystem { get; set; }
-
-    [RecursiveMember]
     public partial bool ScenarioEnabled { get; set; }
 
     [RecursiveMember]
@@ -69,6 +66,9 @@ internal sealed partial class ScenarioController : ShellController
 
     [RecursiveMember]
     public partial decimal TriggerSharePercent { get; set; } = 50;
+
+    [RecursiveMember]
+    public partial UIVisibility TriggerVisibility { get; set; } = UIVisibility.Collapsed;
 
     [RecursiveMember]
     public partial UIPhrase? SheetTitle { get; set; }
@@ -175,20 +175,28 @@ internal sealed partial class ScenarioController : ShellController
             ScenarioId = null;
             SheetTitle = null;
             Sheet = UINodeDocument.Empty;
+            TriggerVisibility = UIVisibility.Collapsed;
             EditorVisibility = UIVisibility.Collapsed;
             EmptyVisibility = UIVisibility.Visible;
             return;
         }
 
+        var isSystem = chosen.Document.System;
         ScenarioId = chosen.Id;
-        ScenarioSystem = chosen.Document.System;
         ScenarioEnabled = chosen.Document.Enabled;
         TriggerKind = chosen.Document.Trigger.Kind.ToString();
         TriggerSharePercent = Math.Clamp(Math.Round((decimal)chosen.Document.Trigger.Share * 100m), 5m, 95m);
+        TriggerVisibility = isSystem ? UIVisibility.Collapsed : UIVisibility.Visible;
         SheetTitle = UIPhrase.Text(chosen.Document.Name);
         Sheet = ScenarioExecutor.ReadSheet(chosen.Document, key: chosen.Id);
         EditorVisibility = UIVisibility.Visible;
         EmptyVisibility = UIVisibility.Collapsed;
+
+        if (ScenarioActions.TryGet(RenameAction, out MenuItem? rename))
+            rename.Enabled = !isSystem;
+
+        if (ScenarioActions.TryGet(DeleteAction, out MenuItem? delete))
+            delete.Enabled = !isSystem;
     }
 
     /// <summary>Switches the canvas to the scenario chosen in the selector.</summary>
@@ -249,18 +257,12 @@ internal sealed partial class ScenarioController : ShellController
     [UICommand]
     public async Task SaveMetaAsync(CancellationToken cancellationToken)
     {
-        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not Scenario current)
+        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
             return;
-
-        if (ScenarioSystem)
-        {
-            ScenarioEnabled = false;
-            TriggerKind = nameof(ScenarioTriggerKind.Manual);
-        }
 
         ScenarioTriggerKind kind = Enum.TryParse(TriggerKind, out ScenarioTriggerKind parsed) ? parsed : current.Trigger.Kind;
         var share = Math.Clamp((double)(TriggerSharePercent / 100m), 0.05, 0.95);
-        Scenario updated = current with { System = ScenarioSystem, Enabled = ScenarioEnabled, Trigger = new ScenarioTrigger { Kind = kind, Share = share } };
+        Scenario updated = current with { Enabled = ScenarioEnabled, Trigger = new ScenarioTrigger { Kind = kind, Share = share } };
 
         await Data.Scenarios.WriteAsync(id, updated, cancellationToken).ConfigureAwait(false);
     }
@@ -268,7 +270,7 @@ internal sealed partial class ScenarioController : ShellController
     [UICommand]
     public async Task<UICommandResult> AskRenameAsync(CancellationToken cancellationToken)
     {
-        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not Scenario current)
+        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
             return UICommandResult.Ok();
 
         _creatingScenario = false;
@@ -301,7 +303,7 @@ internal sealed partial class ScenarioController : ShellController
             {
                 var copyPattern = Context.Translate("chatai.settings.copy-name") ?? "{name} (copy)";
                 var chosenName = name.Length > 0 ? name : copyPattern.Replace("{name}", source.Name, StringComparison.Ordinal);
-                created = source with { Name = chosenName, Order = nextOrder };
+                created = source with { Name = chosenName, System = false, Order = nextOrder };
             }
             else
             {
@@ -322,7 +324,7 @@ internal sealed partial class ScenarioController : ShellController
             return UICommandResult.Ok([new CloseDialogEffect(RenameDialogKey), new PushAddressEffect(new Dictionary<string, object?> { [AppRoutes.CardParameter] = createdId })]);
         }
 
-        if (id is not null && name.Length > 0 && Slug.IsValidId(id) && await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is Scenario current)
+        if (id is not null && name.Length > 0 && Slug.IsValidId(id) && await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is { System: false } current)
         {
             await Data.Scenarios.WriteAsync(id, current with { Name = name }, cancellationToken).ConfigureAwait(false);
             await LoadScenariosAsync(id, cancellationToken).ConfigureAwait(false);
@@ -334,7 +336,7 @@ internal sealed partial class ScenarioController : ShellController
     [UICommand]
     public async Task<UICommandResult> AskDeleteAsync(CancellationToken cancellationToken)
     {
-        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not Scenario current)
+        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
             return UICommandResult.Ok();
 
         _deletingId = id;
@@ -349,7 +351,7 @@ internal sealed partial class ScenarioController : ShellController
         var id = _deletingId;
         _deletingId = null;
 
-        if (id is not null && Slug.IsValidId(id))
+        if (id is not null && Slug.IsValidId(id) && await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is { System: false })
         {
             if (_runs.IsRunning)
                 _runs.Stop();

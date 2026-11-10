@@ -84,6 +84,26 @@ public static class CardPictures
         return PictureFiles.WriteAsync(store.FolderOf(id), name, picture, contentType, cancellationToken);
     }
 
+    /// <summary>Copies the card's pictures (<see cref="Avatar"/> and <see cref="Background"/>) from <paramref name="sourceId"/> to <paramref name="targetId"/>.</summary>
+    public static void Copy<T>(DocumentStore<T> store, string sourceId, string targetId) where T : NamedDocument
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        if (!Slug.IsValidId(sourceId) || !Slug.IsValidId(targetId) || !store.Exists(sourceId) || !store.Exists(targetId))
+            return;
+
+        var targetFolder = store.FolderOf(targetId);
+
+        foreach (var name in (string[])[Avatar, Background])
+        {
+            if (PathOf(store, sourceId, name) is string sourcePath)
+            {
+                PictureFiles.Delete(targetFolder, name);
+                File.Copy(sourcePath, Path.Combine(targetFolder, Path.GetFileName(sourcePath)), overwrite: true);
+            }
+        }
+    }
+
     /// <summary>Takes the card's picture of that name away; without an avatar it is drawn with the person's glyph.</summary>
     public static void Delete<T>(DocumentStore<T> store, string id, string name) where T : NamedDocument
     {

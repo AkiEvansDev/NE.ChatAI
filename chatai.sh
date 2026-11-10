@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Default port (change here, export CHATAI_PORT, or pass as argument: ./chatai.sh 8080 / ./chatai.sh --port 8080)
-DEFAULT_PORT=5090
+DEFAULT_PORT=5008
 REPO="${CHATAI_REPO:-AkiEvansDev/NE.ChatAI}"
 ASSET_NAME="NE.ChatAI-linux-x64.tar.gz"
 

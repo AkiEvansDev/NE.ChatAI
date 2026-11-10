@@ -10,7 +10,7 @@ internal static class PersonaView
 {
     public static UIDialog CreateDialog()
         => CardEditor.CreateDialog(ShellController.PersonaDialogKey, "chatai.persona.title",
-            CardEditor.Section(null,
+            UILayout.Stack(16,
                 CardEditor.CreateHead(),
                 new SwitchComponent()
                     .SetTitle("chatai.persona.default")

@@ -4,7 +4,7 @@ setlocal EnableExtensions
 set "ROOT=%~dp0"
 
 :: Default port (change here, set CHATAI_PORT, or pass as argument: ChatAI.cmd 8080 / ChatAI.cmd --port 8080)
-set "DEFAULT_PORT=5090"
+set "DEFAULT_PORT=5008"
 set "REPO=AkiEvansDev/NE.ChatAI"
 set "ASSET_NAME=NE.ChatAI-win-x64.zip"
 

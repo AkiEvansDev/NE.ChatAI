@@ -61,9 +61,9 @@
           "Samplers": "precise-d4000003",
           "Thinking": "Off",
           "OverrideReplyLength": true,
-          "ReplyLength": 400,
+          "ReplyLength": 2048,
           "OverrideTemperature": true,
-          "Temperature": 0.4
+          "Temperature": 0.65
         }
       },
       {

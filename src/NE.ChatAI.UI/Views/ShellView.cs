@@ -9,10 +9,8 @@ namespace NE.ChatAI.Views;
 /// page in the head over its content.
 /// </summary>
 /// <remarks>
-/// The panels are the view's sides, drawers at every width — the tablet held upright this is used on gives the chat its whole
-/// width — until the reader pins one, which then stands in its column. The generation panel leaves the chat usable beside it — a
-/// sampler changed, then Regenerate pressed — so it does not dim the page; the chats panel is done with once a chat is picked, so it
-/// dims the page and goes on a press beside it.
+/// The panels are the view's sides, modal drawers at every width — the tablet held upright this is used on gives the chat its whole
+/// width — that dim the page and close on a press beside them until the reader pins one, which then stands in its column.
 /// </remarks>
 internal abstract class ShellView : UIViewBase
 {
@@ -28,7 +26,6 @@ internal abstract class ShellView : UIViewBase
         ScrollContentOnly = true,
         ShellLayout = UIShellLayout.FullHeightSides,
         SideDrawers = UISideDrawers.Always,
-        LeftDrawerModal = false,
         NotificationPlacement = UINotificationPlacement.Top
     };
 
@@ -72,7 +69,7 @@ internal abstract class ShellView : UIViewBase
         if (!HasPageHead)
             return null;
 
-        ContainerComponent header = UIPage.Header(UIIconButtons.Back().OnClick(nameof(ShellController.BackToChat)), PageTitle, null, [.. HeaderActions, CreateChatsButton()]);
+        ContainerComponent header = UIPage.Header(UIIconButtons.Back().SetUrl(AppRoutes.Home), PageTitle, null, [.. HeaderActions, CreateChatsButton()]);
 
         return HeadColumnWidth is UIColumnWidth width ? header.InColumn(width) : header;
     }

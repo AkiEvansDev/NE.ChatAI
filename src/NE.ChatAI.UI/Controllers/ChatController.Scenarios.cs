@@ -208,9 +208,6 @@ internal sealed partial class ChatController
 
     private async Task<UICommandResult?> ScenarioActionAsync(string action, CancellationToken cancellationToken)
     {
-        if (action == EditScenariosAction)
-            return UICommandResult.Ok([new NavigateEffect(AppRoutes.Scenarios)]);
-
         if (action == ImpersonateAction)
             return await ImpersonateAsync(cancellationToken).ConfigureAwait(false);
 
@@ -618,8 +615,6 @@ internal sealed partial class ChatController
                 item.Records.Insert(i, created);
             }
         }
-
-        item.RecordsVisibility = item.Records.Count > 0 ? UIVisibility.Visible : UIVisibility.Collapsed;
     }
 
     private static UIPhrase FormatRecordTitle(ChatRecord record, string? name)

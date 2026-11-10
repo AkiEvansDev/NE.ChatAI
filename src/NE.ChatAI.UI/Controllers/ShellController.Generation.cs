@@ -68,6 +68,9 @@ internal abstract partial class ShellController
     public partial bool ThinkingAvailable { get; set; }
 
     [RecursiveMember]
+    public partial bool IncludeNames { get; set; }
+
+    [RecursiveMember]
     public partial bool ContextAuto { get; set; } = true;
 
     [RecursiveMember]
@@ -166,6 +169,7 @@ internal abstract partial class ShellController
 
         Thinking = profile.Format.Thought.Enabled;
         ThinkingAvailable = profile.Format.Thought.IsDefined;
+        IncludeNames = profile.Prompt.IncludeNames;
         ContextAuto = profile.Connection.ContextLength.Auto;
         ContextValue = profile.Connection.ContextLength.Value;
 
@@ -291,6 +295,19 @@ internal abstract partial class ShellController
 
         await Data.ModelFormats.WriteAsync(id, format, cancellationToken).ConfigureAwait(false);
         _profile = _profile with { Format = format };
+    }
+
+    /// <summary>Turns prepending speaker names on messages in the active prompt preset on or off.</summary>
+    [UICommand]
+    public async Task SaveIncludeNamesAsync(CancellationToken cancellationToken)
+    {
+        if (_profile?.Connection.Prompt is not string id)
+            return;
+
+        PromptPreset prompt = _profile.Prompt with { IncludeNames = IncludeNames };
+
+        await Data.Prompts.WriteAsync(id, prompt, cancellationToken).ConfigureAwait(false);
+        _profile = _profile with { Prompt = prompt };
     }
 
     /// <summary>Writes the active connection's context: the server's own, or the number given.</summary>

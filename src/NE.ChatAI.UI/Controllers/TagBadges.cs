@@ -62,24 +62,6 @@ internal static class TagBadges
         return new OptionItem { Id = tag, IsContent = true, BadgeTitle = tag, BadgeVariant = UIBadgeVariant.Surface, BadgeTitleType = UITextAppearance.Caption, BadgeColor = colors.TryGetValue(tag, out UIThemeColor color) ? color : null };
     }
 
-    /// <summary>A tag as a checkable menu entry offers it: the badge itself in its colour, with a checkmark at the end when chosen.</summary>
-    public static MenuItem MenuItemOf(string tag, IReadOnlyDictionary<string, UIThemeColor> colors, bool isChecked)
-    {
-        ArgumentNullException.ThrowIfNull(colors);
-
-        return new MenuItem
-        {
-            Id = tag,
-            IsContent = true,
-            Kind = UIMenuItemKind.Check,
-            Checked = isChecked,
-            BadgeTitle = tag,
-            BadgeVariant = UIBadgeVariant.Surface,
-            BadgeTitleType = UITextAppearance.Caption,
-            BadgeColor = colors.TryGetValue(tag, out UIThemeColor color) ? color : null
-        };
-    }
-
     public static void Fill(RecursiveCollection<TagBadge> badges, IEnumerable<string> tags, IReadOnlyDictionary<string, UIThemeColor> colors)
     {
         ArgumentNullException.ThrowIfNull(badges);

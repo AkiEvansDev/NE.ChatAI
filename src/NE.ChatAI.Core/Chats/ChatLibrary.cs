@@ -48,9 +48,10 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
 
         DateTimeOffset now = time.GetUtcNow();
         List<ChatMessage> messages = [];
+        List<MessageVariant> greetings = [.. character.FirstMessages.Where(static text => !string.IsNullOrWhiteSpace(text)).Select(static text => new MessageVariant { Text = text })];
 
-        if (character.FirstMessages.Count > 0)
-            messages.Add(new ChatMessage { Id = NewMessageId(), Role = MessageRole.Character, Variants = [.. character.FirstMessages.Select(static text => new MessageVariant { Text = text })], At = now });
+        if (greetings.Count > 0)
+            messages.Add(new ChatMessage { Id = NewMessageId(), Role = MessageRole.Character, Variants = greetings, At = now });
 
         Chat chat = new()
         {
@@ -76,8 +77,13 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
 
         Character? character = chat.Character is string characterId ? await data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
         var name = $"{character?.Name ?? chat.Name} {time.GetUtcNow().ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
+        Chat branched = ChatEditing.UpTo(chat, messageId) with { Name = name, Background = null };
+        var branchedId = await data.Chats.CreateAsync(branched, cancellationToken).ConfigureAwait(false);
 
-        return await data.Chats.CreateAsync(ChatEditing.UpTo(chat, messageId) with { Name = name }, cancellationToken).ConfigureAwait(false);
+        if (ChatPictures.Copy(data, chat.Background, branchedId) is string fileName)
+            await data.Chats.WriteAsync(branchedId, branched with { Background = fileName }, cancellationToken).ConfigureAwait(false);
+
+        return branchedId;
     }
 
     public Task<Chat?> ReadAsync(string chatId, CancellationToken cancellationToken)
@@ -88,7 +94,13 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
 
     /// <summary>Deletes a single chat by its id.</summary>
     public bool Delete(string chatId)
-        => Slug.IsValidId(chatId) && data.Chats.Delete(chatId);
+    {
+        if (!Slug.IsValidId(chatId) || !data.Chats.Delete(chatId))
+            return false;
+
+        ChatPictures.Delete(data, chatId);
+        return true;
+    }
 
     /// <summary>Deletes the character and every chat with it: a chat without its character has no place in the list to be found by.</summary>
     public async Task<bool> DeleteCharacterAsync(string characterId, CancellationToken cancellationToken)
@@ -101,7 +113,10 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
         foreach (StoredDocument<Chat> chat in chats.Items)
         {
             if (chat.Document.Character == characterId)
+            {
                 _ = data.Chats.Delete(chat.Id);
+                ChatPictures.Delete(data, chat.Id);
+            }
         }
 
         return data.Characters.Delete(characterId);

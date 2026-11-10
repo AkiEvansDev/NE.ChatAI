@@ -24,6 +24,7 @@ internal static class GenerationPanel
         return UILayout.Stack(16,
             UILayout.Stack(12,
                 CreateThinking(),
+                CreateIncludeNames(),
                 contextAuto,
                 Number<ShellController>("chatai.generation.context.length", static x => x.ContextValue, 512, 1048576, 1024, nameof(ShellController.SaveContextAsync))
                     .HiddenWhen(contextAuto),
@@ -67,6 +68,13 @@ internal static class GenerationPanel
             .BindValue<ShellController>(static x => x.Thinking)
             .BindEnabled<ShellController>(static x => x.ThinkingAvailable)
             .OnChange(nameof(ShellController.SaveThinkingAsync));
+
+    private static SwitchComponent CreateIncludeNames()
+        => new SwitchComponent()
+            .SetTitle("chatai.generation.include-names")
+            .SetDescription("chatai.generation.include-names.description")
+            .BindValue<ShellController>(static x => x.IncludeNames)
+            .OnChange(nameof(ShellController.SaveIncludeNamesAsync));
 
     /// <remarks>The stepper shown, which a number field leaves off by default.</remarks>
     private static NumberInputComponent Number<TSource>(string title, Expression<Func<TSource, object?>> value, decimal min, decimal max, decimal step, string command)

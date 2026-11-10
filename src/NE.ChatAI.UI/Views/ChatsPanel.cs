@@ -15,6 +15,9 @@ internal static class ChatsPanel
     /// <summary>Matches a card's name plus one row of tag badges (24 + 4 + 16), so rows with and without tags keep the same height.</summary>
     private const double AvatarSize = 44;
     private const double HeaderAvatarSize = 34;
+    public const string SearchId = "chatai-card-search";
+    public const string TagFilterId = "chatai-tag-filter";
+    private const string ListSwitchId = "chatai-list-switch";
 
     /// <summary>The panel's fixed top bar and search row, kept outside the scroller so neither scrolls away.</summary>
     public static StackPanelComponent CreateHead()
@@ -32,18 +35,16 @@ internal static class ChatsPanel
                 UIIconButtons.Pin().SetPinsDrawer(UISide.Right).SetSize(UISize.Small),
                 UIIconButtons.Close().SetOpensDrawer(UISide.Right).SetSize(UISize.Small)
             ),
-            new TextInputComponent()
+            new TextInputComponent(SearchId)
                 .SetSearch()
                 .SetDebounceMilliseconds(200)
-                .BindValue<ShellController>(static x => x.CharacterSearch)
-                .OnChange(nameof(ShellController.FilterCards))
                 .AddTrailingAction(CreateTagFilter())
                 .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ShellController.AskCreateCard)))
                 .BindVisibility<ShellController>(static x => x.CharactersVisibility)
         );
 
     private static ButtonGroupComponent CreateListSwitch()
-        => new ButtonGroupComponent()
+        => new ButtonGroupComponent(ListSwitchId)
             .SetSize(UISize.Small)
             .SetItems([
                 new ButtonItem { Id = ShellController.CharactersList, Title = "chatai.chats.characters" },
@@ -82,20 +83,16 @@ internal static class ChatsPanel
             .SetWidth(UILayoutLength.Absolute(size))
             .SetVerticalAlignment(UIAlignment.Center);
 
-    /// <summary>The tag filter menu inside the search field, showing each tag as its badge with a checkmark at the end and the active count on the button.</summary>
-    private static SplitButtonComponent CreateTagFilter()
-        => new SplitButtonComponent("chatai-tag-filter")
-            .SetMode(UISplitButtonMode.Menu)
-            .SetVariant(UIButtonVariant.Ghost)
-            .SetShowChevron(false)
+    /// <summary>The tag filter menu inside the search field, showing each tag as its badge and the active count on the button.</summary>
+    private static MultiSelectComponent CreateTagFilter()
+        => new MultiSelectComponent(TagFilterId)
+            .SetVariant(UIMultiSelectVariant.Button)
             .SetIcon(UIStandardAction.Filter.Icon)
             .SetTooltip(UIStandardAction.Filter.Title)
             .SetPopupPlacement(UIPopupPlacement.BottomEnd)
-            .SetBadgeVariant(UIBadgeVariant.Primary)
-            .BindBadgeTitle<ShellController>(static x => x.TagFilterCount)
-            .AsContent(SplitButtonComponent.BadgeTitleProperty)
-            .BindItems<ShellController>(static x => x.TagFilterItems)
-            .OnItemClick(nameof(ShellController.ToggleTagFilter), UIAction.ArgCurrentItemKey("tag"));
+            .ConfigureDefaultEmptyTemplate(empty => empty.SetTitle("chatai.tags.none").SetTitleWrap(true))
+            .BindOptions<ShellController>(static x => x.TagFilterOptions)
+            .BindValue<ShellController>(static x => x.TagFilter);
 
     public static StackPanelComponent CreateBody()
         => UILayout.Stack(12,
@@ -105,24 +102,26 @@ internal static class ChatsPanel
 
     private static StackPanelComponent CreateLists()
         => UILayout.Stack(12,
-                CreateList("chatai-character-list", static x => x.CharacterRows, static x => x.CharactersEmpty, static x => x.CharacterListVisibility, showEdit: true)
+                CreateList("chatai-character-list", ShellController.CharactersList, static x => x.CharacterRows, static x => x.CharactersEmpty, showEdit: true)
                     .OnItemClick(nameof(ShellController.OpenCharacterAsync), UIAction.ArgCurrentItemKey("characterId")),
-                CreateList("chatai-persona-list", static x => x.PersonaRows, static x => x.PersonasEmpty, static x => x.PersonaListVisibility, showEdit: false)
+                CreateList("chatai-persona-list", ShellController.PersonasList, static x => x.PersonaRows, static x => x.PersonasEmpty, showEdit: false)
                     .OnItemClick(nameof(ShellController.OpenPersonaAsync), UIAction.ArgCurrentItemKey("personaId")),
-                CreateList("chatai-world-list", static x => x.WorldRows, static x => x.WorldsEmpty, static x => x.WorldListVisibility, showEdit: false)
+                CreateList("chatai-world-list", ShellController.WorldsList, static x => x.WorldRows, static x => x.WorldsEmpty, showEdit: false)
                     .OnItemClick(nameof(ShellController.OpenWorldAsync), UIAction.ArgCurrentItemKey("worldId"))
             )
             .BindVisibility<ShellController>(static x => x.CharactersVisibility);
 
-    private static ItemsViewComponent CreateList(string id, Expression<Func<ShellController, object?>> rows, Expression<Func<ShellController, object?>> empty, Expression<Func<ShellController, object?>> visibility, bool showEdit)
+    private static ItemsViewComponent CreateList(string id, string listKey, Expression<Func<ShellController, object?>> rows, Expression<Func<ShellController, object?>> empty, bool showEdit)
         => new ItemsViewComponent(id)
             .SetVerticalScroll(UIScrollMode.Disabled)
             .SetRowHoverable(true)
             .BindItems(rows)
+            .FilterBy(SearchId, IInputComponent.ValueProperty, nameof(CardRow.Name))
+            .FilterBy(TagFilterId, MultiSelectComponent.ValueProperty, nameof(CardRow.Tags), UIComparisonOperator.In)
             .SetSpacing(4)
             .ConfigureDefaultEmptyTemplate(template => template.BindTitle(empty).SetTitleWrap(true))
             .SetTemplate(CreateCardRow(showEdit))
-            .BindVisibility(visibility);
+            .ShownWhen(ListSwitchId, ButtonGroupComponent.SelectedKeyProperty, UIComparisonOperator.Equal, listKey);
 
     /// <summary>The card's picture, its name — the default persona or active card marked beside it — under the name its tags, and its row actions at the end.</summary>
     /// <remarks>A plain row, not a <see cref="UISurfaceStyle.Background"/> surface: on the panel's own fill a framed row read worse.</remarks>
@@ -165,8 +164,8 @@ internal static class ChatsPanel
                         .BindItems<CardRow>(static x => x.Tags, UIBindingScope.Relative)
                         .SetLayoutType(UIItemsLayoutType.Wrap)
                         .SetSpacing(4)
+                        .SetShowEmptyTemplate(false)
                         .SetTemplate(CreateTagBadge())
-                        .BindVisibility<CardRow>(static x => x.TagsVisibility, UIBindingScope.Relative)
                 )
                 .SetVerticalAlignment(UIAlignment.Center)
                 .SetPlacement(2, 1, 22, 1)

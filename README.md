@@ -11,7 +11,7 @@ Download the launcher for your platform from the [latest release](https://github
 - **Windows (x64)** — [`ChatAI.cmd`](https://github.com/AkiEvansDev/NE.ChatAI/releases/latest/download/ChatAI.cmd)
 - **Linux (x64)** — [`chatai.sh`](https://github.com/AkiEvansDev/NE.ChatAI/releases/latest/download/chatai.sh) (`chmod +x chatai.sh && ./chatai.sh`)
 
-On the first run the launcher downloads the latest self-contained build into `app/` and opens `http://localhost:5090` in your browser. On every subsequent run it checks GitHub Releases and updates `app/` in place when a newer version is available, leaving your `data/` folder untouched.
+On the first run the launcher downloads the latest self-contained build into `app/` and opens `http://localhost:5008` in your browser. On every subsequent run it checks GitHub Releases and updates `app/` in place when a newer version is available, leaving your `data/` folder untouched.
 
 ### Launcher options
 
@@ -22,7 +22,7 @@ ChatAI.cmd [--port <port>] [--no-browser] [--no-update]
 
 | Option | Description |
 | --- | --- |
-| `--port <port>`, `-p <port>` | Port to listen on on all interfaces (`0.0.0.0`). Defaults to `CHATAI_PORT` or `5090`. |
+| `--port <port>`, `-p <port>` | Port to listen on on all interfaces (`0.0.0.0`). Defaults to `CHATAI_PORT` or `5008`. |
 | `--no-browser` | Start the server without opening a browser window. |
 | `--no-update` | Skip the GitHub release check and start the installed build directly. |
 
@@ -32,7 +32,7 @@ Settings and content live in `data/` next to the application by default. Environ
 
 | Variable | Description |
 | --- | --- |
-| `CHATAI_PORT` | Default port used by `ChatAI.cmd` and `chatai.sh` (`5090` when unset). |
+| `CHATAI_PORT` | Default port used by `ChatAI.cmd` and `chatai.sh` (`5008` when unset). |
 | `ChatAI__DataPath` | Path to the folder where characters, personas, worlds, presets and chats are stored. |
 | `ChatAI__KoboldCppAddress` | Initial `koboldcpp` server URL (`http://localhost:5001/`) used when creating the default connection on an empty data folder. |
 | `ChatAI__Secrets__<name>` | API key override for the named secret over `secrets.json`. |

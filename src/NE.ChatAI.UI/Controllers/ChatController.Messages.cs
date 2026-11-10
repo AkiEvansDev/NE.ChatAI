@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -235,6 +236,8 @@ internal sealed partial class ChatController
             return refusal!;
 
         ReplyJob? job = null;
+        string? savedChatId = null;
+        Chat? savedChat = null;
         var busy = false;
 
         await Context.Runtime.InvokeAsync(() =>
@@ -260,6 +263,17 @@ internal sealed partial class ChatController
                 item.ShowThought(null, _hideThoughts, thinking: false);
             }
 
+            if (kind == ReplyKind.Remake)
+            {
+                IReadOnlyList<ChatRecord> keptRecords = ChatRecords.DropInsertionsFrom(_chat.Messages, _chat.Records, at);
+
+                if (!ReferenceEquals(keptRecords, _chat.Records))
+                {
+                    _chat = savedChat = _chat with { Records = keptRecords };
+                    savedChatId = chatId;
+                }
+            }
+
             job = BeginReply(profile, chatId, _chat, kind, item, [.. _chat.Messages.Take(at)], kind == ReplyKind.Continuation ? message.Current.Text : null);
 
             if (at < _chat.Messages.Count - 1)
@@ -268,6 +282,9 @@ internal sealed partial class ChatController
 
         if (busy)
             return Notify("chatai.chat.busy", UIColorStyle.Info);
+
+        if (savedChat is not null && savedChatId is not null)
+            await Chats.WriteAsync(savedChatId, savedChat, cancellationToken).ConfigureAwait(false);
 
         if (job is not null)
             Context.Runtime.Start(lifetime => GenerateAsync(job, lifetime));
@@ -415,9 +432,4 @@ internal sealed partial class ChatController
 
         return UICommandResult.Ok([.. result.Effects, new CloseDialogEffect(RefreshDialogKey)]);
     }
-
-    /// <summary>A question answered Cancel: the dialog closed itself on the page.</summary>
-    [UICommand]
-    public void CloseQuestion()
-        => _askedId = null;
 }

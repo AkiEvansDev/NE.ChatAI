@@ -47,13 +47,21 @@ internal sealed class ChatAIStartup : UIStartupBase
         });
 
         // A reply streams for as long as the model writes it; the generation's own cancellation ends it, not a client timeout.
-        _ = services.AddHttpClient(KoboldCppClients.HttpClientName, static http => http.Timeout = Timeout.InfiniteTimeSpan);
+        // koboldcpp is an HTTP/1.0 server that closes after each answer, and unreachable probes are handled by the controller.
+        _ = services.AddHttpClient(KoboldCppClients.HttpClientName, static http =>
+            {
+                http.Timeout = Timeout.InfiniteTimeSpan;
+                http.DefaultRequestHeaders.ConnectionClose = true;
+            })
+            .RemoveAllLoggers();
         _ = services.AddSingleton<KoboldCppClients>();
 
         _ = services.AddSingleton(TimeProvider.System);
         _ = services.AddSingleton<ChatLibrary>();
         _ = services.AddSingleton<PictureContent>();
         _ = services.AddSingleton<IUIContentProvider>(static provider => provider.GetRequiredService<PictureContent>());
+        _ = services.AddSingleton<UserSessionResolver>();
+        _ = services.AddSingleton<IUserSessionResolver>(static provider => provider.GetRequiredService<UserSessionResolver>());
 
         _ = services.AddHostedService<FirstStart>();
     }
@@ -61,6 +69,9 @@ internal sealed class ChatAIStartup : UIStartupBase
     protected override void ConfigureApplication(UIApplicationBuilder application)
     {
         ArgumentNullException.ThrowIfNull(application);
+
+        _ = application.ConfigurePersistence(static persistence => persistence.Lifetime = UIRuntimeLifetime.PerClient);
+        _ = application.ConfigureSessions(static sessions => sessions.ClientKey = UserSessionResolver.CookieName);
 
         _ = application.ConfigureLocalization(static localization =>
         {

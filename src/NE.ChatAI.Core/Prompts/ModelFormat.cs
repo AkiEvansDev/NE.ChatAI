@@ -178,7 +178,7 @@ public sealed record ModelFormat : NamedDocument
         else if (Thought.OpenedByPrompt)
             _ = opening.Append(Thought.Prefix);
 
-        if (NamesBehavior == NamesBehavior.Always && !string.IsNullOrEmpty(name) && !Thought.OpenedByPrompt)
+        if (NamesBehavior == NamesBehavior.Always && !string.IsNullOrEmpty(name) && (!Thought.IsDefined || !Thought.Enabled))
             _ = opening.Append(name).Append(':');
 
         return opening.ToString();

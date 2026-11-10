@@ -15,7 +15,7 @@
   ],
   "sequencesAsStop": true,
   "thought": {
-    "enabled": true,
+    "enabled": false,
     "prefix": "<think>\n",
     "suffix": "</think>",
     "opensReply": true

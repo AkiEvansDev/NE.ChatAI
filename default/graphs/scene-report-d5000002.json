@@ -21,7 +21,7 @@
         "x": 320,
         "y": 448,
         "values": {
-          "Last": 2,
+          "Last": 3,
           "Raw": true
         }
       },
@@ -40,7 +40,7 @@
         "x": 0,
         "y": 448,
         "values": {
-          "Value": "State the current scene in three short dry lines — Clothing:, Pose/location:, Mood: — updating the previous report only where the latest messages changed it, or establishing it from scratch when there is none. Output only the three lines, with no prose, headings or narration."
+          "Value": "Pause the roleplay and state the current scene in three short factual lines — Clothing:, Pose/location:, Mood: — based strictly on the latest messages above, updating the previous report only where those messages changed it (or establishing it from the latest messages when there is none; use the character card only for baseline attire not specified in the messages, and ignore example dialogues or general habits in the card). Output only the three lines, with no prose, headings or narration."
         }
       },
       {
@@ -67,9 +67,9 @@
           "Samplers": "precise-d4000003",
           "Thinking": "Off",
           "OverrideReplyLength": true,
-          "ReplyLength": 160,
+          "ReplyLength": 256,
           "OverrideTemperature": true,
-          "Temperature": 0.2
+          "Temperature": 0.65
         }
       },
       {

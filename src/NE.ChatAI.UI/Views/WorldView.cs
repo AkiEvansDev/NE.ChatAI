@@ -8,37 +8,59 @@ namespace NE.ChatAI.Views;
 /// </summary>
 internal static class WorldView
 {
+    public const string ArticleSearchId = "chatai-world-article-search";
+    public const string ArticlesId = "chatai-world-articles";
+
     private static readonly OptionItem[] Positions =
     [
         new() { Id = "BeforeStory", Title = "chatai.world.position.before" },
-        new() { Id = "AfterStory", Title = "chatai.world.position.after" }
+        new() { Id = "AfterStory", Title = "chatai.world.position.after" },
+        new() { Id = "InHistory", Title = "chatai.world.position.history" }
     ];
 
     public static UIDialog CreateDialog()
         => CardEditor.CreateDialog(ShellController.WorldDialogKey, "chatai.world.title",
-            CardEditor.Section(null,
-                CardEditor.CreateHead(),
-                CardEditor.Area<ShellController>("chatai.world.overview", static x => x.CardDescription, 8, "chatai.world.overview.hint")
-            ),
-            CardEditor.Section("chatai.world.articles",
-                CreateArticles()
-            )
+            new TabsComponent("chatai-world-tabs")
+                .AddTab("overview", "chatai.world.overview", UILayout.Stack(16,
+                    CardEditor.CreateHead(),
+                    CardEditor.Area<ShellController>("chatai.world.overview", static x => x.CardDescription, 20, "chatai.world.overview.hint")
+                ))
+                .AddTab("articles", "chatai.world.articles", UILayout.Stack(16,
+                    UIForm.Field(new NumberInputComponent()
+                            .SetTitle("chatai.world.scan-depth")
+                            .SetShowStepper(true)
+                            .SetMin(1)
+                            .SetMax(64)
+                            .SetStep(1)
+                            .BindValue<ShellController>(static x => x.WorldScanDepth)
+                            .OnChange(nameof(ShellController.SaveCardAsync)),
+                        "chatai.world.scan-depth.hint"
+                    ),
+                    CreateArticles()
+                ))
         );
 
-    /// <summary>The articles, each its fields with its remove inside the title; then a new one.</summary>
+    /// <summary>The articles in an accordion, each its fields with its rename and remove in the header; then a new one.</summary>
     private static StackPanelComponent CreateArticles()
-        => UILayout.Stack(16,
-            new ItemsViewComponent()
+        => UILayout.Stack(12,
+            new TextInputComponent(ArticleSearchId)
+                .SetSearch("chatai.world.article.search")
+                .SetDebounceMilliseconds(200)
+                .BindVisibility<ShellController>(static x => x.WorldArticleSearchVisibility),
+            new ItemsViewComponent(ArticlesId)
                 .SetVerticalScroll(UIScrollMode.Disabled)
+                .SetLayoutType(UIItemsLayoutType.Accordion)
                 .BindItems<ShellController>(static x => x.WorldArticles)
-                .SetSpacing(24)
+                .FilterBy(ArticleSearchId, IInputComponent.ValueProperty, nameof(ArticleItem.SearchText))
                 .ConfigureDefaultEmptyTemplate(empty => empty.SetTitle("chatai.world.articles.none").SetTitleWrap(true))
-                .SetTemplate(UILayout.Stack(12,
-                        new TextInputComponent()
-                            .SetPlaceholder("chatai.world.article.title")
-                            .BindValue<ArticleItem>(static x => x.Title, UIBindingScope.Relative)
-                            .OnChange(nameof(ShellController.SaveCardAsync))
-                            .AddTrailingAction(UIIconButtons.Delete().OnClick(nameof(ShellController.RemoveArticleAsync), UIAction.ArgCurrentItemKey("articleId"))),
+                .SetTemplate(CardEditor.Fold(nameof(ShellController.SaveCardAsync), nameof(ShellController.RemoveArticleAsync), "articleId",
+                        UIForm.Field(new TextInputComponent()
+                                .SetTitle("chatai.world.article.triggers")
+                                .SetPlaceholder("chatai.world.article.triggers.placeholder")
+                                .BindValue<ArticleItem>(static x => x.Triggers, UIBindingScope.Relative)
+                                .OnChange(nameof(ShellController.SaveCardAsync)),
+                            "chatai.world.article.triggers.hint"
+                        ),
                         UIForm.Row(
                             new SelectComponent()
                                 .SetTitle("chatai.world.article.position")

@@ -133,20 +133,17 @@ internal sealed class WorldNode : IGraphNode
             return;
         }
 
-        IReadOnlyList<WorldArticle> articles = WorldInfo.ArticlesOf(world);
-        List<string> enabledTexts = [];
+        IReadOnlyList<PromptMessage> history = ChatRecords.ProjectHistory(scope.Chat.Messages, scope.Chat.Records);
+        IReadOnlyList<WorldArticle> articles = WorldInfo.ArticlesOf(world, history, scope.InitialDraft);
+        var skipOverview = !string.IsNullOrWhiteSpace(world.Description) ? 1 : 0;
+        var enabledTexts = new string[Math.Max(0, articles.Count - skipOverview)];
 
-        for (var i = 0; i < world.Articles.Count; i++)
-        {
-            WorldArticle article = world.Articles[i];
-
-            if (article.Enabled && !string.IsNullOrWhiteSpace(article.Text))
-                enabledTexts.Add(article.Text);
-        }
+        for (var i = skipOverview; i < articles.Count; i++)
+            enabledTexts[i - skipOverview] = articles[i].Text;
 
         World = new WorldLore(world, articles);
         Overview = world.Description;
-        Articles = [.. enabledTexts];
+        Articles = enabledTexts;
     }
 }
 
@@ -253,6 +250,7 @@ internal sealed class CollectorNode : IGraphNode
             {
                 SystemPrompt = string.IsNullOrWhiteSpace(Prompt) ? null : Character.Character.SystemPrompt,
                 PostHistoryInstructions = null,
+                AuthorsNote = null,
                 ExampleMessages = string.Empty
             };
 
@@ -268,7 +266,6 @@ internal sealed class CollectorNode : IGraphNode
             Persona = Persona?.Persona,
             UserName = Persona?.Name ?? scope.UserName,
             Lore = World?.Articles ?? [],
-            NotePlacement = scope.Settings.AuthorsNotePlacement,
             History = Messages?.Messages ?? [],
             Instruction = instructionTurn,
             ReplySpeaker = string.Empty
@@ -400,7 +397,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         SeedChoice seed = Seeds.Pick(samplers.Seed, scope.Chat.Seed, regenerate: false);
         var genKey = $"ne_{Guid.NewGuid():N}";
         KoboldGenerateRequest request = KoboldGenerateRequest.From(built.Text, samplers, resolvedContext.Length, seed.Seed, format.AllStopSequences(), genKey);
-        ReplyReader reader = new(continuingDraft ? new ThoughtFormat() : format.Thought);
+        ReplyReader reader = new(continuingDraft ? new ThoughtFormat() : format.Thought, feedsDraft && !continuingDraft ? scope.UserName : null);
         StringBuilder sent = new();
         Stopwatch clock = new();
         double? promptSeconds = null;
@@ -430,7 +427,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
                 {
                     var partialDraft = continuingDraft
                         ? scope.InitialDraft + reader.Text
-                        : StripSpeakerPrefix(reader.Text, scope.UserName);
+                        : reader.Text;
                     await scope.OnDraftChunkAsync(partialDraft).ConfigureAwait(false);
                 }
             }
@@ -467,9 +464,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         scope.Generations.Add(record);
         scope.LastGenerationId = record.Id;
         scope.LastThought = reader.Thought.Length == 0 ? null : reader.Thought;
-        Text = continuingDraft
-            ? (scope.InitialDraft + reader.Text).Trim()
-            : (feedsDraft ? StripSpeakerPrefix(reader.Text, scope.UserName) : reader.Text).Trim();
+        Text = (continuingDraft ? scope.InitialDraft + reader.Text : reader.Text).Trim();
         Thought = reader.Thought.Trim();
 
         await context.LogAsync(string.Create(CultureInfo.InvariantCulture, $"{built.Tokens} prompt + {replyTokens} reply tokens in {clock.Elapsed.TotalSeconds:F1} s.")).ConfigureAwait(false);
@@ -568,23 +563,6 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         {
             return await PromptBuilder.BuildAsync(spec, format, contextLength, replyLength, ApproximateTokenCounter.Instance, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    private static string StripSpeakerPrefix(string text, string userName)
-    {
-        if (string.IsNullOrWhiteSpace(userName))
-            return text;
-
-        ReadOnlySpan<char> trimmed = text.AsSpan().TrimStart();
-
-        if (trimmed.StartsWith(userName, StringComparison.OrdinalIgnoreCase)
-            && trimmed.Length > userName.Length
-            && trimmed[userName.Length] == ':')
-        {
-            return trimmed[(userName.Length + 1)..].TrimStart().ToString();
-        }
-
-        return text;
     }
 
     private static async Task<(int Tokens, TokenCounts Counts)> CountReplyAsync(KoboldCppClient kobold, string reply, BuiltPrompt prompt)

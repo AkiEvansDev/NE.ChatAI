@@ -24,8 +24,8 @@ internal static class PictureFields
             .SetHeight(UILayoutLength.Absolute(PreviewHeight))
             .BindValue(path.AppendProperty(nameof(PictureSlot.Value)))
             .BindSelectionId(path.AppendProperty(nameof(PictureSlot.Upload)))
-            .BindVisibility(path.AppendProperty(nameof(PictureSlot.PickerVisibility)))
             .OnChange(save);
+        _ = picker.HiddenWhen(picker);
 
         return UILayout.Stack(4,
             UIForm.Field(
@@ -34,7 +34,7 @@ internal static class PictureFields
                     new ContainerComponent()
                         .AddChild(picker.SetPlacement(1, 1, 24, 1))
                         .AddChild(CreatePreview(path, picker, author, avatar, dimSliderId)
-                            .BindVisibility(path.AppendProperty(nameof(PictureSlot.RemoveVisibility)))
+                            .ShownWhen(picker)
                             .SetPlacement(1, 1, 24, 1)
                         )
                 ),
@@ -44,7 +44,7 @@ internal static class PictureFields
                 .SetSize(UISize.Small)
                 .SetHorizontalAlignment(UIAlignment.Start)
                 .OnClick(remove)
-                .BindVisibility(path.AppendProperty(nameof(PictureSlot.RemoveVisibility)))
+                .ShownWhen(picker)
         );
     }
 

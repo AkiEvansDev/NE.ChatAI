@@ -21,6 +21,7 @@ public sealed class ReplyReader
     private readonly ThoughtFormat _thought;
     private readonly string _marker;
     private readonly string _label;
+    private readonly string _speakerPrefix;
     private readonly StringBuilder _raw = new();
     private bool _complete;
 
@@ -30,12 +31,13 @@ public sealed class ReplyReader
     /// </summary>
     private readonly string _opened;
 
-    public ReplyReader(ThoughtFormat thought)
+    public ReplyReader(ThoughtFormat thought, string? speaker = null)
     {
         ArgumentNullException.ThrowIfNull(thought);
 
         _thought = thought;
         (_marker, _label) = SplitPrefix(thought.Prefix);
+        _speakerPrefix = string.IsNullOrWhiteSpace(speaker) ? string.Empty : $"{speaker.Trim()}:";
         _opened = thought.OpenedByPrompt ? thought.Prefix : string.Empty;
     }
 
@@ -81,6 +83,7 @@ public sealed class ReplyReader
         var raw = _opened + _raw.ToString();
 
         (var nextText, var nextThought) = (_thought.IsDefined ? ReadFormat(raw) : null) ?? ReadTags(raw);
+        nextText = StripSpeaker(nextText);
         Text = _complete ? nextText.TrimEnd('\r', '\n') : nextText;
         Thought = nextThought;
 
@@ -156,6 +159,26 @@ public sealed class ReplyReader
             return (raw[(close + ThinkClose.Length)..].TrimStart(), raw[open..close].Trim());
 
         return (string.Empty, raw[open..].Trim());
+    }
+
+    /// <summary>Takes the speaker's <c>Name:</c> and the space after it off the reply's opening, waiting while a partial name may still end in <c>:</c>.</summary>
+    private string StripSpeaker(string text)
+    {
+        if (_speakerPrefix.Length == 0 || text.Length == 0)
+            return text;
+
+        ReadOnlySpan<char> trimmed = text.AsSpan().TrimStart();
+
+        if (trimmed.IsEmpty)
+            return string.Empty;
+
+        if (trimmed.StartsWith(_speakerPrefix, StringComparison.OrdinalIgnoreCase))
+            return trimmed[_speakerPrefix.Length..].TrimStart().ToString();
+
+        if (!_complete && _speakerPrefix.AsSpan().StartsWith(trimmed, StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        return trimmed.Length == text.Length ? text : trimmed.ToString();
     }
 
     private static class Opening

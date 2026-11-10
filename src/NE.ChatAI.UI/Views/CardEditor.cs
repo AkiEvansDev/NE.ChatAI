@@ -53,7 +53,7 @@ internal static class CardEditor
                         .BindOptions<ShellController>(static x => x.CardTagOptions)
                         .BindValue<ShellController>(static x => x.CardTags)
                         .OnChange(nameof(ShellController.SaveTagsAsync))
-                        .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Tags), "chatai.tags.title").OnClick(nameof(ShellController.OpenTagsAsync)))
+                        .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Tags), "chatai.tags.title").InteractOn(EventNames.Click, new OpenDialogEffect(ShellController.TagsDialogKey)))
                 )
                 .SetPlacement(2, 1, 23, 1)
             );
@@ -78,21 +78,90 @@ internal static class CardEditor
         return hint is null ? area : UIForm.Field(area, hint);
     }
 
-    /// <summary>A group of fields that belong together, separated by a rule and a heading when titled.</summary>
-    public static StackPanelComponent Section(string? title, params IVisualComponent[] fields)
-        => title is null
-            ? UILayout.Stack(16, fields)
-            : UILayout.Stack(16, [new SeparatorComponent(), UIText.Subtitle(title), .. fields]);
+    /// <summary>One row of an accordion list in a card editor with a delete action in the header and its content inside.</summary>
+    public static ExpanderComponent Fold<TItem>(string removeCommand, string keyName, IVisualComponent content)
+        where TItem : CardFoldItem
+        => new ExpanderComponent()
+            .SetSurface(UISurfaceStyle.Surface)
+            .ConfigureDefaultHeader(header => header
+                .SetTitleType(UITextAppearance.Caption)
+                .SetTitleColor(UIThemeColor.Muted)
+                .SetMargin(UIThickness.All(0, 0, 36, 0))
+                .BindTitle<TItem>(static x => x.Header, UIBindingScope.Relative)
+            )
+            .SetHeaderAction(UILayout.Row(4,
+                    UIIconButtons.Delete()
+                        .SetSize(UISize.Small)
+                        .OnClick(removeCommand, UIAction.ArgCurrentItemKey(keyName))
+                )
+                .SetMargin(UIThickness.All(0, -4, 0, 4))
+            )
+            .BindExpanded<TItem>(static x => x.Expanded, UIBindingScope.Relative)
+            .SetContent(content);
 
-    /// <summary>A wide card-editor dialog with a fixed header, a delete button in it, and a scrollable body.</summary>
-    public static UIDialog CreateDialog(string key, string title, params IVisualComponent[] sections)
+    /// <summary>One row of an accordion list in a card editor: its renamable header, its rename and delete actions, and its fields inside.</summary>
+    public static ExpanderComponent Fold(string saveCommand, string removeCommand, string keyName, params IVisualComponent[] fields)
+    {
+        ExpanderHeaderRegion? headerRegion = null;
+        ExpanderComponent expander = new ExpanderComponent()
+            .SetSurface(UISurfaceStyle.Surface)
+            .ConfigureDefaultHeader(header =>
+            {
+                headerRegion = header;
+                _ = header
+                    .SetTitleType(UITextAppearance.Caption)
+                    .SetTitleColor(UIThemeColor.Muted)
+                    .SetDescriptionType(UITextAppearance.Caption)
+                    .SetDescriptionColor(UIThemeColor.Muted)
+                    .SetMargin(UIThickness.All(0, 0, 68, 0))
+                    .SetRenamable(true)
+                    .BindTitle<ArticleItem>(static x => x.Header, UIBindingScope.Relative)
+                    .BindDescription<ArticleItem>(static x => x.Summary, UIBindingScope.Relative)
+                    .BindRenamedTitle<ArticleItem>(static x => x.Title, UIBindingScope.Relative)
+                    .OnRename(saveCommand);
+            })
+            .BindExpanded<ArticleItem>(static x => x.Expanded, UIBindingScope.Relative)
+            .SetContent(UILayout.Stack(12, fields));
+
+        return expander.SetHeaderAction(UILayout.Row(4,
+                UIIconButtons.Rename()
+                    .SetSize(UISize.Small)
+                    .InteractOn(EventNames.Click, new RenameItemEffect(headerRegion!)),
+                UIIconButtons.Delete()
+                    .SetSize(UISize.Small)
+                    .OnClick(removeCommand, UIAction.ArgCurrentItemKey(keyName))
+            )
+            .SetMargin(UIThickness.All(0, -4, 0, 4))
+        );
+    }
+
+    /// <summary>A wide card-editor dialog with a fixed header, token count, duplicate and delete buttons in it, and a scrollable body.</summary>
+    public static UIDialog CreateDialog(string key, string title, IVisualComponent body)
         => UIDialogs.Create(
             key,
             title,
-            new ContainerComponent(key).AddChild(UILayout.Stack(24, sections)),
+            new ContainerComponent(key).AddChild(body),
             width: UIColumnWidth.Wide,
-            trailing: UIIconButtons.Delete().SetSize(UISize.Small).OnClick(nameof(ShellController.AskDeleteEditingCard))
-        );
+            trailing:
+            [
+                new TextComponent()
+                    .SetTitleType(UITextAppearance.Caption)
+                    .SetTitleColor(UIThemeColor.Muted)
+                    .SetTitleWrap(false)
+                    .SetVerticalAlignment(UIAlignment.Center)
+                    .SetMargin(UIThickness.All(0, 0, 4, 0))
+                    .BindTitle<ShellController>(static x => x.CardTokens),
+                UIIconButtons.Duplicate()
+                    .SetSize(UISize.Small)
+                    .OnClick(nameof(ShellController.DuplicateEditingCardAsync)),
+                UIIconButtons.Delete()
+                    .SetSize(UISize.Small)
+                    .OnClick(nameof(ShellController.AskDeleteEditingCard))
+            ]
+        ) with
+        {
+            Height = UIResponsive<UILayoutLength>.Create(UILayoutLength.Fill())
+        };
 
     /// <summary>The tags dialog and the question before a tag is deleted.</summary>
     public static IReadOnlyList<UIDialog> CreateTagsDialogs()

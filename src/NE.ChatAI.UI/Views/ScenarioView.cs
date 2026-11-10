@@ -32,16 +32,11 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
 
     protected override IVisualComponent CreatePage()
     {
-        SwitchComponent system = new SwitchComponent()
-            .SetTitle("chatai.scenarios.system")
-            .BindValue<ScenarioController>(static x => x.ScenarioSystem)
-            .OnChange(nameof(ScenarioController.SaveMetaAsync));
         SelectComponent trigger = new SelectComponent()
             .SetTitle("chatai.scenarios.trigger")
             .SetOptions(TriggerKinds)
             .BindValue<ScenarioController>(static x => x.TriggerKind)
-            .OnChange(nameof(ScenarioController.SaveMetaAsync))
-            .HiddenWhen(system);
+            .OnChange(nameof(ScenarioController.SaveMetaAsync));
 
         return new ContainerComponent(ScenarioController.PageId)
             .SetColumn(1, UIGridUnit.Star(), md: UIGridUnit.Auto())
@@ -63,12 +58,10 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                             .BindVisibility<ScenarioController>(static x => x.EditorVisibility)
                         ),
                     UILayout.Stack(16,
-                            system,
                             new SwitchComponent()
                                 .SetTitle("chatai.scenarios.enabled")
                                 .BindValue<ScenarioController>(static x => x.ScenarioEnabled)
-                                .OnChange(nameof(ScenarioController.SaveMetaAsync))
-                                .HiddenWhen(system),
+                                .OnChange(nameof(ScenarioController.SaveMetaAsync)),
                             trigger,
                             new NumberInputComponent()
                                 .SetTitle("chatai.scenarios.share")
@@ -80,7 +73,7 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                                 .OnChange(nameof(ScenarioController.SaveMetaAsync))
                                 .ShownWhen(trigger, nameof(ScenarioTriggerKind.ContextShare))
                         )
-                        .BindVisibility<ScenarioController>(static x => x.EditorVisibility)
+                        .BindVisibility<ScenarioController>(static x => x.TriggerVisibility)
                 )
                 .SetWidth(UILayoutLength.Fill(), md: UILayoutLength.Absolute(SidebarWidth))
                 .SetMargin(UIThickness.All(0, 0, 0, 12), md: UIThickness.All(0, 0, 16, 0))

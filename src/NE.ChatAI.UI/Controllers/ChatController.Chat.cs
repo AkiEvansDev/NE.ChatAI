@@ -36,11 +36,21 @@ internal sealed partial class ChatController
     /// <summary>A phrase's entry shows this much of it.</summary>
     private const int PhraseShown = 48;
 
-    private IReadOnlyList<string> _phrases = [];
-
     /// <summary>The open chat's own author's note, as its dialog edits it.</summary>
     [RecursiveMember]
     public partial string ChatNote { get; set; } = string.Empty;
+
+    /// <summary>The picture behind this chat alone; none, and it takes the character's or the application's.</summary>
+    [RecursiveMember]
+    public partial PictureSlot ChatBackground { get; set; } = new();
+
+    /// <summary>The character name shown on the sample message over the chat's background preview.</summary>
+    [RecursiveMember]
+    public partial string ChatBackgroundPreviewAuthor { get; set; } = AppName;
+
+    /// <summary>The character avatar shown on the sample message over the chat's background preview.</summary>
+    [RecursiveMember]
+    public partial string? ChatBackgroundPreviewAvatar { get; set; }
 
     /// <summary>How many tokens and history messages the assembled prompt holds.</summary>
     [RecursiveMember]
@@ -64,15 +74,15 @@ internal sealed partial class ChatController
     /// </summary>
     private async Task ShowChatListsAsync(CancellationToken cancellationToken)
     {
-        _phrases = (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).Phrases;
+        IReadOnlyList<string> savedPhrases = (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).Phrases;
 
         ShowPersonas();
 
         MenuItem phrases = ExtraOf(PhrasesAction);
         phrases.Items.Clear();
 
-        for (var i = 0; i < _phrases.Count; i++)
-            phrases.Items.Add(new MenuItem { Id = PhrasePrefix + i.ToString(CultureInfo.InvariantCulture), Title = Shortened(_phrases[i]), IsContent = true });
+        for (var i = 0; i < savedPhrases.Count; i++)
+            phrases.Items.Add(new MenuItem { Id = PhrasePrefix + i.ToString(CultureInfo.InvariantCulture), Title = Shortened(savedPhrases[i]), Value = UIPhrase.Text(savedPhrases[i]), IsContent = true });
 
         phrases.Enabled = phrases.Items.Count > 0 && _chat is not null;
         await ShowScenarioMenuAsync(cancellationToken).ConfigureAwait(false);
@@ -106,7 +116,7 @@ internal sealed partial class ChatController
         return line.Length <= PhraseShown ? line.ToString() : string.Concat(line[..PhraseShown].TrimEnd(), "…");
     }
 
-    /// <summary>An extras entry for the chat itself: its statistics, its assembled prompt, its note's dialog, a persona picked, a phrase inserted into the composer; none for any other.</summary>
+    /// <summary>An extras entry for the chat itself: its statistics, its assembled prompt, its note's dialog, or a persona picked; none for any other.</summary>
     private async Task<UICommandResult?> ChatActionAsync(string action, CancellationToken cancellationToken)
     {
         if (action == StatisticsAction)
@@ -123,9 +133,6 @@ internal sealed partial class ChatController
 
         if (action.StartsWith(PersonaPrefix, StringComparison.Ordinal))
             return await ChoosePersonaAsync(action[PersonaPrefix.Length..], cancellationToken).ConfigureAwait(false);
-
-        if (action.StartsWith(PhrasePrefix, StringComparison.Ordinal) && int.TryParse(action.AsSpan(PhrasePrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index < _phrases.Count)
-            return _phrases[index].Length > 0 ? UICommandResult.Ok([InsertTextEffect.Literal(ComposerId, _phrases[index])]) : UICommandResult.Ok();
 
         return null;
     }
@@ -227,6 +234,9 @@ internal sealed partial class ChatController
 
             open = _chat is not null;
             ChatNote = (_chat?.AuthorsNote ?? string.Empty).TrimEnd('\r', '\n');
+            ChatBackground.Show(Pictures.ChatBackgroundOf(OpenChatId));
+            ChatBackgroundPreviewAuthor = CharacterName;
+            ChatBackgroundPreviewAvatar = Pictures.CharacterAvatarOf(_chat?.Character);
         }, cancellationToken).ConfigureAwait(false);
 
         if (busy)
@@ -261,6 +271,34 @@ internal sealed partial class ChatController
 
         if (changed is not null && chatId is not null)
             await Chats.WriteAsync(chatId, changed, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Takes in the picture the field just uploaded as the one behind this chat alone.</summary>
+    [UICommand]
+    public async Task SaveChatBackgroundAsync(CancellationToken cancellationToken)
+    {
+        if (OpenChatId is not string chatId || _chat is null || _generating || await TakePictureAsync(ChatBackground, cancellationToken).ConfigureAwait(false) is not var (content, contentType))
+            return;
+
+        var fileName = await ChatPictures.WriteAsync(Data, chatId, content, contentType, cancellationToken).ConfigureAwait(false);
+        _chat = _chat with { Background = fileName };
+        await Chats.WriteAsync(chatId, _chat, cancellationToken).ConfigureAwait(false);
+        ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
+        Background = Pictures.BackgroundOf(_chat.Character, chatId);
+    }
+
+    /// <summary>Takes the chat's own background away; the chat stands on the character's or the application's.</summary>
+    [UICommand]
+    public async Task RemoveChatBackgroundAsync(CancellationToken cancellationToken)
+    {
+        if (OpenChatId is not string chatId || _chat is null || _generating)
+            return;
+
+        ChatPictures.Delete(Data, chatId);
+        _chat = _chat with { Background = null };
+        await Chats.WriteAsync(chatId, _chat, cancellationToken).ConfigureAwait(false);
+        ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
+        Background = Pictures.BackgroundOf(_chat.Character, chatId);
     }
 
     /// <summary>The chat written as another persona from now on: the reader's messages read again under its name and picture.</summary>

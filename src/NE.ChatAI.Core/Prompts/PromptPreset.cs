@@ -56,6 +56,9 @@ public sealed record PromptPreset : NamedDocument
     /// <summary>What stands between the story and the chat's history.</summary>
     public string ChatStart { get; init; } = "***";
 
+    /// <summary>Whether each message in the history and the reply's opening are prefixed with <c>{{char}}:</c> or <c>{{user}}:</c>.</summary>
+    public bool IncludeNames { get; init; }
+
     public ThoughtHandling Thoughts { get; init; } = new();
 
     /// <summary>SillyTavern's own default story string.</summary>

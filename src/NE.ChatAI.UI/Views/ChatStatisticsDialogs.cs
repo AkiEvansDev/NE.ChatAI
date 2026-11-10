@@ -27,9 +27,12 @@ internal static class ChatStatisticsDialogs
                     .SetMinHeight(UILayoutLength.Absolute(DialogBodyMinHeight))
                     .BindVisibility<ChatController>(static x => x.StatisticsContentVisibility)
             ),
-            width: UIColumnWidth.Reading,
+            width: UIColumnWidth.Wide,
             trailing: [CreateScopeSwitch()]
-        );
+        ) with
+        {
+            Height = UIResponsive<UILayoutLength>.Create(UILayoutLength.Fill())
+        };
 
     private static StackPanelComponent CreateTokensTab()
         => UILayout.Stack(20,
@@ -125,5 +128,8 @@ internal static class ChatStatisticsDialogs
                 )
             ),
             width: UIColumnWidth.Reading
-        );
+        ) with
+        {
+            Height = UIResponsive<UILayoutLength>.Create(UILayoutLength.Fill())
+        };
 }

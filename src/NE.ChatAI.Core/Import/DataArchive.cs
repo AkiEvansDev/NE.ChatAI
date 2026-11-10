@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using NE.ChatAI.Characters;
+using NE.ChatAI.Chats;
 using NE.ChatAI.Settings;
 using NE.ChatAI.Storage;
 
@@ -98,7 +99,7 @@ public static class DataArchive
             }
 
             if (scopes.HasFlag(DataArchiveScopes.Chats))
-                await AddStoreFilesAsync(archive, data.Root, ChatsFolder, cancellationToken).ConfigureAwait(false);
+                await AddChatFilesAsync(archive, data, cancellationToken).ConfigureAwait(false);
         }
 
         return buffer.ToArray();
@@ -195,6 +196,24 @@ public static class DataArchive
             || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
 
+    private static async Task AddChatFilesAsync(ZipArchive archive, DataFolder data, CancellationToken cancellationToken)
+    {
+        await AddStoreFilesAsync(archive, data.Root, ChatsFolder, cancellationToken).ConfigureAwait(false);
+
+        var directory = Path.Combine(data.Root, ChatsFolder);
+
+        if (!Directory.Exists(directory))
+            return;
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.json").OrderBy(static path => path, StringComparer.Ordinal))
+        {
+            var id = Path.GetFileNameWithoutExtension(file);
+
+            if (Slug.IsValidId(id) && ChatPictures.PathOf(data, id) is string picturePath)
+                await AddFileEntryAsync(archive, $"{ChatsFolder}/{Path.GetFileName(picturePath)}", picturePath, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Restores the documents, pictures and settings inside <paramref name="archiveBytes"/> into <paramref name="data"/>, overwriting matching ids.</summary>
     public static async Task<DataArchiveImportSummary> ImportAsync(DataFolder data, ReadOnlyMemory<byte> archiveBytes, CancellationToken cancellationToken)
     {
@@ -222,6 +241,7 @@ public static class DataArchive
         var chats = 0;
         HashSet<string> validCards = new(StringComparer.Ordinal);
         List<(string Folder, string Id, string FileName, byte[] Content)> companionFiles = [];
+        List<(string Id, string Ext, byte[] Content)> chatPictures = [];
 
         foreach ((var path, var content) in entries.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {
@@ -261,6 +281,17 @@ public static class DataArchive
                 continue;
             }
 
+            if (parts.Length == 2 && parts[0] == ChatsFolder && manifest.Chats)
+            {
+                var id = Path.GetFileNameWithoutExtension(parts[1]);
+                var ext = Path.GetExtension(parts[1]);
+
+                if (Slug.IsValidId(id) && IsPictureExtension(ext))
+                    chatPictures.Add((id, ext.ToLowerInvariant(), content));
+
+                continue;
+            }
+
             if (parts.Length == 3 && manifest.Content && Slug.IsValidId(parts[1]))
             {
                 (var imported, var kind) = await ImportCardDocumentAsync(data, parts[0], parts[1], parts[2], content, cancellationToken).ConfigureAwait(false);
@@ -287,6 +318,15 @@ public static class DataArchive
         {
             if (validCards.Contains($"{folder}/{id}") || CardExists(data, folder, id))
                 await ImportCardFileAsync(data, folder, id, fileName, content, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach ((var id, var ext, var content) in chatPictures)
+        {
+            if (data.Chats.Exists(id))
+            {
+                ChatPictures.Delete(data, id);
+                await AtomicFile.WriteAsync(Path.Combine(data.Root, ChatsFolder, id + ext), content, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         var settingsApplied = await ApplySettingsAsync(data, manifest, incomingSettings, rootBackground, cancellationToken).ConfigureAwait(false);

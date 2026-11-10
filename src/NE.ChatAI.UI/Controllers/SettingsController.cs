@@ -17,6 +17,7 @@ internal sealed partial class SettingsController : ShellController
 {
     public const string DeleteDialogKey = "chatai-settings-delete";
     public const string RenameDialogKey = "chatai-settings-rename";
+    public const string RestoreDefaultsDialogKey = "chatai-settings-restore-defaults";
     public const string DimSliderId = "chatai-settings-background-dim";
 
     public const string ConnectionKind = "connection";
@@ -96,11 +97,11 @@ internal sealed partial class SettingsController : ShellController
 
         ActiveProfile? profile = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false);
 
-        Connection.Choose(profile?.ConnectionId);
-        Format.Choose(profile?.Connection.Instruct);
-        SystemPrompt.Choose(profile?.Connection.SystemPrompt);
-        Prompt.Choose(profile?.Connection.Prompt);
-        Samplers.Choose(profile?.Connection.Samplers);
+        Connection.Choose(Connection.Id ?? profile?.ConnectionId);
+        Format.Choose(Format.Id ?? profile?.Connection.Instruct);
+        SystemPrompt.Choose(SystemPrompt.Id ?? profile?.Connection.SystemPrompt);
+        Prompt.Choose(Prompt.Id ?? profile?.Connection.Prompt);
+        Samplers.Choose(Samplers.Id ?? profile?.Connection.Samplers);
 
         foreach (var kind in Kinds)
             await EditorOf(kind).ShowAsync(cancellationToken).ConfigureAwait(false);

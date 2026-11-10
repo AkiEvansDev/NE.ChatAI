@@ -4,14 +4,16 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using NE.ChatAI.Characters;
+using NE.ChatAI.Chats;
 using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Hosting;
 
 /// <summary>
 /// The pictures the pages show from the data folder: a character's avatar at <c>c{id}/{version}</c>, a persona's at
-/// <c>p{id}/{version}</c>, a world's at <c>w{id}/{version}</c>; the picture behind a character's chats at <c>b{id}/{version}</c>,
-/// the application's own at <c>gapp/{version}</c>. Anything else is no content, and the framework answers it with a 404.
+/// <c>p{id}/{version}</c>, a world's at <c>w{id}/{version}</c>; the picture behind a chat at <c>h{id}/{version}</c>, behind a
+/// character's chats at <c>b{id}/{version}</c>, the application's own at <c>gapp/{version}</c>. Anything else is no content, and the
+/// framework answers it with a 404.
 /// </summary>
 /// <remarks>
 /// The version is the file's last write, so a picture replaced under the same id is a new address and the old one may be kept for
@@ -23,12 +25,16 @@ internal sealed class PictureContent(DataFolder data, IUIContentAddressResolver 
     private const char PersonaPrefix = 'p';
     private const char WorldPrefix = 'w';
     private const char BackgroundPrefix = 'b';
+    private const char ChatBackgroundPrefix = 'h';
     private const char AppBackgroundPrefix = 'g';
     private const string AppId = "app";
 
     /// <summary>The character's avatar, or <c>null</c> for a character with none, so the page draws its own mark.</summary>
     public string? CharacterAvatarOf(string? characterId)
         => characterId is null ? null : AddressOf(CharacterPrefix, characterId, CardPictures.PathOf(data.Characters, characterId, CardPictures.Avatar));
+
+    private string? AddressOf(char prefix, string id, string? path)
+        => path is null ? null : addresses.AddressOf($"{prefix}{id}/{File.GetLastWriteTimeUtc(path).Ticks.ToString(CultureInfo.InvariantCulture)}");
 
     /// <summary>The persona's avatar, or <c>null</c> for a persona with none.</summary>
     public string? PersonaAvatarOf(string? personaId)
@@ -38,9 +44,13 @@ internal sealed class PictureContent(DataFolder data, IUIContentAddressResolver 
     public string? WorldAvatarOf(string? worldId)
         => worldId is null ? null : AddressOf(WorldPrefix, worldId, CardPictures.PathOf(data.Worlds, worldId, CardPictures.Avatar));
 
-    /// <summary>The picture behind a chat with the character: its own, else the application's; none, and the chat stands on the theme.</summary>
-    public string? BackgroundOf(string? characterId)
-        => CharacterBackgroundOf(characterId) ?? AppBackground();
+    /// <summary>The picture behind a chat: the chat's own, else its character's, else the application's; none, and the chat stands on the theme.</summary>
+    public string? BackgroundOf(string? characterId, string? chatId = null)
+        => ChatBackgroundOf(chatId) ?? CharacterBackgroundOf(characterId) ?? AppBackground();
+
+    /// <summary>The chat's own picture behind it, or <c>null</c> for none.</summary>
+    public string? ChatBackgroundOf(string? chatId)
+        => chatId is null ? null : AddressOf(ChatBackgroundPrefix, chatId, ChatPictures.PathOf(data, chatId));
 
     /// <summary>The character's own picture behind its chats, or <c>null</c> for none.</summary>
     public string? CharacterBackgroundOf(string? characterId)
@@ -49,9 +59,6 @@ internal sealed class PictureContent(DataFolder data, IUIContentAddressResolver 
     /// <summary>The application's picture behind a chat whose character has none, or <c>null</c>.</summary>
     public string? AppBackground()
         => AddressOf(AppBackgroundPrefix, AppId, PictureFiles.Find(data.Root, CardPictures.Background));
-
-    private string? AddressOf(char prefix, string id, string? path)
-        => path is null ? null : addresses.AddressOf($"{prefix}{id}/{File.GetLastWriteTimeUtc(path).Ticks.ToString(CultureInfo.InvariantCulture)}");
 
     public Task<UIContent?> ResolveAsync(UIContentRequest request, CancellationToken cancellationToken = default)
     {
@@ -67,6 +74,7 @@ internal sealed class PictureContent(DataFolder data, IUIContentAddressResolver 
             PersonaPrefix => CardPictures.PathOf(data.Personas, id, CardPictures.Avatar),
             WorldPrefix => CardPictures.PathOf(data.Worlds, id, CardPictures.Avatar),
             BackgroundPrefix => CardPictures.PathOf(data.Characters, id, CardPictures.Background),
+            ChatBackgroundPrefix => ChatPictures.PathOf(data, id),
             AppBackgroundPrefix when id == AppId => PictureFiles.Find(data.Root, CardPictures.Background),
             _ => null
         };

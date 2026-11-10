@@ -95,9 +95,4 @@ internal abstract partial class ShellController : UIControllerBase
     /// <summary>A command's answer that is only a toast.</summary>
     protected static UICommandResult Notify(string key, UIColorStyle style)
         => UICommandResult.Ok([new ShowNotificationEffect(key, style)]);
-
-    /// <summary>The way back to the chat from a page's head.</summary>
-    [UICommand]
-    public static UICommandResult BackToChat()
-        => UICommandResult.Ok([new NavigateEffect(AppRoutes.Home)]);
 }

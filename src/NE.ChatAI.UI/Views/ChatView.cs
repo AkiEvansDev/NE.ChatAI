@@ -200,7 +200,6 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
             .BindItems<ChatMessageItem>(static x => x.Records, UIBindingScope.Relative)
             .SetSpacing(6)
             .SetShowEmptyTemplate(false)
-            .BindVisibility<ChatMessageItem>(static x => x.RecordsVisibility, UIBindingScope.Relative)
             .SetTemplate(UIPage.BoundFold<ChatRecordItem>(static x => x.Title, UIBindingScope.Relative, false,
                     new ContainerComponent()
                         .SetColumn(24, UIGridUnit.Auto())
@@ -300,6 +299,7 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
         => UIIconButtons.More()
             .SetPopupPlacement(UIPopupPlacement.TopStart)
             .BindItems<ChatController>(static x => x.Extras)
+            .OnItemClick(ChatController.PhrasesAction, InsertTextEffect.CurrentItemValue(ChatController.ComposerId))
             .OnItemClick(nameof(ChatController.ExtraActionAsync), UIAction.ArgCurrentItemKey("action"));
 
     /// <summary>
@@ -316,13 +316,14 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
                     UIText.Note("chatai.chat.note.description"),
                     SettingsEditors.MacroInput("chatai.chat.note.note", 8)
                         .BindValue<ChatController>(static x => x.ChatNote)
-                        .OnChange(nameof(ChatController.SaveChatNoteAsync))
+                        .OnChange(nameof(ChatController.SaveChatNoteAsync)),
+                    PictureFields.Background<ChatController>("chatai.chat.background", "chatai.chat.background.hint", static x => x.ChatBackground, nameof(ChatController.SaveChatBackgroundAsync), nameof(ChatController.RemoveChatBackgroundAsync), static x => x.ChatBackgroundPreviewAuthor, static x => x.ChatBackgroundPreviewAvatar)
                 ),
                 width: UIColumnWidth.Form
             ),
-            UIDialogs.Confirm(ChatController.DeleteDialogKey, "chatai.chat.delete.title", (UIPhrase?)"chatai.chat.delete.question", "chatai.chat.delete", nameof(ChatController.DeleteMessageAsync), cancelCommand: nameof(ChatController.CloseQuestion)),
-            UIDialogs.Confirm(ChatController.DeleteFromDialogKey, "chatai.chat.delete-from.title", (UIPhrase?)"chatai.chat.delete-from.question", "chatai.chat.delete", nameof(ChatController.DeleteFromAsync), cancelCommand: nameof(ChatController.CloseQuestion)),
-            UIDialogs.Confirm(ChatController.RefreshDialogKey, "chatai.chat.refresh.title", (UIPhrase?)"chatai.chat.refresh.question", "chatai.chat.regenerate", nameof(ChatController.RefreshMessageAsync), cancelCommand: nameof(ChatController.CloseQuestion))
+            UIDialogs.Confirm(ChatController.DeleteDialogKey, "chatai.chat.delete.title", (UIPhrase?)"chatai.chat.delete.question", "chatai.chat.delete", nameof(ChatController.DeleteMessageAsync)),
+            UIDialogs.Confirm(ChatController.DeleteFromDialogKey, "chatai.chat.delete-from.title", (UIPhrase?)"chatai.chat.delete-from.question", "chatai.chat.delete", nameof(ChatController.DeleteFromAsync)),
+            UIDialogs.Confirm(ChatController.RefreshDialogKey, "chatai.chat.refresh.title", (UIPhrase?)"chatai.chat.refresh.question", "chatai.chat.regenerate", nameof(ChatController.RefreshMessageAsync))
         ];
 
     private static UIDialog CreatePromptDialog()

@@ -4,34 +4,58 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NE.ChatAI.Characters;
+using NE.ChatAI.Prompts;
 using NE.ChatAI.Settings;
 using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>One of a character's first messages, a variant a new chat opens with.</summary>
-internal sealed partial class GreetingItem : RecursiveObservable, IBindableItem
+/// <summary>One folded entry in a card editor's accordion list: a greeting of a character or an article of a world.</summary>
+internal abstract partial class CardFoldItem : RecursiveObservable, IBindableItem
 {
-    /// <summary>The row's own key while the dialog is open; greetings are kept as a list, not by id.</summary>
+    private const int MaxPreviewLength = 80;
+
+    /// <summary>The row's own key while the dialog is open; entries are kept as a list, not by id.</summary>
     [RecursiveMember(false)]
     public string Id { get; } = Guid.CreateVersion7().ToString("N", CultureInfo.InvariantCulture);
 
     [RecursiveMember]
     public partial string Text { get; set; } = string.Empty;
+
+    [RecursiveMember]
+    public partial UIPhrase Header { get; set; } = new("chatai.card.untitled");
+
+    [RecursiveMember]
+    public partial bool Expanded { get; set; }
+
+    public virtual void RefreshHeader()
+        => Header = FirstLineHeader(Text);
+
+    protected static UIPhrase FirstLineHeader(string text)
+    {
+        foreach (ReadOnlySpan<char> line in text.AsSpan().EnumerateLines())
+        {
+            ReadOnlySpan<char> trimmed = line.Trim();
+
+            if (!trimmed.IsEmpty)
+                return UIPhrase.Text(trimmed.Length <= MaxPreviewLength ? trimmed.ToString() : $"{trimmed[..MaxPreviewLength].TrimEnd()}…");
+        }
+
+        return new UIPhrase("chatai.card.untitled");
+    }
 }
 
-/// <summary>One article of a world in its editor dialog: its title, its words, where they go and whether they go.</summary>
-internal sealed partial class ArticleItem : RecursiveObservable, IBindableItem
-{
-    /// <summary>The row's own key while the dialog is open; articles are kept as a list, not by id.</summary>
-    [RecursiveMember(false)]
-    public string Id { get; } = Guid.CreateVersion7().ToString("N", CultureInfo.InvariantCulture);
+/// <summary>One of a character's first messages: the variant a new chat opens with.</summary>
+internal sealed partial class GreetingItem : CardFoldItem;
 
+/// <summary>One article of a world in its editor dialog: its title, its words, any triggers that wake it, where they go and whether they go.</summary>
+internal sealed partial class ArticleItem : CardFoldItem
+{
     [RecursiveMember]
     public partial string Title { get; set; } = string.Empty;
 
     [RecursiveMember]
-    public partial string Text { get; set; } = string.Empty;
+    public partial string Triggers { get; set; } = string.Empty;
 
     /// <summary>A <see cref="LorePosition"/>'s name.</summary>
     [RecursiveMember]
@@ -39,6 +63,38 @@ internal sealed partial class ArticleItem : RecursiveObservable, IBindableItem
 
     [RecursiveMember]
     public partial bool Enabled { get; set; } = true;
+
+    [RecursiveMember]
+    public partial UIPhrase? Summary { get; set; }
+
+    [RecursiveMember]
+    public partial string SearchText { get; set; } = string.Empty;
+
+    public override void RefreshHeader()
+    {
+        Header = !string.IsNullOrWhiteSpace(Title) ? UIPhrase.Text(Title.Trim()) : FirstLineHeader(Text);
+        Summary = BuildSummary();
+        SearchText = $"{Title}\n{Triggers}\n{Text}";
+    }
+
+    private UIPhrase BuildSummary()
+    {
+        var triggers = Triggers.Trim();
+        UIPhrase state = !Enabled
+            ? new UIPhrase("chatai.stats.off")
+            : triggers.Length == 0
+                ? new UIPhrase("chatai.world.article.triggers.placeholder")
+                : UIPhrase.Text(triggers);
+        UIPhrase position = new(Position switch
+        {
+            nameof(LorePosition.BeforeStory) => "chatai.world.position.before",
+            nameof(LorePosition.InHistory) => "chatai.world.position.history",
+            _ => "chatai.world.position.after"
+        });
+        var tokens = ApproximateTokenCounter.Estimate(Text.TrimEnd('\r', '\n'));
+
+        return UIPhrase.Of("chatai.world.article.summary", ("state", state), ("position", position), ("tokens", tokens));
+    }
 }
 
 /// <summary>
@@ -91,6 +147,9 @@ internal abstract partial class ShellController
     public RecursiveCollection<OptionItem> CardWorldOptions { get; } = [];
 
     [RecursiveMember]
+    public partial UIPhrase? CardTokens { get; set; }
+
+    [RecursiveMember]
     public partial string CharacterPersonality { get; set; } = string.Empty;
 
     [RecursiveMember]
@@ -122,6 +181,12 @@ internal abstract partial class ShellController
     /// <summary>Whether new chats are started as this persona; one persona at a time is.</summary>
     [RecursiveMember]
     public partial bool PersonaIsDefault { get; set; }
+
+    [RecursiveMember]
+    public partial decimal WorldScanDepth { get; set; } = World.DefaultScanDepth;
+
+    [RecursiveMember]
+    public partial UIVisibility WorldArticleSearchVisibility { get; set; } = UIVisibility.Collapsed;
 
     [RecursiveMember(false)]
     public RecursiveCollection<ArticleItem> WorldArticles { get; } = [];
@@ -232,6 +297,7 @@ internal abstract partial class ShellController
         CardTags = baseCard.Tags;
         CardDescription = baseCard.Description.TrimEnd('\r', '\n');
         ShowCardWorlds(baseCard.World);
+        RefreshCardTokens();
         await ShowTagsAsync(cancellationToken).ConfigureAwait(false);
 
         return DialogKeyOf(scope);
@@ -239,11 +305,28 @@ internal abstract partial class ShellController
 
     private void ShowWorldCard(World card)
     {
+        WorldScanDepth = Math.Clamp(card.ScanDepth, 1, 64);
         WorldArticles.Clear();
 
         foreach (WorldArticle article in card.Articles)
-            WorldArticles.Add(new ArticleItem { Title = article.Title, Text = article.Text.TrimEnd('\r', '\n'), Position = article.Position.ToString(), Enabled = article.Enabled });
+        {
+            ArticleItem item = new()
+            {
+                Title = article.Title,
+                Text = article.Text.TrimEnd('\r', '\n'),
+                Triggers = string.Join(", ", article.Triggers),
+                Position = article.Position.ToString(),
+                Enabled = article.Enabled
+            };
+            item.RefreshHeader();
+            WorldArticles.Add(item);
+        }
+
+        RefreshWorldArticles();
     }
+
+    private void RefreshWorldArticles()
+        => WorldArticleSearchVisibility = WorldArticles.Count > 1 ? UIVisibility.Visible : UIVisibility.Collapsed;
 
     private void ShowCharacterCard(string cardId, Character card)
     {
@@ -251,8 +334,15 @@ internal abstract partial class ShellController
         CharacterScenario = card.Scenario.TrimEnd('\r', '\n');
         CharacterGreetings.Clear();
 
-        foreach (var text in card.FirstMessages)
-            CharacterGreetings.Add(new GreetingItem { Text = text.TrimEnd('\r', '\n') });
+        foreach (var message in card.FirstMessages)
+        {
+            GreetingItem item = new()
+            {
+                Text = message.TrimEnd('\r', '\n')
+            };
+            item.RefreshHeader();
+            CharacterGreetings.Add(item);
+        }
 
         CharacterExampleMessages = card.ExampleMessages.TrimEnd('\r', '\n');
         CharacterSystemPrompt = card.SystemPrompt?.TrimEnd('\r', '\n') ?? string.Empty;
@@ -272,6 +362,28 @@ internal abstract partial class ShellController
             CardWorldOptions.Add(new OptionItem { Id = stored.Id, Title = stored.Document.Name, IsContent = true });
 
         CardWorldId = world is not null && KnownWorlds.Any(stored => stored.Id == world) ? world : NoWorld;
+    }
+
+    private void RefreshCardTokens()
+    {
+        var tokens = _editingCardScope switch
+        {
+            TagScope.Persona => ApproximateTokenCounter.Estimate(CardDescription),
+            TagScope.World => ApproximateTokenCounter.Estimate(CardDescription)
+                + WorldArticles
+                    .Where(static article => article.Enabled)
+                    .Sum(static article => ApproximateTokenCounter.Estimate(article.Text)),
+            _ => ApproximateTokenCounter.Estimate(CardDescription)
+                + ApproximateTokenCounter.Estimate(CharacterPersonality)
+                + ApproximateTokenCounter.Estimate(CharacterScenario)
+                + ApproximateTokenCounter.Estimate(CharacterExampleMessages)
+                + ApproximateTokenCounter.Estimate(CharacterSystemPrompt)
+                + ApproximateTokenCounter.Estimate(CharacterPostHistoryInstructions)
+                + ApproximateTokenCounter.Estimate(CharacterAuthorsNote)
+                + (CharacterGreetings.Count > 0 ? ApproximateTokenCounter.Estimate(CharacterGreetings[0].Text) : 0)
+        };
+
+        CardTokens = UIPhrase.Of("chatai.card.tokens", ("tokens", tokens));
     }
 
     private static string DialogKeyOf(TagScope scope)
@@ -344,6 +456,7 @@ internal abstract partial class ShellController
                     return;
 
                 await Data.Worlds.WriteAsync(cardId, ApplyWorldFields(world with { Name = name.Length == 0 ? world.Name : name, Description = description }), cancellationToken).ConfigureAwait(false);
+                RefreshWorldArticles();
                 break;
 
             case TagScope.Character:
@@ -355,13 +468,19 @@ internal abstract partial class ShellController
                 break;
         }
 
+        RefreshCardTokens();
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
         await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private World ApplyWorldFields(World card)
-        => card with
+    {
+        foreach (ArticleItem article in WorldArticles)
+            article.RefreshHeader();
+
+        return card with
         {
+            ScanDepth = Math.Clamp((int)WorldScanDepth, 1, 64),
             Articles =
             [
                 .. WorldArticles
@@ -370,24 +489,36 @@ internal abstract partial class ShellController
                     {
                         Title = article.Title.Trim(),
                         Text = article.Text.TrimEnd('\r', '\n'),
+                        Triggers = [.. article.Triggers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase)],
                         Position = Enum.TryParse(article.Position, out LorePosition position) ? position : LorePosition.AfterStory,
                         Enabled = article.Enabled
                     })
             ]
         };
+    }
 
     private Character ApplyCharacterFields(Character card)
-        => card with
+    {
+        foreach (GreetingItem greeting in CharacterGreetings)
+            greeting.RefreshHeader();
+
+        return card with
         {
             Personality = CharacterPersonality.TrimEnd('\r', '\n'),
             Scenario = CharacterScenario.TrimEnd('\r', '\n'),
-            FirstMessages = [.. CharacterGreetings.Select(static greeting => greeting.Text.TrimEnd('\r', '\n')).Where(static text => !string.IsNullOrWhiteSpace(text))],
+            FirstMessages =
+            [
+                .. CharacterGreetings
+                    .Where(static greeting => !string.IsNullOrWhiteSpace(greeting.Text))
+                    .Select(static greeting => greeting.Text.TrimEnd('\r', '\n'))
+            ],
             ExampleMessages = CharacterExampleMessages.TrimEnd('\r', '\n'),
             SystemPrompt = string.IsNullOrWhiteSpace(CharacterSystemPrompt) ? null : CharacterSystemPrompt.TrimEnd('\r', '\n'),
             PostHistoryInstructions = string.IsNullOrWhiteSpace(CharacterPostHistoryInstructions) ? null : CharacterPostHistoryInstructions.TrimEnd('\r', '\n'),
             CreatorNotes = CharacterCreatorNotes.TrimEnd('\r', '\n'),
             AuthorsNote = string.IsNullOrWhiteSpace(CharacterAuthorsNote) ? null : CharacterAuthorsNote.TrimEnd('\r', '\n')
         };
+    }
 
     /// <summary>Takes in the picture the field just uploaded, already cropped by the page, as the card's avatar.</summary>
     [UICommand]
@@ -443,10 +574,21 @@ internal abstract partial class ShellController
         await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>A new greeting to write; it is kept once it has words.</summary>
+    /// <summary>A new greeting to write, opened on its own; it is kept once it has a note or words.</summary>
     [UICommand]
     public void AddGreeting()
-        => CharacterGreetings.Add(new GreetingItem());
+    {
+        GreetingItem item = new();
+        CharacterGreetings.Add(item);
+        ExpandOnly(CharacterGreetings, item.Id);
+    }
+
+    private static void ExpandOnly<TItem>(RecursiveCollection<TItem> items, string? id)
+        where TItem : CardFoldItem
+    {
+        foreach (TItem item in items)
+            item.Expanded = item.Id == id;
+    }
 
     [UICommand]
     public async Task RemoveGreetingAsync(string greetingId, CancellationToken cancellationToken)
@@ -472,10 +614,16 @@ internal abstract partial class ShellController
         await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>A new article to write; it is kept once it has a title or words.</summary>
+    /// <summary>A new article to write, opened on its own; it is kept once it has a title or words.</summary>
     [UICommand]
     public void AddArticle()
-        => WorldArticles.Add(new ArticleItem());
+    {
+        ArticleItem item = new();
+        item.RefreshHeader();
+        WorldArticles.Add(item);
+        RefreshWorldArticles();
+        ExpandOnly(WorldArticles, item.Id);
+    }
 
     [UICommand]
     public async Task RemoveArticleAsync(string articleId, CancellationToken cancellationToken)
@@ -483,7 +631,59 @@ internal abstract partial class ShellController
         if (!WorldArticles.Remove(articleId))
             return;
 
+        RefreshWorldArticles();
         await SaveCardAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Duplicates the card currently open in the editor dialog, including its pictures, and opens the copy.</summary>
+    [UICommand]
+    public async Task<UICommandResult> DuplicateEditingCardAsync(CancellationToken cancellationToken)
+    {
+        if (_editingCardId is not string sourceId || !Slug.IsValidId(sourceId))
+            return UICommandResult.Ok();
+
+        await SaveCardAsync(cancellationToken).ConfigureAwait(false);
+
+        var copyFormat = Context.Translate("chatai.settings.copy-name") ?? "{name} (copy)";
+        string copyId;
+
+        switch (_editingCardScope)
+        {
+            case TagScope.Persona:
+                if (await Data.Personas.ReadAsync(sourceId, cancellationToken).ConfigureAwait(false) is not Persona persona)
+                    return UICommandResult.Ok();
+
+                copyId = await Data.Personas.CreateAsync(persona with { Name = copyFormat.Replace("{name}", persona.Name, StringComparison.Ordinal) }, cancellationToken).ConfigureAwait(false);
+                CardPictures.Copy(Data.Personas, sourceId, copyId);
+                break;
+
+            case TagScope.World:
+                if (await Data.Worlds.ReadAsync(sourceId, cancellationToken).ConfigureAwait(false) is not World world)
+                    return UICommandResult.Ok();
+
+                copyId = await Data.Worlds.CreateAsync(world with { Name = copyFormat.Replace("{name}", world.Name, StringComparison.Ordinal) }, cancellationToken).ConfigureAwait(false);
+                CardPictures.Copy(Data.Worlds, sourceId, copyId);
+                break;
+
+            case TagScope.Character:
+            default:
+                if (await Data.Characters.ReadAsync(sourceId, cancellationToken).ConfigureAwait(false) is not Character character)
+                    return UICommandResult.Ok();
+
+                copyId = await Data.Characters.CreateAsync(character with { Name = copyFormat.Replace("{name}", character.Name, StringComparison.Ordinal) }, cancellationToken).ConfigureAwait(false);
+                CardPictures.Copy(Data.Characters, sourceId, copyId);
+
+                if (_panelCharacterId == sourceId)
+                    _panelCharacterId = copyId;
+
+                break;
+        }
+
+        await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
+        await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
+        _ = await OpenCardEditorAsync(_editingCardScope, copyId, cancellationToken).ConfigureAwait(false);
+
+        return UICommandResult.Ok();
     }
 
     /// <summary>Asks to delete the card currently open in the editor dialog.</summary>

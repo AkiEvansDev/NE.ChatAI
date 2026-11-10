@@ -386,6 +386,45 @@ public static class ChatRecords
         return changed ?? records;
     }
 
+    /// <summary>Removes insertion records (<see cref="ChatRecord.After"/>) anchored at or after <paramref name="fromAt"/> when a message is refreshed.</summary>
+    public static IReadOnlyList<ChatRecord> DropInsertionsFrom(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records, int fromAt)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(records);
+
+        if (records.Count == 0 || fromAt < 0 || fromAt >= messages.Count)
+            return records;
+
+        Dictionary<string, int> indexById = IndexMap(messages);
+        List<ChatRecord>? kept = null;
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            ChatRecord record = records[i];
+            var drop = record.Replaces is not { Count: >= 2 }
+                && record.After is string afterId
+                && indexById.TryGetValue(afterId, out var afterIndex)
+                && afterIndex >= fromAt;
+
+            if (drop)
+            {
+                if (kept is null)
+                {
+                    kept = new List<ChatRecord>(records.Count - 1);
+
+                    for (var j = 0; j < i; j++)
+                        kept.Add(records[j]);
+                }
+            }
+            else
+            {
+                kept?.Add(record);
+            }
+        }
+
+        return kept ?? records;
+    }
+
     /// <summary>Marks stale and clamps any record touched or left behind when the chat is remade or rolled back.</summary>
     internal static IReadOnlyList<ChatRecord> OnRolledBack(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatRecord> records, IReadOnlyList<ChatMessage> after, int? remadeAt = null)
     {
@@ -409,29 +448,53 @@ public static class ChatRecords
             if (TryResolveRange(record, indexById, out var first, out var last))
             {
                 if (last < cutoff)
+                {
+                    changed?.Add(record);
                     continue;
+                }
 
-                changed ??= [.. records];
-                changed[i] = first < keptCount
+                changed ??= CopyPrefix(records, i);
+                changed.Add(first < keptCount
                     ? record with { Replaces = [before[first].Id, after[Math.Min(last, keptCount - 1)].Id], Stale = true }
-                    : record with { Replaces = null, After = lastKeptId, Stale = true };
+                    : record with { Replaces = null, After = lastKeptId, Stale = true });
             }
             else if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex))
             {
                 if (afterIndex < cutoff)
+                {
+                    changed?.Add(record);
                     continue;
+                }
 
-                changed ??= [.. records];
-                changed[i] = record with { After = afterIndex < keptCount ? afterId : lastKeptId, Stale = true };
+                changed ??= CopyPrefix(records, i);
+
+                if (remadeAt is null)
+                    changed.Add(record with { After = afterIndex < keptCount ? afterId : lastKeptId, Stale = true });
             }
             else if (!ReferencesSurvive(record, survivingIds))
             {
-                changed ??= [.. records];
-                changed[i] = record with { Replaces = null, After = lastKeptId, Stale = true };
+                changed ??= CopyPrefix(records, i);
+
+                if (remadeAt is null || record.Replaces is { Count: >= 2 })
+                    changed.Add(record with { Replaces = null, After = lastKeptId, Stale = true });
+            }
+            else
+            {
+                changed?.Add(record);
             }
         }
 
         return changed ?? records;
+    }
+
+    private static List<ChatRecord> CopyPrefix(IReadOnlyList<ChatRecord> records, int count)
+    {
+        List<ChatRecord> copy = new(records.Count);
+
+        for (var i = 0; i < count; i++)
+            copy.Add(records[i]);
+
+        return copy;
     }
 
     private static HashSet<string> CollectAllMessageIds(IReadOnlyList<ChatMessage> messages)

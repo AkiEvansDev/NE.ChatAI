@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -48,7 +49,8 @@ public sealed class KoboldCppClient(HttpClient http, Uri address)
     /// <summary>How many tokens the model's own tokenizer makes of <paramref name="text"/>: an exact count.</summary>
     public async Task<int> CountTokensAsync(string text, CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await http.PostAsJsonAsync(Endpoint("api/extra/tokencount"), new { prompt = text }, Json, cancellationToken).ConfigureAwait(false);
+        using ByteArrayContent content = JsonBody(new { prompt = text });
+        using HttpResponseMessage response = await http.PostAsync(Endpoint("api/extra/tokencount"), content, cancellationToken).ConfigureAwait(false);
 
         _ = response.EnsureSuccessStatusCode();
 
@@ -62,7 +64,7 @@ public sealed class KoboldCppClient(HttpClient http, Uri address)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        using HttpRequestMessage message = new(HttpMethod.Post, Endpoint("api/extra/generate/stream")) { Content = JsonContent.Create(request, options: Json) };
+        using HttpRequestMessage message = new(HttpMethod.Post, Endpoint("api/extra/generate/stream")) { Content = JsonBody(request) };
         using HttpResponseMessage response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
         _ = response.EnsureSuccessStatusCode();
@@ -97,9 +99,19 @@ public sealed class KoboldCppClient(HttpClient http, Uri address)
     /// <summary>Stops the generation started under <paramref name="genKey"/>; what it made so far is the end of the stream.</summary>
     public async Task AbortAsync(string genKey, CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await http.PostAsJsonAsync(Endpoint("api/extra/abort"), new { genkey = genKey }, Json, cancellationToken).ConfigureAwait(false);
+        using ByteArrayContent content = JsonBody(new { genkey = genKey });
+        using HttpResponseMessage response = await http.PostAsync(Endpoint("api/extra/abort"), content, cancellationToken).ConfigureAwait(false);
 
         _ = response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>koboldcpp's HTTP/1.0 server expects a known <c>Content-Length</c> rather than chunked transfer encoding.</summary>
+    private static ByteArrayContent JsonBody<T>(T value)
+    {
+        ByteArrayContent content = new(JsonSerializer.SerializeToUtf8Bytes(value, Json));
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+
+        return content;
     }
 
     private sealed record ResultAnswer(string? Result);

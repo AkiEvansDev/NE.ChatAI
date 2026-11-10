@@ -218,7 +218,9 @@ internal static class SettingsEditors
                 UIForm.Row(
                     Text("chatai.settings.prompt.example-separator", static x => x.Prompt.Draft.ExampleSeparator, SettingsController.PromptKind),
                     Text("chatai.settings.prompt.chat-start", static x => x.Prompt.Draft.ChatStart, SettingsController.PromptKind)
-                )
+                ),
+                Switch("chatai.generation.include-names", static x => x.Prompt.Draft.IncludeNames, SettingsController.PromptKind)
+                    .SetDescription("chatai.generation.include-names.description")
             ),
             Card("chatai.settings.prompt.thoughts",
                 UIForm.Row(
@@ -398,9 +400,12 @@ internal static class SettingsEditors
             ),
             Card("chatai.import.defaults",
                 UIText.Note("chatai.import.defaults.description"),
-                UIButtons.Outline("chatai.import.defaults.add")
-                    .OnClick(nameof(SettingsController.LayDownDefaultsAsync))
-                    .SetHorizontalAlignment(UIAlignment.Start)
+                UIButtons.Toolbar(
+                    UIButtons.Outline("chatai.import.defaults.add")
+                        .OnClick(nameof(SettingsController.LayDownDefaultsAsync)),
+                    UIButtons.Outline("chatai.import.defaults.restore")
+                        .InteractOn(EventNames.Click, new OpenDialogEffect(SettingsController.RestoreDefaultsDialogKey))
+                )
             )
         );
 

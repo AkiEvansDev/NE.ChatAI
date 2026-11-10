@@ -47,23 +47,32 @@ public sealed record Character : Card
 public sealed record Persona : Card;
 
 /// <summary>
-/// A world, its world info: an overview (the card's description) and its articles, every one that is on put into the prompt as it
-/// is — no keyword triggers — in a chat whose character, or else whose persona, names it.
+/// A world, its world info: an overview (the card's description) and its articles — constant or woken by triggers in recent messages —
+/// in a chat whose character, or else whose persona, names it.
 /// </summary>
 public sealed record World : Card
 {
+    public const int DefaultScanDepth = 4;
+
+    /// <summary>How many recent messages of the chat are scanned for triggered articles.</summary>
     [JsonPropertyOrder(1)]
+    public int ScanDepth { get; init; } = DefaultScanDepth;
+
+    [JsonPropertyOrder(2)]
     public IReadOnlyList<WorldArticle> Articles { get; init; } = [];
 }
 
-/// <summary>One article of a world: a title for the reader, the words the prompt takes, and where.</summary>
+/// <summary>One article of a world: a title for the reader, the words the prompt takes, where they go, and any triggers that wake it.</summary>
 public sealed record WorldArticle
 {
     public string Title { get; init; } = string.Empty;
 
     public string Text { get; init; } = string.Empty;
 
-    /// <summary>Before the card's description (<c>{{wiBefore}}</c>) or after the scenario (<c>{{wiAfter}}</c>).</summary>
+    /// <summary>Keywords that include the article when matched in recent messages; empty, and the article is always on.</summary>
+    public IReadOnlyList<string> Triggers { get; init; } = [];
+
+    /// <summary>Before the card's description (<c>{{wiBefore}}</c>), after the scenario (<c>{{wiAfter}}</c>), or in the history at the note's depth.</summary>
     public LorePosition Position { get; init; } = LorePosition.AfterStory;
 
     public bool Enabled { get; init; } = true;
@@ -72,5 +81,6 @@ public sealed record WorldArticle
 public enum LorePosition
 {
     BeforeStory,
-    AfterStory
+    AfterStory,
+    InHistory
 }

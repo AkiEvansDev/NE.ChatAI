@@ -271,7 +271,25 @@ internal sealed partial class SettingsController
     [UICommand]
     public async Task<UICommandResult> LayDownDefaultsAsync(CancellationToken cancellationToken)
     {
-        var written = await DefaultDocuments.LayDownAsync(Data, cancellationToken).ConfigureAwait(false);
+        var written = await ApplyDefaultsAsync(overwrite: false, cancellationToken).ConfigureAwait(false);
+        UIPhrase said = written == 0 ? new UIPhrase("chatai.import.defaults.none") : UIPhrase.Of("chatai.import.defaults.added", ("count", written.ToString(CultureInfo.InvariantCulture)));
+
+        return UICommandResult.Ok([new ShowNotificationEffect(said, UIColorStyle.Success)]);
+    }
+
+    /// <summary>Overwrites every built-in document in the data folder with the base set's original version; user-created documents stay as they are.</summary>
+    [UICommand]
+    public async Task<UICommandResult> RestoreDefaultsAsync(CancellationToken cancellationToken)
+    {
+        var written = await ApplyDefaultsAsync(overwrite: true, cancellationToken).ConfigureAwait(false);
+        UIPhrase said = UIPhrase.Of("chatai.import.defaults.restored", ("count", written.ToString(CultureInfo.InvariantCulture)));
+
+        return UICommandResult.Ok([new CloseDialogEffect(RestoreDefaultsDialogKey), new ShowNotificationEffect(said, UIColorStyle.Success)]);
+    }
+
+    private async Task<int> ApplyDefaultsAsync(bool overwrite, CancellationToken cancellationToken)
+    {
+        var written = await DefaultDocuments.LayDownAsync(Data, cancellationToken, overwrite).ConfigureAwait(false);
 
         await LoadGenerationAsync(cancellationToken).ConfigureAwait(false);
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
@@ -279,8 +297,6 @@ internal sealed partial class SettingsController
         foreach (var kind in Kinds)
             await ShowAsync(kind, cancellationToken).ConfigureAwait(false);
 
-        UIPhrase said = written == 0 ? new UIPhrase("chatai.import.defaults.none") : UIPhrase.Of("chatai.import.defaults.added", ("count", written.ToString(CultureInfo.InvariantCulture)));
-
-        return UICommandResult.Ok([new ShowNotificationEffect(said, UIColorStyle.Success)]);
+        return written;
     }
 }

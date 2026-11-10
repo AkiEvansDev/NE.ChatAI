@@ -36,6 +36,7 @@ internal sealed class SettingsView : ShellView, IUIViewDefinition
                     .OnEnter(nameof(SettingsController.RenameAsync)),
                 UIButtons.Primary("chatai.settings.rename").OnClick(nameof(SettingsController.RenameAsync))
             ),
-            UIDialogs.BoundConfirm<SettingsController>(SettingsController.DeleteDialogKey, "chatai.settings.delete.title", static x => x.DeleteQuestion, "chatai.settings.delete", nameof(SettingsController.DeleteAsync))
+            UIDialogs.BoundConfirm<SettingsController>(SettingsController.DeleteDialogKey, "chatai.settings.delete.title", static x => x.DeleteQuestion, "chatai.settings.delete", nameof(SettingsController.DeleteAsync)),
+            UIDialogs.Confirm(SettingsController.RestoreDefaultsDialogKey, "chatai.import.defaults.restore.title", (UIPhrase?)"chatai.import.defaults.restore.question", "chatai.import.defaults.restore.confirm", nameof(SettingsController.RestoreDefaultsAsync))
         ];
 }

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,9 +31,6 @@ internal sealed partial class CardRow : RecursiveObservable, IBindableItem, ICon
     [RecursiveMember(false)]
     public RecursiveCollection<TagBadge> Tags { get; } = [];
 
-    [RecursiveMember]
-    public partial UIVisibility TagsVisibility { get; set; } = UIVisibility.Collapsed;
-
     /// <summary>Shown on the persona new chats are started as.</summary>
     [RecursiveMember]
     public partial UIVisibility DefaultVisibility { get; set; } = UIVisibility.Collapsed;
@@ -64,7 +60,6 @@ internal abstract partial class ShellController
     public const string DeletePersonaDialogKey = "chatai-panel-delete-persona";
     public const string DeleteWorldDialogKey = "chatai-panel-delete-world";
     public const string DeleteChatDialogKey = "chatai-panel-delete-chat";
-    private const string EmptyTagFilterId = "__none";
 
     /// <summary>What the last read found, so the panel turns between a character and the list without reading the folder again.</summary>
     private IReadOnlyList<ChatSummary> _chats = [];
@@ -98,18 +93,11 @@ internal abstract partial class ShellController
     private string? _deletingCardList;
     private string? _deletingChatId;
 
-    [RecursiveMember]
-    public partial string CharacterSearch { get; set; } = string.Empty;
-
     [RecursiveMember(false)]
-    public RecursiveCollection<MenuItem> TagFilterItems { get; } = [];
+    public RecursiveCollection<OptionItem> TagFilterOptions { get; } = [];
 
     [RecursiveMember]
     public partial IReadOnlyList<string> TagFilter { get; set; } = [];
-
-    /// <summary>How many tags currently narrow the list, shown on the filter button; <see langword="null"/> when none.</summary>
-    [RecursiveMember]
-    public partial string? TagFilterCount { get; set; }
 
     /// <summary>Which list the panel shows, the switch over it writing it.</summary>
     [RecursiveMember]
@@ -125,26 +113,17 @@ internal abstract partial class ShellController
     [RecursiveMember]
     public partial UIPhrase CharactersEmpty { get; set; } = new("chatai.chats.no-characters");
 
-    [RecursiveMember]
-    public partial UIVisibility CharacterListVisibility { get; set; } = UIVisibility.Visible;
-
     [RecursiveMember(false)]
     public RecursiveCollection<CardRow> PersonaRows { get; } = [];
 
     [RecursiveMember]
     public partial UIPhrase PersonasEmpty { get; set; } = new("chatai.chats.no-personas");
 
-    [RecursiveMember]
-    public partial UIVisibility PersonaListVisibility { get; set; } = UIVisibility.Collapsed;
-
     [RecursiveMember(false)]
     public RecursiveCollection<CardRow> WorldRows { get; } = [];
 
     [RecursiveMember]
     public partial UIPhrase WorldsEmpty { get; set; } = new("chatai.chats.no-worlds");
-
-    [RecursiveMember]
-    public partial UIVisibility WorldListVisibility { get; set; } = UIVisibility.Collapsed;
 
     /// <summary>The lists with their switch, search and tags; a character picked puts them away for its chats.</summary>
     [RecursiveMember]
@@ -208,37 +187,22 @@ internal abstract partial class ShellController
         if (TagFilter.Count > 0)
             TagFilter = [.. TagFilter.Where(tag => knownTags.Contains(tag, StringComparer.OrdinalIgnoreCase))];
 
-        HashSet<string> chosen = new(TagFilter, StringComparer.OrdinalIgnoreCase);
+        TagFilterOptions.Clear();
 
-        TagFilterItems.Clear();
-
-        if (knownTags.Length == 0)
-        {
-            TagFilterItems.Add(new MenuItem { Id = EmptyTagFilterId, Title = "chatai.tags.none", Enabled = false });
-        }
-        else
-        {
-            foreach (var tag in knownTags)
-                TagFilterItems.Add(TagBadges.MenuItemOf(tag, colors, chosen.Contains(tag)));
-        }
+        foreach (var tag in knownTags)
+            TagFilterOptions.Add(TagBadges.OptionOf(tag, colors));
     }
 
-    /// <summary>The three lists as the search and the active list's tags narrow them.</summary>
+    /// <summary>The three card lists.</summary>
     protected void ShowCards()
     {
-        var search = CharacterSearch.Trim();
-        HashSet<string> chosen = new(TagFilter, StringComparer.OrdinalIgnoreCase);
-        HashSet<string> none = [];
-
-        TagFilterCount = chosen.Count > 0 ? chosen.Count.ToString(CultureInfo.InvariantCulture) : null;
-
-        ShowCharacters(search, PanelList == CharactersList ? chosen : none);
-        ShowPersonas(search, PanelList == PersonasList ? chosen : none);
-        ShowWorlds(search, PanelList == WorldsList ? chosen : none);
+        ShowCharacters();
+        ShowPersonas();
+        ShowWorlds();
     }
 
-    /// <summary>The characters let through, the one last talked to first, then the rest by name.</summary>
-    private void ShowCharacters(string search, HashSet<string> chosen)
+    /// <summary>The characters, the one last talked to first, then the rest by name.</summary>
+    private void ShowCharacters()
     {
         Dictionary<string, DateTimeOffset> lastAt = new(StringComparer.Ordinal);
 
@@ -251,7 +215,6 @@ internal abstract partial class ShellController
         CharacterRows.Clear();
 
         IEnumerable<StoredDocument<Character>> shown = _characters
-            .Where(stored => Matches(stored.Document, search, chosen))
             .OrderByDescending(stored => lastAt.GetValueOrDefault(stored.Id, DateTimeOffset.MinValue))
             .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
 
@@ -266,28 +229,23 @@ internal abstract partial class ShellController
         CharactersEmpty = new UIPhrase(_characters.Count == 0 ? "chatai.chats.no-characters" : "chatai.chats.no-match");
     }
 
-    private static bool Matches(Card card, string search, HashSet<string> chosen)
-        => (search.Length == 0 || card.Name.Contains(search, StringComparison.CurrentCultureIgnoreCase)) && (chosen.Count == 0 || card.Tags.Any(chosen.Contains));
-
     /// <summary>A card's row: its picture, its name, its tags in their colours.</summary>
     private static CardRow RowOf(string id, Card card, string? avatar, IReadOnlyDictionary<string, UIThemeColor> tagColors)
     {
         CardRow row = new() { Id = id, Name = card.Name, Avatar = avatar };
 
         TagBadges.Fill(row.Tags, card.Tags, tagColors);
-        row.TagsVisibility = row.Tags.Count == 0 ? UIVisibility.Collapsed : UIVisibility.Visible;
 
         return row;
     }
 
-    /// <summary>The personas let through, the default one first, then the rest by name.</summary>
-    private void ShowPersonas(string search, HashSet<string> chosen)
+    /// <summary>The personas, the default one first, then the rest by name.</summary>
+    private void ShowPersonas()
     {
         PersonaRows.Clear();
 
         var activePersonaId = ActivePersonaId ?? DefaultPersonaId;
         IEnumerable<StoredDocument<Persona>> shown = KnownPersonas
-            .Where(stored => Matches(stored.Document, search, chosen))
             .OrderByDescending(stored => stored.Id == DefaultPersonaId)
             .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
 
@@ -303,13 +261,12 @@ internal abstract partial class ShellController
         PersonasEmpty = new UIPhrase(KnownPersonas.Count == 0 ? "chatai.chats.no-personas" : "chatai.chats.no-match");
     }
 
-    /// <summary>The worlds let through, by name.</summary>
-    private void ShowWorlds(string search, HashSet<string> chosen)
+    /// <summary>The worlds, by name.</summary>
+    private void ShowWorlds()
     {
         WorldRows.Clear();
 
         IEnumerable<StoredDocument<World>> shown = KnownWorlds
-            .Where(stored => Matches(stored.Document, search, chosen))
             .OrderBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
 
         foreach (StoredDocument<World> stored in shown)
@@ -413,30 +370,6 @@ internal abstract partial class ShellController
         return LoadChatsAsync(cancellationToken);
     }
 
-    [UICommand]
-    public void FilterCards()
-        => ShowCards();
-
-    /// <summary>Toggles one tag in the filter menu and narrows the card lists.</summary>
-    [UICommand]
-    public void ToggleTagFilter(string tag)
-    {
-        if (string.IsNullOrWhiteSpace(tag) || tag == EmptyTagFilterId)
-            return;
-
-        HashSet<string> chosen = new(TagFilter, StringComparer.OrdinalIgnoreCase);
-
-        if (!chosen.Remove(tag))
-            _ = chosen.Add(tag);
-
-        TagFilter = [.. chosen];
-
-        foreach (MenuItem item in TagFilterItems)
-            item.Checked = chosen.Contains(item.Id);
-
-        ShowCards();
-    }
-
     /// <summary>The panel turned to the characters, the personas or the worlds; the search and that list's tags narrow it.</summary>
     [UICommand]
     public void SwitchList(string list)
@@ -449,11 +382,7 @@ internal abstract partial class ShellController
             TagFilter = [];
         }
 
-        CharacterListVisibility = PanelList == CharactersList ? UIVisibility.Visible : UIVisibility.Collapsed;
-        PersonaListVisibility = PanelList == PersonasList ? UIVisibility.Visible : UIVisibility.Collapsed;
-        WorldListVisibility = PanelList == WorldsList ? UIVisibility.Visible : UIVisibility.Collapsed;
         ShowTagFilter();
-        ShowCards();
     }
 
     /// <summary>Opens the confirmation dialog before deleting a card from its row in the panel's list.</summary>

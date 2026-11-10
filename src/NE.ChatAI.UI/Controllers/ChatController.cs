@@ -125,9 +125,6 @@ internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableIt
     [RecursiveMember(false)]
     public RecursiveCollection<ChatRecordItem> Records { get; } = [];
 
-    [RecursiveMember]
-    public partial UIVisibility RecordsVisibility { get; set; } = UIVisibility.Collapsed;
-
     /// <summary>The thought as it stands, shown folded unless <paramref name="hidden"/>; <paramref name="thinking"/> while it is written.</summary>
     public void ShowThought(string? thought, bool hidden, bool thinking)
     {
@@ -257,7 +254,10 @@ internal sealed partial class ChatController : ShellController
         if (_generating)
             return;
 
-        var chatId = navigation.TryGetParameter(AppRoutes.ChatParameter, out var named) ? named : (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).LastChat;
+        var chatId = navigation.TryGetParameter(AppRoutes.ChatParameter, out var named) ? named : OpenChatId ?? (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).LastChat;
+
+        if (chatId is not null && chatId == OpenChatId && _chat is not null)
+            return;
 
         if (chatId is not null && await OpenAsync(chatId, cancellationToken).ConfigureAwait(false))
             return;
@@ -304,7 +304,7 @@ internal sealed partial class ChatController : ShellController
             return;
         }
 
-        Background = Pictures.BackgroundOf(_chat?.Character);
+        Background = Pictures.BackgroundOf(_chat?.Character, OpenChatId);
 
         if (_chat is null)
         {
@@ -398,6 +398,7 @@ internal sealed partial class ChatController : ShellController
         ChatSeed = null;
         OpenChatId = null;
         Background = Pictures.BackgroundOf(null);
+        ChatBackground.Show(null);
         EmptyFeed = new UIPhrase("chatai.chat.none");
         ShowCards();
         Messages.Attach(static () => [], ItemOf);
@@ -422,7 +423,8 @@ internal sealed partial class ChatController : ShellController
         ChatSeed = chat.Seed;
         _character = chat.Character is string characterId ? await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
         _personaId = chat.Persona is string own && Slug.IsValidId(own) && Data.Personas.Exists(own) ? own : DefaultPersonaId;
-        Background = Pictures.BackgroundOf(chat.Character);
+        Background = Pictures.BackgroundOf(chat.Character, chatId);
+        ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
         _persona = _personaId is null ? null : await Data.Personas.ReadAsync(_personaId, cancellationToken).ConfigureAwait(false);
         ActivePersonaId = _personaId;
         ActiveWorldId = ResolveActiveWorldId();
@@ -719,7 +721,7 @@ internal sealed partial class ChatController : ShellController
         KoboldCppClient kobold = Context.Services.GetRequiredService<KoboldCppClients>().For(profile.Connection.Address!);
         var genKey = "chatai-" + ChatLibrary.NewMessageId();
         // A continuation goes on from words the model wrote after its thought: what comes is words, with no thought to open.
-        ReplyReader reader = new(job.Kind == ReplyKind.Continuation ? new ThoughtFormat() : profile.Format.Thought);
+        ReplyReader reader = new(job.Kind == ReplyKind.Continuation ? new ThoughtFormat() : profile.Format.Thought, job.Kind == ReplyKind.Continuation ? null : CharacterName);
         var before = job.Continued ?? string.Empty;
         DateTimeOffset started = DateTimeOffset.UtcNow;
         Stopwatch clock = new();
@@ -832,6 +834,7 @@ internal sealed partial class ChatController : ShellController
     {
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         World? world = await WorldInfo.OfAsync(Data, _character, _persona, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<PromptMessage> projectedHistory = ChatRecords.ProjectHistory(history, chat.Records);
         PromptSpec spec = new()
         {
             SystemPrompt = profile.SystemPrompt.Content,
@@ -840,10 +843,10 @@ internal sealed partial class ChatController : ShellController
             CharacterName = CharacterName,
             UserName = UserName,
             Persona = _persona,
-            Lore = WorldInfo.ArticlesOf(world),
+            Lore = WorldInfo.ArticlesOf(world, projectedHistory, continued),
             AuthorsNotes = [settings.AuthorsNote, _character?.AuthorsNote, chat.AuthorsNote],
             NotePlacement = settings.AuthorsNotePlacement,
-            History = ChatRecords.ProjectHistory(history, chat.Records),
+            History = projectedHistory,
             Continuation = continued
         };
 

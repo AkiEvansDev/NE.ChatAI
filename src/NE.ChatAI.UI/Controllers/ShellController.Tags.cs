@@ -58,6 +58,7 @@ internal abstract partial class ShellController
     /// <summary>Every tag known for this kind of card to pick from, and the same in the dialog's list.</summary>
     private async Task ShowTagsAsync(CancellationToken cancellationToken)
     {
+        NewTag = string.Empty;
         IReadOnlyList<KnownTag> known = await TagCatalog.ListAsync(Data, _editingCardScope, cancellationToken).ConfigureAwait(false);
         Dictionary<string, UIThemeColor> colors = TagColorsOf(known);
 
@@ -121,15 +122,6 @@ internal abstract partial class ShellController
         }
 
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    [UICommand]
-    public async Task<UICommandResult> OpenTagsAsync(CancellationToken cancellationToken)
-    {
-        NewTag = string.Empty;
-        await ShowTagsAsync(cancellationToken).ConfigureAwait(false);
-
-        return UICommandResult.Ok([new OpenDialogEffect(TagsDialogKey)]);
     }
 
     /// <summary>Makes the tag named in the dialog and gives it to the card.</summary>

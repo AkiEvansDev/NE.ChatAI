@@ -56,9 +56,9 @@ public static class DefaultDocuments
         return ids;
     }
 
-    /// <summary>Writes each document of the base set the folder holds no document under its id; answers how many it wrote.</summary>
-    /// <remarks>Never over one the folder has: a default the reader changed stays changed, and one deleted comes back only from here.</remarks>
-    public static async Task<int> LayDownAsync(DataFolder data, CancellationToken cancellationToken)
+    /// <summary>Writes each document of the base set the folder holds no document under its id, or all of them when <paramref name="overwrite"/> is <c>true</c>; answers how many it wrote.</summary>
+    /// <remarks>When <paramref name="overwrite"/> is <c>false</c>, never writes over one the folder has: a default the reader changed stays changed, and one deleted comes back only from here.</remarks>
+    public static async Task<int> LayDownAsync(DataFolder data, CancellationToken cancellationToken, bool overwrite = false)
     {
         ArgumentNullException.ThrowIfNull(data);
 
@@ -79,11 +79,11 @@ public static class DefaultDocuments
 
             written += parts[0] switch
             {
-                "instruct" => await LayDownAsync(data.ModelFormats, assembly, resource, parts[1], cancellationToken).ConfigureAwait(false),
-                "sysprompts" => await LayDownAsync(data.SystemPrompts, assembly, resource, parts[1], cancellationToken).ConfigureAwait(false),
-                "prompts" => await LayDownAsync(data.Prompts, assembly, resource, parts[1], cancellationToken).ConfigureAwait(false),
-                "samplers" => await LayDownAsync(data.Samplers, assembly, resource, parts[1], cancellationToken).ConfigureAwait(false),
-                "graphs" => await LayDownAsync(data.Scenarios, assembly, resource, parts[1], cancellationToken).ConfigureAwait(false),
+                "instruct" => await LayDownAsync(data.ModelFormats, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
+                "sysprompts" => await LayDownAsync(data.SystemPrompts, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
+                "prompts" => await LayDownAsync(data.Prompts, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
+                "samplers" => await LayDownAsync(data.Samplers, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
+                "graphs" => await LayDownAsync(data.Scenarios, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
                 _ => 0
             };
         }
@@ -110,7 +110,7 @@ public static class DefaultDocuments
             var id = name["default/graphs/".Length..^Extension.Length];
 
             if (!id.Contains('/', StringComparison.Ordinal))
-                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, cancellationToken).ConfigureAwait(false);
+                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, overwrite: false, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -132,7 +132,7 @@ public static class DefaultDocuments
         {
             if (string.Equals(resource.Replace('\\', '/'), target, StringComparison.Ordinal))
             {
-                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, cancellationToken).ConfigureAwait(false);
+                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, overwrite: false, cancellationToken).ConfigureAwait(false);
                 break;
             }
         }
@@ -140,10 +140,10 @@ public static class DefaultDocuments
         return await data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<int> LayDownAsync<T>(DocumentStore<T> store, Assembly assembly, string resource, string id, CancellationToken cancellationToken)
+    private static async Task<int> LayDownAsync<T>(DocumentStore<T> store, Assembly assembly, string resource, string id, bool overwrite, CancellationToken cancellationToken)
         where T : NamedDocument
     {
-        if (!Slug.IsValidId(id) || store.Exists(id))
+        if (!Slug.IsValidId(id) || (!overwrite && store.Exists(id)))
             return 0;
 
         Stream stream = assembly.GetManifestResourceStream(resource) ?? throw new InvalidOperationException($"The resource '{resource}' is gone.");
