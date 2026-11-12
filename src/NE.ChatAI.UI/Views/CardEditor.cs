@@ -18,10 +18,7 @@ internal static class CardEditor
     private const double SwatchSize = 40;
 
     /// <summary>The picture, aligned to the field boxes of the name and the tags beside it.</summary>
-    /// <remarks>
-    /// The air is the picture's margin, not the grid's spacing: that stands between all twenty-four tracks and squeezed the picture's column to nothing on a phone.
-    /// Uncoloured Surface badges share the filled input's <c>--ui-color-surface</c> background and read lower than coloured ones (<c>NE.Standard-private#281</c>).
-    /// </remarks>
+    /// <remarks>The air is the picture's margin, not the grid's spacing: that stands between all twenty-four tracks and squeezed the picture's column to nothing on a phone.</remarks>
     public static ContainerComponent CreateHead()
         => new ContainerComponent()
             .SetColumn(1, UIGridUnit.Auto())
@@ -175,10 +172,7 @@ internal static class CardEditor
     /// Every tag known on a line — the swatch its colour is picked from, its name kept as it lets go with its delete inside — under
     /// the field a new one is made in; each change is every card's.
     /// </summary>
-    /// <remarks>
-    /// Opacity is on so setting it to zero clears a tag's colour back to the default transparent badge; the palette tab's factor value
-    /// and white selection border are tracked in NE.Standard-private#280.
-    /// </remarks>
+    /// <remarks>Opacity is on so setting it to zero clears a tag's colour back to the default transparent badge.</remarks>
     private static UIDialog CreateTagsDialog()
         => UIDialogs.Create(ShellController.TagsDialogKey, "chatai.tags.title", UILayout.Stack(16,
                 new TextInputComponent()

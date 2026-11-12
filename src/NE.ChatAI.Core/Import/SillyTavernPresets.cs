@@ -92,7 +92,7 @@ public static class SillyTavernImport
     /// <summary>Everything in <paramref name="element"/> but <paramref name="read"/>, under one field, so the document stays readable.</summary>
     private static Dictionary<string, JsonElement>? Kept(JsonElement element, string[] read)
     {
-        Dictionary<string, JsonElement> kept = new(StringComparer.Ordinal);
+        Dictionary<string, JsonElement> kept = [with(StringComparer.Ordinal)];
 
         foreach (JsonProperty property in element.EnumerateObject())
         {

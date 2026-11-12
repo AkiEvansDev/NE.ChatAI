@@ -47,7 +47,7 @@ public sealed class TokenCache
     /// <summary>Past this many texts the cache starts over rather than grow with a long session.</summary>
     private const int MaxEntries = 20_000;
 
-    private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _counts = [with(StringComparer.Ordinal)];
     private readonly Lock _gate = new();
     private string? _model;
 

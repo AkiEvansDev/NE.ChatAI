@@ -120,7 +120,7 @@ public static class PromptBuilder
         var replySpeaker = spec.ReplySpeaker ?? characterName;
         Dictionary<string, string> names = new(StringComparer.OrdinalIgnoreCase) { ["char"] = characterName, ["user"] = userName };
         Dictionary<string, string> values = Values(spec, names);
-        Dictionary<string, StringBuilder> contributions = new(StringComparer.Ordinal);
+        Dictionary<string, StringBuilder> contributions = [with(StringComparer.Ordinal)];
 
         var story = Macros.Render(spec.Prompt.StoryString, values, (macro, value) => Contribute(contributions, macro, value));
         var examplesInStory = contributions.ContainsKey(PromptBlocks.Examples);
@@ -151,7 +151,7 @@ public static class PromptBuilder
             ? spec.Continuation ?? string.Empty
             : spec.Continuation is string words ? effectiveFormat.Continuing(replySpeaker, words) : bareOpening;
 
-        Dictionary<string, int> blocks = new(StringComparer.Ordinal);
+        Dictionary<string, int> blocks = [with(StringComparer.Ordinal)];
         var topTokens = await counter.CountAsync(topTurn, cancellationToken).ConfigureAwait(false);
         var loreTokens = await counter.CountAsync(loreTurn, cancellationToken).ConfigureAwait(false);
         var noteTokens = await counter.CountAsync(noteTurn, cancellationToken).ConfigureAwait(false);

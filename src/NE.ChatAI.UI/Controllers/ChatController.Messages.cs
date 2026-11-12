@@ -58,6 +58,7 @@ internal sealed partial class ChatController
             _editingId = messageId;
             _editingNew = asNew;
             Messages.Held(messageId)?.ShowEditor(asNew ? string.Empty : message.Current.Text);
+            RefreshRealizedRecords();
         }, cancellationToken).ConfigureAwait(false);
 
         return busy ? Notify("chatai.chat.busy", UIColorStyle.Info) : UICommandResult.Ok();
@@ -87,18 +88,23 @@ internal sealed partial class ChatController
                 return;
             }
 
-            chatId = OpenChatId;
-            _chat = changed = _editingNew ? ChatEditing.AddVariant(_chat, messageId, new MessageVariant { Text = text }, null) : ChatEditing.Edit(_chat, messageId, text);
+            var asNew = _editingNew;
+            Chat previous = _chat;
 
-            if (_editingNew)
+            _editingId = null;
+            _editingNew = false;
+            item.ShowEditor(null);
+
+            chatId = OpenChatId;
+            _chat = asNew ? ChatEditing.AddVariant(previous, messageId, new MessageVariant { Text = text }, null) : ChatEditing.Edit(previous, messageId, text);
+            changed = ReferenceEquals(_chat, previous) ? null : _chat;
+
+            if (asNew)
                 Messages.Reread();
 
             RefreshRealizedRecords();
             RefreshLoadedStatistics();
-            item.ShowEditor(null);
             ShowMessage(messageId);
-            _editingId = null;
-            _editingNew = false;
             ShowLastActions();
         }, cancellationToken).ConfigureAwait(false);
 
@@ -133,6 +139,7 @@ internal sealed partial class ChatController
             }
 
             Messages.Held(messageId)?.ShowEditor(null);
+            RefreshRealizedRecords();
         }, cancellationToken).ConfigureAwait(false);
 
     /// <summary>The editor's Delete: the question before this one message leaves the chat.</summary>

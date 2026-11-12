@@ -38,7 +38,7 @@ public static class DefaultDocuments
 
     private static HashSet<string> ReadBuiltInIds()
     {
-        HashSet<string> ids = new(StringComparer.Ordinal);
+        HashSet<string> ids = [with(StringComparer.Ordinal)];
 
         foreach (var resource in typeof(DefaultDocuments).Assembly.GetManifestResourceNames())
         {

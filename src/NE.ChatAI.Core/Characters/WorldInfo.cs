@@ -68,7 +68,7 @@ public static class WorldInfo
         if (candidates is not null)
             ActivateTriggered(candidates, active, ScanWindow(history, continuation, world.ScanDepth));
 
-        List<WorldArticle> articles = new(count + 1);
+        List<WorldArticle> articles = [with(count + 1)];
 
         if (!string.IsNullOrWhiteSpace(world.Description))
             articles.Add(new WorldArticle { Title = world.Name, Text = world.Description });

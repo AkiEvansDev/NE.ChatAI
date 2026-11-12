@@ -152,6 +152,6 @@ public sealed class SecretStore : IDisposable
 
     private sealed record SecretsFile : Document
     {
-        public Dictionary<string, string> Secrets { get; init; } = new(StringComparer.Ordinal);
+        public Dictionary<string, string> Secrets { get; init; } = [with(StringComparer.Ordinal)];
     }
 }

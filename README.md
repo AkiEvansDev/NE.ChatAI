@@ -39,7 +39,7 @@ Settings and content live in `data/` next to the application by default. Environ
 
 ## Building from source
 
-Requires the .NET 10 SDK pinned in [`global.json`](global.json).
+Requires the .NET 11 SDK pinned in [`global.json`](global.json).
 
 ```sh
 dotnet build --configuration Release

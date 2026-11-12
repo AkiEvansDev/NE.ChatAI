@@ -16,7 +16,7 @@ public static class PngText
     /// <summary>Every text chunk's keyword and text; a later chunk of the same keyword wins. Not a PNG, and it is empty.</summary>
     public static IReadOnlyDictionary<string, string> Read(ReadOnlySpan<byte> file)
     {
-        Dictionary<string, string> texts = new(StringComparer.Ordinal);
+        Dictionary<string, string> texts = [with(StringComparer.Ordinal)];
 
         if (!IsPng(file))
             return texts;

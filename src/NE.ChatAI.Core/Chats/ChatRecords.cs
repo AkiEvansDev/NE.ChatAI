@@ -20,7 +20,7 @@ public static class ChatRecords
     public static IReadOnlyList<PromptMessage> ProjectHistory(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records)
     {
         IReadOnlyList<ChatProjectedTurn> projected = Project(messages, records);
-        List<PromptMessage> history = new(projected.Count);
+        List<PromptMessage> history = [with(projected.Count)];
 
         for (var i = 0; i < projected.Count; i++)
             history.Add(projected[i].Message);
@@ -55,7 +55,7 @@ public static class ChatRecords
             {
                 replacements.Add((first, last, i, record));
             }
-            else if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex))
+            else if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex) && IsVariantActive(record, messages[afterIndex]))
             {
                 if (!insertions.TryGetValue(afterIndex, out List<ChatRecord>? list))
                     insertions[afterIndex] = list = [];
@@ -80,7 +80,7 @@ public static class ChatRecords
             return byEnd != 0 ? byEnd : right.Order.CompareTo(left.Order);
         });
 
-        List<ChatProjectedTurn> turns = new(messages.Count + insertions.Count);
+        List<ChatProjectedTurn> turns = [with(messages.Count + insertions.Count)];
         var repCursor = 0;
 
         for (var i = 0; i < messages.Count; i++)
@@ -91,7 +91,7 @@ public static class ChatRecords
             if (repCursor < replacements.Count && replacements[repCursor].First == i)
             {
                 (var first, var last, _, ChatRecord record) = replacements[repCursor];
-                turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, record.Text, record.Thought), messages[first].Id, messages[last].Id, record.Id));
+                turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, FormatRecordText(record), record.Thought), messages[first].Id, messages[last].Id, record.Id));
                 AppendInsertions(turns, insertions, last, messages[last].Id);
                 i = last;
                 continue;
@@ -107,7 +107,7 @@ public static class ChatRecords
 
     private static List<ChatProjectedTurn> RawTurns(IReadOnlyList<ChatMessage> messages)
     {
-        List<ChatProjectedTurn> turns = new(messages.Count);
+        List<ChatProjectedTurn> turns = [with(messages.Count)];
 
         for (var i = 0; i < messages.Count; i++)
         {
@@ -141,6 +141,19 @@ public static class ChatRecords
             && first <= last;
     }
 
+    private static bool IsVariantActive(ChatRecord record, ChatMessage message)
+        => record.Variant is not int variant || ChatEditing.Shown(message) == variant;
+
+    private static string FormatRecordText(ChatRecord record)
+    {
+        if (string.IsNullOrWhiteSpace(record.Template))
+            return record.Text;
+
+        return record.Template.Contains("{0}", StringComparison.Ordinal)
+            ? record.Template.Replace("{0}", record.Text, StringComparison.Ordinal)
+            : $"{record.Template}\n{record.Text}";
+    }
+
     private static void AppendInsertions(List<ChatProjectedTurn> turns, Dictionary<int, List<ChatRecord>> insertions, int index, string messageId)
     {
         if (!insertions.TryGetValue(index, out List<ChatRecord>? list))
@@ -149,7 +162,7 @@ public static class ChatRecords
         for (var i = 0; i < list.Count; i++)
         {
             ChatRecord record = list[i];
-            turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, record.Text, record.Thought), messageId, messageId, record.Id));
+            turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, FormatRecordText(record), record.Thought), messageId, messageId, record.Id));
         }
     }
 
@@ -169,7 +182,7 @@ public static class ChatRecords
         if (start >= end)
             return new ChatHistorySlice([], null, null);
 
-        List<PromptMessage> sliced = new(end - start);
+        List<PromptMessage> sliced = [with(end - start)];
 
         for (var i = start; i < end; i++)
             sliced.Add(source[i].Message);
@@ -177,7 +190,7 @@ public static class ChatRecords
         return new ChatHistorySlice(sliced, source[start].FirstMessageId, source[end - 1].LastMessageId);
     }
 
-    /// <summary>The message id in <paramref name="messages"/> under which <paramref name="record"/>'s folded block stands, or <c>null</c> when its messages sit in another variant's tail.</summary>
+    /// <summary>The message id in <paramref name="messages"/> under which <paramref name="record"/>'s folded block stands, or <c>null</c> when its messages sit in another variant's tail or another variant of that message.</summary>
     public static string? AnchorMessageId(ChatRecord record, IReadOnlyList<ChatMessage> messages)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -191,7 +204,14 @@ public static class ChatRecords
             return first >= 0 && last >= first ? range[^1] : null;
         }
 
-        return record.After is string afterId && ChatEditing.IndexOf(messages, afterId) >= 0 ? afterId : null;
+        if (record.After is string afterId)
+        {
+            var at = ChatEditing.IndexOf(messages, afterId);
+
+            return at >= 0 && IsVariantActive(record, messages[at]) ? afterId : null;
+        }
+
+        return null;
     }
 
     /// <summary>Finds the active timeline's latest record carrying <paramref name="tag"/>, stale or current; <c>null</c> when none matches.</summary>
@@ -230,7 +250,7 @@ public static class ChatRecords
 
         for (var i = 0; i < written.Count; i++)
         {
-            ChatRecord incoming = NormalizeTag(written[i]);
+            ChatRecord incoming = NormalizeRecord(written[i], chat.Messages);
             var replaced = false;
 
             if (incoming.Tag is string tag)
@@ -261,17 +281,49 @@ public static class ChatRecords
         return chat with { Records = records, Generations = allGenerations };
     }
 
-    private static ChatRecord NormalizeTag(ChatRecord record)
+    private static ChatRecord NormalizeRecord(ChatRecord record, IReadOnlyList<ChatMessage> messages)
     {
         var trimmed = string.IsNullOrWhiteSpace(record.Tag) ? null : record.Tag.Trim();
         var text = record.Text.TrimEnd('\r', '\n');
         var thought = record.Thought?.TrimEnd('\r', '\n');
+        var variant = record.Variant;
+
+        if (variant is null && record.Replaces is not { Count: >= 2 } && record.After is string afterId)
+        {
+            var at = ChatEditing.IndexOf(messages, afterId);
+
+            if (at >= 0)
+                variant = ChatEditing.Shown(messages[at]);
+        }
 
         return string.Equals(record.Tag, trimmed, StringComparison.Ordinal)
             && string.Equals(record.Text, text, StringComparison.Ordinal)
             && string.Equals(record.Thought, thought, StringComparison.Ordinal)
+            && record.Variant == variant
             ? record
-            : record with { Tag = trimmed, Text = text, Thought = thought };
+            : record with { Tag = trimmed, Text = text, Thought = thought, Variant = variant };
+    }
+
+    /// <summary>Stamps <paramref name="variant"/> on any insertion record anchored to <paramref name="messageId"/> that was saved without an explicit variant index.</summary>
+    internal static IReadOnlyList<ChatRecord> PinVariantRecords(IReadOnlyList<ChatRecord> records, string messageId, int variant)
+    {
+        if (records.Count == 0)
+            return records;
+
+        List<ChatRecord>? changed = null;
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            ChatRecord record = records[i];
+
+            if (record.Replaces is { Count: >= 2 } || record.Variant is not null || !string.Equals(record.After, messageId, StringComparison.Ordinal))
+                continue;
+
+            changed ??= [.. records];
+            changed[i] = record with { Variant = variant };
+        }
+
+        return changed ?? records;
     }
 
     /// <summary>Updates a record's text and marks it current again.</summary>
@@ -335,7 +387,7 @@ public static class ChatRecords
                 continue;
 
             var hit = (TryResolveRange(record, indexById, out var first, out var last) && first <= editedAt && editedAt <= last)
-                || (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex) && afterIndex == editedAt);
+                || (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex) && afterIndex == editedAt && IsVariantActive(record, messages[editedAt]));
 
             if (!hit)
                 continue;
@@ -347,7 +399,7 @@ public static class ChatRecords
         return changed ?? records;
     }
 
-    /// <summary>Marks stale and re-anchors any active record covering or following the deleted message at <paramref name="deletedAt"/>.</summary>
+    /// <summary>Marks stale any replacement covering the deleted message at <paramref name="deletedAt"/> and drops insertion or replacement records whose messages are gone.</summary>
     internal static IReadOnlyList<ChatRecord> OnMessageDeleted(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatRecord> records, int deletedAt, IReadOnlyList<ChatMessage> after)
     {
         if (records.Count == 0)
@@ -357,7 +409,7 @@ public static class ChatRecords
             return [];
 
         Dictionary<string, int> indexById = IndexMap(before);
-        var fallbackAfterId = deletedAt > 0 ? before[deletedAt - 1].Id : after[0].Id;
+        HashSet<string> survivingIds = CollectAllMessageIds(after);
         List<ChatRecord>? changed = null;
 
         for (var i = 0; i < records.Count; i++)
@@ -366,24 +418,72 @@ public static class ChatRecords
 
             if (TryResolveRange(record, indexById, out var first, out var last) && first <= deletedAt && deletedAt <= last)
             {
-                changed ??= [.. records];
+                changed ??= CopyPrefix(records, i);
 
-                changed[i] = first == last
-                    ? record with { Replaces = null, After = fallbackAfterId, Stale = true }
-                    : deletedAt == first
-                        ? record with { Replaces = [before[first + 1].Id, before[last].Id], Stale = true }
-                        : deletedAt == last
-                            ? record with { Replaces = [before[first].Id, before[last - 1].Id], Stale = true }
-                            : record with { Stale = true };
+                if (first == last)
+                    continue;
+
+                changed.Add(deletedAt == first
+                    ? record with { Replaces = [before[first + 1].Id, before[last].Id], Stale = true }
+                    : deletedAt == last
+                        ? record with { Replaces = [before[first].Id, before[last - 1].Id], Stale = true }
+                        : record with { Stale = true });
             }
             else if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex) && afterIndex == deletedAt)
             {
-                changed ??= [.. records];
-                changed[i] = record with { After = fallbackAfterId, Stale = true };
+                changed ??= CopyPrefix(records, i);
+            }
+            else if (!ReferencesSurvive(record, survivingIds))
+            {
+                changed ??= CopyPrefix(records, i);
+            }
+            else
+            {
+                changed?.Add(record);
             }
         }
 
         return changed ?? records;
+    }
+
+    private static HashSet<string> CollectAllMessageIds(IReadOnlyList<ChatMessage> messages)
+    {
+        HashSet<string> ids = [with(StringComparer.Ordinal)];
+        AddMessageIds(messages, ids);
+        return ids;
+    }
+
+    private static void AddMessageIds(IReadOnlyList<ChatMessage> messages, HashSet<string> ids)
+    {
+        for (var i = 0; i < messages.Count; i++)
+        {
+            ChatMessage message = messages[i];
+            _ = ids.Add(message.Id);
+
+            for (var j = 0; j < message.Variants.Count; j++)
+            {
+                if (message.Variants[j].Tail is { Count: > 0 } tail)
+                    AddMessageIds(tail, ids);
+            }
+        }
+    }
+
+    private static List<ChatRecord> CopyPrefix(IReadOnlyList<ChatRecord> records, int count)
+    {
+        List<ChatRecord> copy = [with(records.Count)];
+
+        for (var i = 0; i < count; i++)
+            copy.Add(records[i]);
+
+        return copy;
+    }
+
+    private static bool ReferencesSurvive(ChatRecord record, HashSet<string> survivingIds)
+    {
+        if (record.Replaces is { Count: >= 2 } range)
+            return survivingIds.Contains(range[0]) && survivingIds.Contains(range[^1]);
+
+        return record.After is string afterId && survivingIds.Contains(afterId);
     }
 
     /// <summary>Removes insertion records (<see cref="ChatRecord.After"/>) anchored at or after <paramref name="fromAt"/> when a message is refreshed.</summary>
@@ -404,17 +504,11 @@ public static class ChatRecords
             var drop = record.Replaces is not { Count: >= 2 }
                 && record.After is string afterId
                 && indexById.TryGetValue(afterId, out var afterIndex)
-                && afterIndex >= fromAt;
+                && (afterIndex > fromAt || (afterIndex == fromAt && IsVariantActive(record, messages[fromAt])));
 
             if (drop)
             {
-                if (kept is null)
-                {
-                    kept = new List<ChatRecord>(records.Count - 1);
-
-                    for (var j = 0; j < i; j++)
-                        kept.Add(records[j]);
-                }
+                kept ??= CopyPrefix(records, i);
             }
             else
             {
@@ -425,7 +519,7 @@ public static class ChatRecords
         return kept ?? records;
     }
 
-    /// <summary>Marks stale and clamps any record touched or left behind when the chat is remade or rolled back.</summary>
+    /// <summary>Marks stale and clamps any replacement touched when the chat is remade or rolled back, dropping records whose messages are gone.</summary>
     internal static IReadOnlyList<ChatRecord> OnRolledBack(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatRecord> records, IReadOnlyList<ChatMessage> after, int? remadeAt = null)
     {
         if (records.Count == 0)
@@ -438,7 +532,6 @@ public static class ChatRecords
         HashSet<string> survivingIds = CollectAllMessageIds(after);
         var keptCount = after.Count;
         var cutoff = remadeAt ?? keptCount;
-        var lastKeptId = after[^1].Id;
         List<ChatRecord>? changed = null;
 
         for (var i = 0; i < records.Count; i++)
@@ -454,29 +547,23 @@ public static class ChatRecords
                 }
 
                 changed ??= CopyPrefix(records, i);
-                changed.Add(first < keptCount
-                    ? record with { Replaces = [before[first].Id, after[Math.Min(last, keptCount - 1)].Id], Stale = true }
-                    : record with { Replaces = null, After = lastKeptId, Stale = true });
+
+                if (first < keptCount)
+                    changed.Add(record with { Replaces = [before[first].Id, after[Math.Min(last, keptCount - 1)].Id], Stale = true });
             }
             else if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex))
             {
-                if (afterIndex < cutoff)
+                if (afterIndex < cutoff || (afterIndex == cutoff && remadeAt is int remade && !IsVariantActive(record, before[remade])))
                 {
                     changed?.Add(record);
                     continue;
                 }
 
                 changed ??= CopyPrefix(records, i);
-
-                if (remadeAt is null)
-                    changed.Add(record with { After = afterIndex < keptCount ? afterId : lastKeptId, Stale = true });
             }
             else if (!ReferencesSurvive(record, survivingIds))
             {
                 changed ??= CopyPrefix(records, i);
-
-                if (remadeAt is null || record.Replaces is { Count: >= 2 })
-                    changed.Add(record with { Replaces = null, After = lastKeptId, Stale = true });
             }
             else
             {
@@ -485,46 +572,6 @@ public static class ChatRecords
         }
 
         return changed ?? records;
-    }
-
-    private static List<ChatRecord> CopyPrefix(IReadOnlyList<ChatRecord> records, int count)
-    {
-        List<ChatRecord> copy = new(records.Count);
-
-        for (var i = 0; i < count; i++)
-            copy.Add(records[i]);
-
-        return copy;
-    }
-
-    private static HashSet<string> CollectAllMessageIds(IReadOnlyList<ChatMessage> messages)
-    {
-        HashSet<string> ids = new(StringComparer.Ordinal);
-        AddMessageIds(messages, ids);
-        return ids;
-    }
-
-    private static void AddMessageIds(IReadOnlyList<ChatMessage> messages, HashSet<string> ids)
-    {
-        for (var i = 0; i < messages.Count; i++)
-        {
-            ChatMessage message = messages[i];
-            _ = ids.Add(message.Id);
-
-            for (var j = 0; j < message.Variants.Count; j++)
-            {
-                if (message.Variants[j].Tail is { Count: > 0 } tail)
-                    AddMessageIds(tail, ids);
-            }
-        }
-    }
-
-    private static bool ReferencesSurvive(ChatRecord record, HashSet<string> survivingIds)
-    {
-        if (record.Replaces is { Count: >= 2 } range)
-            return survivingIds.Contains(range[0]) && survivingIds.Contains(range[^1]);
-
-        return record.After is string afterId && survivingIds.Contains(afterId);
     }
 
     /// <summary>Keeps records belonging up to <paramref name="upToAt"/> for a branched chat, marking partial ranges stale and dropping future records.</summary>
@@ -536,7 +583,7 @@ public static class ChatRecords
         Dictionary<string, int> indexById = IndexMap(before);
         HashSet<string> survivingIds = CollectAllMessageIds(after);
         var lastKeptId = after[^1].Id;
-        List<ChatRecord> kept = new(records.Count);
+        List<ChatRecord> kept = [with(records.Count)];
 
         for (var i = 0; i < records.Count; i++)
         {

@@ -13,9 +13,6 @@ namespace NE.ChatAI.Views;
 /// </summary>
 internal static class SettingsEditors
 {
-    /// <summary>The code input's language for SillyTavern's macros; its tokenizer is the web host's <c>Client/macros.js</c>.</summary>
-    public const string MacroLanguage = "macros";
-
     /// <summary>What concerns the whole application rather than a document: the language, the theme, the message surface and the picture behind a chat whose character has none of its own.</summary>
     public static CardComponent CreateGeneral()
         => Card(null,
@@ -196,19 +193,39 @@ internal static class SettingsEditors
             .BindValue(value)
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
-    /// <summary>A text with macros in it, highlighted by the web host's script under <see cref="MacroLanguage"/>.</summary>
+    /// <summary>A Markdown field with roleplay speech, narration and SillyTavern macro styling and completions.</summary>
     /// <remarks>Filled named here: a code input starts ghost, as a listing to read, and here it stands among the form's filled fields.</remarks>
     public static CodeInputComponent MacroInput(string? title, int rows)
     {
-        CodeInputComponent input = new CodeInputComponent()
-            .SetLanguage(MacroLanguage)
+        CodeInputComponent input = StyleMacroCode(new CodeInputComponent())
             .SetAppearance(UIInputAppearance.Filled)
             .SetRows(rows)
             .SetWrapLines(true)
             .SetStatusBar(false)
-            .SetLineNumbers(false);
+            .SetLineNumbers(false)
+            .SetCompletionTriggers("{{")
+            .SetCompletionItems(MacroCompletions);
 
         return title is null ? input : input.SetTitle(title);
+    }
+
+    /// <summary>Styles a Markdown code input for roleplay prompts and cards: muted italic narration, accent speech, macros and section markers.</summary>
+    public static CodeInputComponent StyleMacroCode(CodeInputComponent input)
+    {
+        UIMarkdownTextStyle speech = new() { Color = UIThemeColor.Accent };
+        UIMarkdownTextStyle macro = new() { Color = UIThemeColor.Danger };
+        UIMarkdownTextStyle marker = new() { Color = UIThemeColor.Warning, FontWeight = 600 };
+
+        return input
+            .SetLanguage(UICodeLanguages.Markdown)
+            .SetMarkStyle(UIMarkdownMark.Emphasis, new UIMarkdownTextStyle { Color = UIThemeColor.Muted })
+            .SetMarkStyle(UIMarkdownMark.Link, new UIMarkdownTextStyle { Color = UIThemeColor.Primary })
+            .AddSpanStyle("\"", "\"", speech)
+            .AddSpanStyle("“", "”", speech)
+            .AddSpanStyle("«", "»", speech)
+            .AddSpanStyle("{{", "}}", macro)
+            .AddSpanStyle("[", "]", new UIMarkdownTextStyle { Color = UIThemeColor.Warning })
+            .AddTokenStyle("<START>", marker);
     }
 
     public static StackPanelComponent CreatePrompt()
@@ -433,5 +450,29 @@ internal static class SettingsEditors
     [
         new() { Id = "Folded", Title = "chatai.settings.prompt.thought.folded" },
         new() { Id = "Hidden", Title = "chatai.settings.prompt.thought.hidden" }
+    ];
+
+    private static readonly UICodeCompletion[] MacroCompletions =
+    [
+        new() { Label = "{{char}}", Detail = "Character name", Kind = "regex" },
+        new() { Label = "{{user}}", Detail = "Persona name", Kind = "regex" },
+        new() { Label = "{{system}}", Detail = "System prompt", Kind = "regex" },
+        new() { Label = "{{original}}", Detail = "Preset system prompt", Kind = "regex" },
+        new() { Label = "{{description}}", Detail = "Character description", Kind = "regex" },
+        new() { Label = "{{personality}}", Detail = "Character personality", Kind = "regex" },
+        new() { Label = "{{scenario}}", Detail = "Character scenario", Kind = "regex" },
+        new() { Label = "{{persona}}", Detail = "Persona description", Kind = "regex" },
+        new() { Label = "{{loreBefore}}", Detail = "World info before story", Kind = "regex" },
+        new() { Label = "{{loreAfter}}", Detail = "World info after story", Kind = "regex" },
+        new() { Label = "{{wiBefore}}", Detail = "World info before story", Kind = "regex" },
+        new() { Label = "{{wiAfter}}", Detail = "World info after story", Kind = "regex" },
+        new() { Label = "{{mesExamples}}", Detail = "Formatted example dialogues", Kind = "regex" },
+        new() { Label = "{{mesExamplesRaw}}", Detail = "Raw example dialogues", Kind = "regex" },
+        new() { Label = "{{newline}}", Detail = "Line break", Kind = "regex" },
+        new() { Label = "{{noop}}", Detail = "Empty placeholder", Kind = "regex" },
+        new() { Label = "{{trim}}", Detail = "Trim surrounding whitespace", Kind = "regex" },
+        new() { Label = "{{#if …}}", InsertText = "{{#if ", Detail = "Conditional block", Kind = "meta" },
+        new() { Label = "{{else}}", Detail = "Else branch", Kind = "meta" },
+        new() { Label = "{{/if}}", Detail = "End conditional block", Kind = "meta" }
     ];
 }

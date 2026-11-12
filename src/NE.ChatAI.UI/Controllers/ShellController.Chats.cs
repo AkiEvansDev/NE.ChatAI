@@ -64,9 +64,9 @@ internal abstract partial class ShellController
     /// <summary>What the last read found, so the panel turns between a character and the list without reading the folder again.</summary>
     private IReadOnlyList<ChatSummary> _chats = [];
     private IReadOnlyList<StoredDocument<Character>> _characters = [];
-    private Dictionary<string, UIThemeColor> _characterTagColors = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, UIThemeColor> _personaTagColors = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, UIThemeColor> _worldTagColors = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, UIThemeColor> _characterTagColors = [with(StringComparer.OrdinalIgnoreCase)];
+    private Dictionary<string, UIThemeColor> _personaTagColors = [with(StringComparer.OrdinalIgnoreCase)];
+    private Dictionary<string, UIThemeColor> _worldTagColors = [with(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>The persona new chats are started as; none, and the reader is "User".</summary>
     protected string? DefaultPersonaId { get; private set; }
@@ -204,7 +204,7 @@ internal abstract partial class ShellController
     /// <summary>The characters, the one last talked to first, then the rest by name.</summary>
     private void ShowCharacters()
     {
-        Dictionary<string, DateTimeOffset> lastAt = new(StringComparer.Ordinal);
+        Dictionary<string, DateTimeOffset> lastAt = [with(StringComparer.Ordinal)];
 
         foreach (ChatSummary chat in _chats)
         {

@@ -292,7 +292,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
     [GraphInput(Title = "Samplers", ChoicesKey = SamplerChoicesKey, Placeholder = "From connection", Description = "Sampler preset to run with, or the connection's own preset.")]
     public string Samplers { get; set; } = string.Empty;
 
-    [GraphInput(Title = "Thinking", NoPin = true)]
+    [GraphInput(Title = "Thinking")]
     public ScenarioThinking Thinking { get; set; } = ScenarioThinking.FromProfile;
 
     [GraphInput(Title = "Override reply length", NoPin = true)]
@@ -599,11 +599,14 @@ internal sealed class ReplaceRecordNode : IGraphNode
     [GraphInput(Title = "Text", PinOnly = true)]
     public string Text { get; set; } = string.Empty;
 
-    [GraphInput(Title = "Role", NoPin = true)]
+    [GraphInput(Title = "Role")]
     public MessageRole Role { get; set; } = MessageRole.System;
 
     [GraphInput(Title = "Tag", MaxLength = 80)]
     public string Tag { get; set; } = string.Empty;
+
+    [GraphInput(Title = "Template", MaxLines = 3, Placeholder = "{0}", Description = "Wraps the record when sent in the prompt; {0} is the record text.")]
+    public string Template { get; set; } = string.Empty;
 
     public void Execute(UINodeRunContext context)
     {
@@ -631,6 +634,7 @@ internal sealed class ReplaceRecordNode : IGraphNode
             Replaces = [firstId, lastId],
             Role = Role,
             Text = cleaned,
+            Template = string.IsNullOrWhiteSpace(Template) ? null : Template.Trim(),
             Thought = scope.LastThought,
             Generation = scope.LastGenerationId
         });
@@ -649,11 +653,14 @@ internal sealed class InsertRecordNode : IGraphNode
     [GraphInput(Title = "Slice", PinOnly = true)]
     public MessageSlice? Slice { get; set; }
 
-    [GraphInput(Title = "Role", NoPin = true)]
+    [GraphInput(Title = "Role")]
     public MessageRole Role { get; set; } = MessageRole.System;
 
     [GraphInput(Title = "Tag", MaxLength = 80)]
     public string Tag { get; set; } = string.Empty;
+
+    [GraphInput(Title = "Template", MaxLines = 3, Placeholder = "{0}", Description = "Wraps the record when sent in the prompt; {0} is the record text.")]
+    public string Template { get; set; } = string.Empty;
 
     public void Execute(UINodeRunContext context)
     {
@@ -681,6 +688,7 @@ internal sealed class InsertRecordNode : IGraphNode
             After = afterId,
             Role = Role,
             Text = cleaned,
+            Template = string.IsNullOrWhiteSpace(Template) ? null : Template.Trim(),
             Thought = scope.LastThought,
             Generation = scope.LastGenerationId
         });

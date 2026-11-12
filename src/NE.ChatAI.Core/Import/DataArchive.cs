@@ -239,7 +239,7 @@ public static class DataArchive
         var personas = 0;
         var worlds = 0;
         var chats = 0;
-        HashSet<string> validCards = new(StringComparer.Ordinal);
+        HashSet<string> validCards = [with(StringComparer.Ordinal)];
         List<(string Folder, string Id, string FileName, byte[] Content)> companionFiles = [];
         List<(string Id, string Ext, byte[] Content)> chatPictures = [];
 
@@ -336,7 +336,7 @@ public static class DataArchive
 
     private static async Task<Dictionary<string, byte[]>> ReadEntriesAsync(ReadOnlyMemory<byte> archiveBytes, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = new(StringComparer.Ordinal);
+        Dictionary<string, byte[]> entries = [with(StringComparer.Ordinal)];
 
         try
         {
@@ -383,7 +383,7 @@ public static class DataArchive
     {
         var normalized = fullName.Replace('\\', '/').Trim('/');
 
-        if (normalized.Length == 0 || fullName.EndsWith('/') || fullName.EndsWith('\\') || normalized.Contains(':', StringComparison.Ordinal))
+        if (normalized.Length == 0 || fullName.EndsWith('/', StringComparison.Ordinal) || fullName.EndsWith('\\', StringComparison.Ordinal) || normalized.Contains(':', StringComparison.Ordinal))
             return null;
 
         var parts = normalized.Split('/');
@@ -402,7 +402,7 @@ public static class DataArchive
             return entries;
 
         var prefix = firstSegments[0] + "/";
-        Dictionary<string, byte[]> stripped = new(StringComparer.Ordinal);
+        Dictionary<string, byte[]> stripped = [with(StringComparer.Ordinal)];
 
         foreach ((var path, var content) in entries)
         {
@@ -560,7 +560,7 @@ public static class DataArchive
 
     private static IReadOnlyList<TagStyle> MergeTags(IReadOnlyList<TagStyle> current, IReadOnlyList<TagStyle> incoming)
     {
-        Dictionary<string, TagStyle> merged = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, TagStyle> merged = [with(StringComparer.OrdinalIgnoreCase)];
 
         foreach (TagStyle tag in current)
         {

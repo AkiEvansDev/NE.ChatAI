@@ -10,22 +10,28 @@
   "sheet": {
     "nodes": [
       {
+        "id": "prompt",
+        "type": "chat.prompt",
+        "x": 0,
+        "y": 0
+      },
+      {
         "id": "persona",
         "type": "chat.persona",
         "x": 0,
-        "y": 0
+        "y": 128
       },
       {
         "id": "character",
         "type": "chat.character",
         "x": 0,
-        "y": 160
+        "y": 320
       },
       {
         "id": "world",
         "type": "chat.world",
         "x": 0,
-        "y": 352
+        "y": 544
       },
       {
         "id": "messages",
@@ -41,22 +47,22 @@
         "id": "instruction",
         "type": "graph.text",
         "x": 0,
-        "y": 512,
+        "y": 1024,
         "values": {
-          "Value": "Write a concise factual summary of the dialogue and any earlier summary above in past tense, preserving every event, decision, relationship shift, location and item introduced. Output only the summary, without headings, commentary or new dialogue."
+          "Value": "Pause the roleplay and ignore the roleplay and language instructions above. Write a concise factual summary in English of the dialogue and any earlier summary above in past tense, preserving every event, decision, relationship shift, location and item introduced. Output only the summary, without headings, commentary or new dialogue."
         }
       },
       {
         "id": "collector",
         "type": "chat.collector",
         "x": 320,
-        "y": 280
+        "y": 384
       },
       {
         "id": "model",
         "type": "chat.model-call",
         "x": 608,
-        "y": 280,
+        "y": 384,
         "values": {
           "Samplers": "precise-d4000003",
           "Thinking": "Off",
@@ -70,65 +76,73 @@
         "id": "replace",
         "type": "chat.replace",
         "x": 928,
-        "y": 256,
+        "y": 384,
         "values": {
           "Role": "System",
-          "Tag": "summary"
+          "Tag": "summary",
+          "Template": "[Summary of earlier events:\n{0}]"
         }
       }
     ],
     "edges": [
       {
         "id": "e1",
+        "fromNode": "prompt",
+        "fromPin": "Prompt",
+        "toNode": "collector",
+        "toPin": "Prompt"
+      },
+      {
+        "id": "e2",
         "fromNode": "persona",
         "fromPin": "Persona",
         "toNode": "collector",
         "toPin": "Persona"
       },
       {
-        "id": "e2",
+        "id": "e3",
         "fromNode": "character",
         "fromPin": "Character",
         "toNode": "collector",
         "toPin": "Character"
       },
       {
-        "id": "e3",
+        "id": "e4",
         "fromNode": "world",
         "fromPin": "World",
         "toNode": "collector",
         "toPin": "World"
       },
       {
-        "id": "e4",
+        "id": "e5",
         "fromNode": "messages",
         "fromPin": "Slice",
         "toNode": "collector",
         "toPin": "Messages"
       },
       {
-        "id": "e5",
+        "id": "e6",
         "fromNode": "instruction",
         "fromPin": "Result",
         "toNode": "collector",
         "toPin": "Instruction"
       },
       {
-        "id": "e6",
+        "id": "e7",
         "fromNode": "collector",
         "fromPin": "Blocks",
         "toNode": "model",
         "toPin": "Prompt"
       },
       {
-        "id": "e7",
+        "id": "e8",
         "fromNode": "messages",
         "fromPin": "Slice",
         "toNode": "replace",
         "toPin": "Slice"
       },
       {
-        "id": "e8",
+        "id": "e9",
         "fromNode": "model",
         "fromPin": "Text",
         "toNode": "replace",

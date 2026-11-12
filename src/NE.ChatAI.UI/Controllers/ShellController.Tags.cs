@@ -71,7 +71,7 @@ internal abstract partial class ShellController
 
     private static Dictionary<string, UIThemeColor> TagColorsOf(IReadOnlyList<KnownTag> known)
     {
-        Dictionary<string, UIThemeColor> colors = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, UIThemeColor> colors = [with(StringComparer.OrdinalIgnoreCase)];
 
         foreach (KnownTag tag in known)
         {

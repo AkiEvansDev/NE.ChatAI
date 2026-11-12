@@ -52,7 +52,11 @@ public static class ChatEditing
         variants[shown] = variants[shown] with { Tail = After(chat, at) };
         variants[chosen] = variants[chosen] with { Tail = null };
 
-        return chat with { Messages = [.. chat.Messages.Take(at), message with { Variants = variants, Chosen = chosen }, .. tail] };
+        return chat with
+        {
+            Messages = [.. chat.Messages.Take(at), message with { Variants = variants, Chosen = chosen }, .. tail],
+            Records = ChatRecords.PinVariantRecords(chat.Records, message.Id, shown)
+        };
     }
 
     /// <summary>Where the message stands among <paramref name="messages"/>; -1 for one they do not hold.</summary>
@@ -69,7 +73,7 @@ public static class ChatEditing
         return -1;
     }
 
-    private static int Shown(ChatMessage message)
+    internal static int Shown(ChatMessage message)
         => Math.Clamp(message.Chosen, 0, Math.Max(0, message.Variants.Count - 1));
 
     /// <summary>The messages after the one at <paramref name="at"/>, to keep in a variant; none kept as no list at all.</summary>
@@ -91,14 +95,20 @@ public static class ChatEditing
             return chat;
 
         ChatMessage message = chat.Messages[at];
+        var shown = Shown(message);
         List<MessageVariant> variants = [.. message.Variants];
 
         if (variants.Count > 0)
-            variants[Shown(message)] = variants[Shown(message)] with { Tail = After(chat, at) };
+            variants[shown] = variants[shown] with { Tail = After(chat, at) };
 
         variants.Add(variant with { Tail = null });
 
-        return chat with { Messages = [.. chat.Messages.Take(at), message with { Variants = variants, Chosen = variants.Count - 1 }], Generations = Recorded(chat, record) };
+        return chat with
+        {
+            Messages = [.. chat.Messages.Take(at), message with { Variants = variants, Chosen = variants.Count - 1 }],
+            Records = variants.Count > 1 ? ChatRecords.PinVariantRecords(chat.Records, message.Id, shown) : chat.Records,
+            Generations = Recorded(chat, record)
+        };
     }
 
     /// <summary>Puts a new variant in place of the one shown and drops the messages after the message: the message made again from there.</summary>
@@ -174,7 +184,7 @@ public static class ChatEditing
 
         var at = IndexOf(chat.Messages, messageId);
 
-        if (at < 0)
+        if (at < 0 || string.Equals(chat.Messages[at].Current.Text, text, StringComparison.Ordinal))
             return chat;
 
         Chat changed = Change(chat, messageId, message => WithCurrent(message, message.Current with { Text = text }));
@@ -276,7 +286,7 @@ public static class ChatEditing
             }
         }
 
-        List<GenerationRecord> result = new(chat.Generations.Count);
+        List<GenerationRecord> result = [with(chat.Generations.Count)];
 
         for (var i = 0; i < chat.Generations.Count; i++)
         {

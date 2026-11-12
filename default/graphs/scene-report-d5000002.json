@@ -10,16 +10,34 @@
   "sheet": {
     "nodes": [
       {
+        "id": "prompt",
+        "type": "chat.prompt",
+        "x": 320,
+        "y": 0
+      },
+      {
+        "id": "persona",
+        "type": "chat.persona",
+        "x": 320,
+        "y": 128
+      },
+      {
         "id": "character",
         "type": "chat.character",
         "x": 320,
-        "y": 64
+        "y": 320
+      },
+      {
+        "id": "world",
+        "type": "chat.world",
+        "x": 320,
+        "y": 544
       },
       {
         "id": "messages",
         "type": "chat.messages",
         "x": 320,
-        "y": 448,
+        "y": 768,
         "values": {
           "Last": 3,
           "Raw": true
@@ -29,7 +47,7 @@
         "id": "previous",
         "type": "chat.record",
         "x": 0,
-        "y": 256,
+        "y": 832,
         "values": {
           "Tag": "scene"
         }
@@ -38,16 +56,16 @@
         "id": "ask",
         "type": "graph.text",
         "x": 0,
-        "y": 448,
+        "y": 1024,
         "values": {
-          "Value": "Pause the roleplay and state the current scene in three short factual lines — Clothing:, Pose/location:, Mood: — based strictly on the latest messages above, updating the previous report only where those messages changed it (or establishing it from the latest messages when there is none; use the character card only for baseline attire not specified in the messages, and ignore example dialogues or general habits in the card). Output only the three lines, with no prose, headings or narration."
+          "Value": "Pause the roleplay and ignore the roleplay and language instructions above. Write in English only. State the current scene in three short factual lines — Clothing:, Pose/location:, Mood: — based strictly on the latest messages above, updating the previous report only where those messages changed it (or establishing it from the latest messages when there is none; use the character card only for baseline attire not specified in the messages, and ignore example dialogues or general habits in the card). Output only the three lines, with no prose, headings or narration."
         }
       },
       {
         "id": "join",
         "type": "graph.join",
         "x": 320,
-        "y": 256,
+        "y": 1024,
         "values": {
           "Template": "Previous scene report:\n{0}\n\nInstruction:\n{1}"
         }
@@ -55,14 +73,14 @@
       {
         "id": "collector",
         "type": "chat.collector",
-        "x": 608,
-        "y": 16
+        "x": 640,
+        "y": 384
       },
       {
         "id": "model",
         "type": "chat.model-call",
-        "x": 928,
-        "y": 16,
+        "x": 960,
+        "y": 384,
         "values": {
           "Samplers": "precise-d4000003",
           "Thinking": "Off",
@@ -75,66 +93,88 @@
       {
         "id": "insert",
         "type": "chat.insert",
-        "x": 1216,
-        "y": 16,
+        "x": 1280,
+        "y": 384,
         "values": {
           "Role": "System",
-          "Tag": "scene"
+          "Tag": "scene",
+          "Template": "[Current scene:\n{0}]"
         }
       }
     ],
     "edges": [
       {
         "id": "e1",
+        "fromNode": "prompt",
+        "fromPin": "Prompt",
+        "toNode": "collector",
+        "toPin": "Prompt"
+      },
+      {
+        "id": "e2",
+        "fromNode": "persona",
+        "fromPin": "Persona",
+        "toNode": "collector",
+        "toPin": "Persona"
+      },
+      {
+        "id": "e3",
         "fromNode": "character",
         "fromPin": "Character",
         "toNode": "collector",
         "toPin": "Character"
       },
       {
-        "id": "e2",
+        "id": "e4",
+        "fromNode": "world",
+        "fromPin": "World",
+        "toNode": "collector",
+        "toPin": "World"
+      },
+      {
+        "id": "e5",
         "fromNode": "messages",
         "fromPin": "Slice",
         "toNode": "collector",
         "toPin": "Messages"
       },
       {
-        "id": "e3",
+        "id": "e6",
         "fromNode": "previous",
         "fromPin": "Text",
         "toNode": "join",
         "toPin": "Values"
       },
       {
-        "id": "e4",
+        "id": "e7",
         "fromNode": "ask",
         "fromPin": "Result",
         "toNode": "join",
         "toPin": "Values"
       },
       {
-        "id": "e5",
+        "id": "e8",
         "fromNode": "join",
         "fromPin": "Text",
         "toNode": "collector",
         "toPin": "Instruction"
       },
       {
-        "id": "e6",
+        "id": "e9",
         "fromNode": "collector",
         "fromPin": "Blocks",
         "toNode": "model",
         "toPin": "Prompt"
       },
       {
-        "id": "e7",
+        "id": "e10",
         "fromNode": "messages",
         "fromPin": "Slice",
         "toNode": "insert",
         "toPin": "Slice"
       },
       {
-        "id": "e8",
+        "id": "e11",
         "fromNode": "model",
         "fromPin": "Text",
         "toNode": "insert",

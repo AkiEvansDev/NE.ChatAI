@@ -164,6 +164,7 @@ internal sealed partial class ChatController : ShellController
 
     private readonly Lock _abortLock = new();
     private bool _generating;
+    private ReplyKind? _liveKind;
     private CancellationTokenSource? _generation;
     private string? _genKey;
     private KoboldCppClient? _kobold;
@@ -390,6 +391,7 @@ internal sealed partial class ChatController : ShellController
         ActiveWorldId = null;
         _editingId = null;
         _editingNew = false;
+        _liveKind = null;
         _askedId = null;
         _editingRecordId = null;
         _streamingRecord = null;
@@ -415,6 +417,7 @@ internal sealed partial class ChatController : ShellController
         _chat = chat;
         _editingId = null;
         _editingNew = false;
+        _liveKind = null;
         _askedId = null;
         _editingRecordId = null;
         _streamingRecord = null;
@@ -651,6 +654,7 @@ internal sealed partial class ChatController : ShellController
     private ReplyJob BeginReply(ActiveProfile profile, string chatId, Chat preTurnChat, ReplyKind kind, ChatMessageItem item, IReadOnlyList<ChatMessage> history, string? continued)
     {
         _generating = true;
+        _liveKind = kind;
         Messages.Live = item;
         CloseOpenEditors();
         item.ShowLoading(kind != ReplyKind.Continuation);
@@ -927,6 +931,7 @@ internal sealed partial class ChatController : ShellController
         {
             var cut = Messages.EndsAtLive;
             Messages.Live = null;
+            _liveKind = null;
             SetActiveGeneration(null, null);
 
             // A chat is not left while its reply is written (OnNavigatedAsync waits for it), so the chat open is the job's.

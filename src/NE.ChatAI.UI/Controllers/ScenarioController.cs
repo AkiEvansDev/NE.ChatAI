@@ -98,11 +98,12 @@ internal sealed partial class ScenarioController : ShellController
             [ModelCallNode.ConnectionChoicesKey] = ToChoices(ConnectionOptions),
             [ModelCallNode.SamplerChoicesKey] = ToChoices(SamplerOptions)
         };
+        _runs.PinChoices = PinChoices;
     }
 
     private static List<UIChoice> ToChoices(RecursiveCollection<OptionItem> options)
     {
-        List<UIChoice> choices = new(options.Count);
+        List<UIChoice> choices = [with(options.Count)];
 
         for (var i = 0; i < options.Count; i++)
         {

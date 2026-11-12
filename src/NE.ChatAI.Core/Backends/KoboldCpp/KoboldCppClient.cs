@@ -25,7 +25,7 @@ public sealed class KoboldCppClient(HttpClient http, Uri address)
     };
 
     // An address without its final slash would lose its last segment to the endpoint's path.
-    private readonly Uri _root = address.AbsoluteUri.EndsWith('/') ? address : new Uri(address.AbsoluteUri + "/");
+    private readonly Uri _root = address.AbsoluteUri.EndsWith('/', StringComparison.Ordinal) ? address : new Uri(address.AbsoluteUri + "/");
 
     /// <summary>The loaded model's name, as koboldcpp reports it (<c>koboldcpp/…</c>).</summary>
     public async Task<string> GetModelAsync(CancellationToken cancellationToken)

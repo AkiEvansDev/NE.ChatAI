@@ -1,7 +1,7 @@
 <Project>
 
   <PropertyGroup>
-    <NEStandardVersion>2.6.3</NEStandardVersion>
+    <NEStandardVersion>2.7.1</NEStandardVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,11 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.13" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="11.0.0" />
   </ItemGroup>
 
 </Project>

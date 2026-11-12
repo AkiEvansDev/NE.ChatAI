@@ -11,10 +11,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Client\macros.js" LogicalName="NE.ChatAI.Web.Client.macros.js" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\NE.ChatAI.UI\NE.ChatAI.UI.csproj" />
   </ItemGroup>
 

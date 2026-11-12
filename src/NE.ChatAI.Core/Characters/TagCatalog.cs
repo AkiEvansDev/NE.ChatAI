@@ -34,7 +34,7 @@ public static class TagCatalog
 
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<string> carried = await CarriedAsync(data, scope, cancellationToken).ConfigureAwait(false);
-        Dictionary<string, KnownTag> known = new(Names);
+        Dictionary<string, KnownTag> known = [with(Names)];
 
         foreach (TagStyle style in StylesOf(settings, scope))
             _ = known.TryAdd(style.Name, new KnownTag(style.Name, style.Color));

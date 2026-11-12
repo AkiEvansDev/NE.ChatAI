@@ -129,7 +129,7 @@ public static class ChatStatistics
         HashSet<string> activeRecordIds = [];
         HashSet<string> inactiveRecordIds = [];
         HashSet<string> continuationIds = [];
-        Dictionary<string, string> messageByGeneration = new(StringComparer.Ordinal);
+        Dictionary<string, string> messageByGeneration = [with(StringComparer.Ordinal)];
 
         CollectActive(chat.Messages, activeIds, messageByGeneration);
         CollectAll(chat.Messages, continuationIds, messageByGeneration);
@@ -143,7 +143,7 @@ public static class ChatStatistics
                 lastMessageGenIndex = i;
         }
 
-        List<GenerationCallSummary> selected = new(chat.Generations.Count);
+        List<GenerationCallSummary> selected = [with(chat.Generations.Count)];
         var lastTurnActive = chat.Messages.Count > 0;
 
         for (var i = 0; i < chat.Generations.Count; i++)

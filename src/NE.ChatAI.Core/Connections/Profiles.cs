@@ -120,7 +120,7 @@ public static class Profiles
                 }
             }
 
-            Dictionary<string, JsonElement> kept = new(extra);
+            Dictionary<string, JsonElement> kept = [with(extra)];
             _ = kept.Remove(LegacySystemPrompt);
 
             await data.Prompts.WriteAsync(stored.Id, stored.Document with { Extra = kept.Count > 0 ? kept : null }, cancellationToken).ConfigureAwait(false);
@@ -150,7 +150,7 @@ public static class Profiles
                 moved = true;
             }
 
-            Dictionary<string, JsonElement> kept = new(extra);
+            Dictionary<string, JsonElement> kept = [with(extra)];
             _ = kept.Remove(LegacyNotePlacement);
 
             await data.Prompts.WriteAsync(stored.Id, stored.Document with { Extra = kept.Count > 0 ? kept : null }, cancellationToken).ConfigureAwait(false);

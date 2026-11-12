@@ -132,9 +132,15 @@ public sealed record ChatRecord
     /// <summary>The id of the message this record is sent immediately after; <c>null</c> when <see cref="Replaces"/> is set.</summary>
     public string? After { get; init; }
 
+    /// <summary>The zero-based variant index of the <see cref="After"/> message this record belongs to; <c>null</c> for replacements or legacy records before variant switches.</summary>
+    public int? Variant { get; init; }
+
     public MessageRole Role { get; init; } = MessageRole.System;
 
     public string Text { get; init; } = string.Empty;
+
+    /// <summary>An optional format with <c>{0}</c> where <see cref="Text"/> stands when projected into the prompt; <c>null</c> sends <see cref="Text"/> as is.</summary>
+    public string? Template { get; init; }
 
     public string? Thought { get; init; }
 

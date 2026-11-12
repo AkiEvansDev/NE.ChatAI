@@ -17,7 +17,7 @@ namespace NE.ChatAI.Scenarios;
 /// </summary>
 internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvider
 {
-    private readonly Dictionary<string, MessageSlice> _slicesByNode = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MessageSlice> _slicesByNode = [with(StringComparer.Ordinal)];
 
     public required DataFolder Data { get; init; }
 
@@ -82,7 +82,7 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     /// <summary>Whether <paramref name="modelNodeId"/> feeds an enabled <see cref="WriteDraftNode"/> downstream.</summary>
     public bool FeedsDraftWriter(string modelNodeId)
     {
-        HashSet<string> visited = new(StringComparer.Ordinal) { modelNodeId };
+        HashSet<string> visited = [with(StringComparer.Ordinal), modelNodeId];
         Queue<string> pending = new();
         pending.Enqueue(modelNodeId);
 
@@ -119,7 +119,7 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         if (Chat.Messages.Count == 0)
             return null;
 
-        HashSet<string> visited = new(StringComparer.Ordinal) { modelNodeId };
+        HashSet<string> visited = [with(StringComparer.Ordinal), modelNodeId];
         Queue<string> pending = new();
         pending.Enqueue(modelNodeId);
         var feedsDraft = false;

@@ -103,7 +103,7 @@ internal sealed class MessageSource : UIItemSourceBase<ChatMessageItem>
 
         start = Math.Clamp(start, 0, total);
         var end = Math.Clamp(start + Math.Max(0, count), start, total);
-        List<ChatMessageItem> items = new(end - start + 1);
+        List<ChatMessageItem> items = [with(end - start + 1)];
 
         for (var i = start; i < end; i++)
             items.Add(Live is ChatMessageItem live && live.Id == messages[i].Id ? live : _shape(messages[i]));

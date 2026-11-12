@@ -44,7 +44,7 @@ public sealed class ReplyReader
     /// <summary>A prefix as its special marker and its label: <c>&lt;|channel&gt;</c> and <c>thought</c>, or no marker and all of it.</summary>
     private static (string Marker, string Label) SplitPrefix(string prefix)
     {
-        var close = prefix.StartsWith('<') ? prefix.IndexOf('>', StringComparison.Ordinal) : prefix.StartsWith('[') ? prefix.IndexOf(']', StringComparison.Ordinal) : -1;
+        var close = prefix.StartsWith('<', StringComparison.Ordinal) ? prefix.IndexOf('>', StringComparison.Ordinal) : prefix.StartsWith('[', StringComparison.Ordinal) ? prefix.IndexOf(']', StringComparison.Ordinal) : -1;
 
         return close > 0 ? (prefix[..(close + 1)], prefix[(close + 1)..].Trim()) : (string.Empty, prefix.Trim());
     }

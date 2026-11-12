@@ -521,12 +521,17 @@ internal sealed partial class ChatController
     private void SyncRecords(ChatMessageItem item)
     {
         List<(string Id, UIPhrase Title, string Text, bool Streaming)> desired = [];
+        var hideSavedInsertions = (ReferenceEquals(item, Messages.Live) && _liveKind is ReplyKind.Variant or ReplyKind.Remake)
+            || (_editingId == item.Id && _editingNew);
 
         if (_chat is { Records.Count: > 0 } chat)
         {
             for (var i = 0; i < chat.Records.Count; i++)
             {
                 ChatRecord record = chat.Records[i];
+
+                if (hideSavedInsertions && record.Replaces is not { Count: >= 2 })
+                    continue;
 
                 if (ChatRecords.AnchorMessageId(record, chat.Messages) == item.Id)
                     desired.Add((record.Id, FormatRecordTitle(record, ResolveRecordName(record)), record.Text, false));

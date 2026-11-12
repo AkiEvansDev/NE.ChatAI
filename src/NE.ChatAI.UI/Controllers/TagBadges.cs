@@ -36,7 +36,7 @@ internal static class TagBadges
             TagScope.World => settings.WorldTags,
             _ => settings.Tags
         };
-        Dictionary<string, UIThemeColor> colors = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, UIThemeColor> colors = [with(StringComparer.OrdinalIgnoreCase)];
 
         foreach (TagStyle tag in styles)
         {
