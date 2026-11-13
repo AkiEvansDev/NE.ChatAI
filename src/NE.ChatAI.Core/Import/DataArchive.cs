@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NE.ChatAI.Characters;
 using NE.ChatAI.Chats;
+using NE.ChatAI.Connections;
 using NE.ChatAI.Settings;
 using NE.ChatAI.Storage;
 
@@ -47,6 +48,8 @@ public static class DataArchive
     private const string PersonasFolder = "personas";
     private const string WorldsFolder = "worlds";
     private const string ChatsFolder = "chats";
+
+    private static readonly Uri DefaultKoboldAddress = new("http://localhost:5001/");
 
     /// <summary>Whether <paramref name="content"/> starts with a ZIP local file or empty archive signature.</summary>
     public static bool IsZip(ReadOnlySpan<byte> content)
@@ -232,6 +235,7 @@ public static class DataArchive
             Content = true,
             Chats = true
         };
+        var placeholderConnectionId = manifest.Settings ? await FindDefaultConnectionPlaceholderAsync(data, cancellationToken).ConfigureAwait(false) : null;
 
         (string FileName, byte[] Content)? rootBackground = null;
         var presets = 0;
@@ -239,6 +243,7 @@ public static class DataArchive
         var personas = 0;
         var worlds = 0;
         var chats = 0;
+        List<string> importedConnections = [];
         HashSet<string> validCards = [with(StringComparer.Ordinal)];
         List<(string Folder, string Id, string FileName, byte[] Content)> companionFiles = [];
         List<(string Id, string Ext, byte[] Content)> chatPictures = [];
@@ -276,6 +281,9 @@ public static class DataArchive
                 else if (manifest.Settings && await ImportPresetEntryAsync(data, parts[0], id, content, cancellationToken).ConfigureAwait(false))
                 {
                     presets++;
+
+                    if (parts[0] == ConnectionsFolder)
+                        importedConnections.Add(id);
                 }
 
                 continue;
@@ -329,7 +337,15 @@ public static class DataArchive
             }
         }
 
-        var settingsApplied = await ApplySettingsAsync(data, manifest, incomingSettings, rootBackground, cancellationToken).ConfigureAwait(false);
+        // Replace an untouched first-start connection when an older archive brings connections under a different slug.
+        var replacedConnectionId = placeholderConnectionId is not null
+            && importedConnections.Count > 0
+            && !importedConnections.Contains(placeholderConnectionId, StringComparer.Ordinal)
+            && data.Connections.Delete(placeholderConnectionId)
+            ? placeholderConnectionId
+            : null;
+        var fallbackConnectionId = replacedConnectionId is not null ? importedConnections[0] : null;
+        var settingsApplied = await ApplySettingsAsync(data, manifest, incomingSettings, rootBackground, replacedConnectionId, fallbackConnectionId, cancellationToken).ConfigureAwait(false);
 
         return new DataArchiveImportSummary(settingsApplied, presets, characters, personas, worlds, chats);
     }
@@ -431,6 +447,30 @@ public static class DataArchive
         }
     }
 
+    private static async Task<string?> FindDefaultConnectionPlaceholderAsync(DataFolder data, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<StoredDocument<ConnectionProfile>> existing = (await data.Connections.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+
+        if (existing.Count != 1)
+            return null;
+
+        StoredDocument<ConnectionProfile> single = existing[0];
+        ConnectionProfile connection = single.Document;
+
+        return connection.Name == "koboldcpp"
+            && connection.Backend == BackendKind.KoboldCpp
+            && connection.Address == DefaultKoboldAddress
+            && connection.Secret is null
+            && connection.ContextLength == new ContextLength()
+            && connection.Instruct == DefaultDocuments.FormatId
+            && connection.SystemPrompt == DefaultDocuments.SystemPromptId
+            && connection.Prompt == DefaultDocuments.PromptId
+            && connection.Samplers == DefaultDocuments.SamplersId
+            && connection.Extra is null
+            ? single.Id
+            : null;
+    }
+
     private static Task<bool> ImportPresetEntryAsync(DataFolder data, string folder, string id, byte[] content, CancellationToken cancellationToken)
         => folder switch
         {
@@ -510,7 +550,7 @@ public static class DataArchive
     private static Task<bool> ImportChatEntryAsync(DataFolder data, string id, byte[] content, CancellationToken cancellationToken)
         => WriteVerifiedAsync(data.Chats, id, content, cancellationToken);
 
-    private static async Task<bool> ApplySettingsAsync(DataFolder data, ArchiveManifest manifest, AppSettings? incoming, (string FileName, byte[] Content)? background, CancellationToken cancellationToken)
+    private static async Task<bool> ApplySettingsAsync(DataFolder data, ArchiveManifest manifest, AppSettings? incoming, (string FileName, byte[] Content)? background, string? replacedConnectionId, string? fallbackConnectionId, CancellationToken cancellationToken)
     {
         if (background is (var fileName, var bytes))
         {
@@ -519,9 +559,20 @@ public static class DataArchive
         }
 
         if (incoming is null)
+        {
+            if (replacedConnectionId is not null)
+            {
+                AppSettings existing = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+
+                if (existing.Connection == replacedConnectionId)
+                    await data.WriteSettingsAsync(existing with { Connection = fallbackConnectionId }, cancellationToken).ConfigureAwait(false);
+            }
+
             return background is not null;
+        }
 
         AppSettings current = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        var currentConnection = current.Connection == replacedConnectionId ? fallbackConnectionId : current.Connection;
         var mergeTagStyles = manifest.Settings || manifest.Content;
         IReadOnlyList<TagStyle> tags = mergeTagStyles ? MergeTags(current.Tags, incoming.Tags) : current.Tags;
         IReadOnlyList<TagStyle> personaTags = mergeTagStyles ? MergeTags(current.PersonaTags, incoming.PersonaTags) : current.PersonaTags;
@@ -532,7 +583,7 @@ public static class DataArchive
             AppSettings updated = incoming with
             {
                 Format = Document.CurrentFormat,
-                Connection = incoming.Connection ?? current.Connection,
+                Connection = incoming.Connection ?? currentConnection,
                 Persona = incoming.Persona ?? current.Persona,
                 LastChat = incoming.LastChat ?? current.LastChat,
                 PinHash = current.PinHash,

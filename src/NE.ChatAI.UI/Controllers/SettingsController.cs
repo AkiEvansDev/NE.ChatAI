@@ -97,14 +97,25 @@ internal sealed partial class SettingsController : ShellController
 
         ActiveProfile? profile = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false);
 
-        Connection.Choose(Connection.Id ?? profile?.ConnectionId);
-        Format.Choose(Format.Id ?? profile?.Connection.Instruct);
-        SystemPrompt.Choose(SystemPrompt.Id ?? profile?.Connection.SystemPrompt);
-        Prompt.Choose(Prompt.Id ?? profile?.Connection.Prompt);
-        Samplers.Choose(Samplers.Id ?? profile?.Connection.Samplers);
+        Connection.Choose(profile?.ConnectionId ?? Connection.Id);
+        await Connection.ShowAsync(cancellationToken).ConfigureAwait(false);
 
-        foreach (var kind in Kinds)
-            await EditorOf(kind).ShowAsync(cancellationToken).ConfigureAwait(false);
+        if (Connection.Visibility == UIVisibility.Visible)
+        {
+            await SyncConnectionPresetsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            Format.Choose(Format.Id);
+            SystemPrompt.Choose(SystemPrompt.Id);
+            Prompt.Choose(Prompt.Id);
+            Samplers.Choose(Samplers.Id);
+
+            await Format.ShowAsync(cancellationToken).ConfigureAwait(false);
+            await SystemPrompt.ShowAsync(cancellationToken).ConfigureAwait(false);
+            await Prompt.ShowAsync(cancellationToken).ConfigureAwait(false);
+            await Samplers.ShowAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         await LoadSettingsFieldsAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -113,17 +124,21 @@ internal sealed partial class SettingsController : ShellController
     private ConnectionProfile NewConnection()
         => new() { Address = new Uri("http://localhost:5001/"), Instruct = Format.Id, SystemPrompt = SystemPrompt.Id, Prompt = Prompt.Id, Samplers = Samplers.Id };
 
-    /// <summary>The editor of a kind by the name the page's buttons carry.</summary>
-    private IDocumentEditor EditorOf(string kind)
-        => kind switch
-        {
-            ConnectionKind => Connection,
-            FormatKind => Format,
-            SystemPromptKind => SystemPrompt,
-            PromptKind => Prompt,
-            SamplersKind => Samplers,
-            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a kind of document the settings edit.")
-        };
+    private async Task SyncConnectionPresetsAsync(CancellationToken cancellationToken)
+    {
+        if (Connection.Visibility != UIVisibility.Visible)
+            return;
+
+        Format.Choose(Connection.Draft.Instruct);
+        SystemPrompt.Choose(Connection.Draft.SystemPrompt);
+        Prompt.Choose(Connection.Draft.Prompt);
+        Samplers.Choose(Connection.Draft.Samplers);
+
+        await Format.ShowAsync(cancellationToken).ConfigureAwait(false);
+        await SystemPrompt.ShowAsync(cancellationToken).ConfigureAwait(false);
+        await Prompt.ShowAsync(cancellationToken).ConfigureAwait(false);
+        await Samplers.ShowAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private async Task LoadSettingsFieldsAsync(CancellationToken cancellationToken)
     {
@@ -139,10 +154,27 @@ internal sealed partial class SettingsController : ShellController
         Background.Show(Pictures.AppBackground());
     }
 
-    /// <summary>Shows the document chosen in a kind's list in its editor.</summary>
+    /// <summary>Shows the document chosen in a kind's list in its editor; choosing a connection also selects its presets on the other tabs.</summary>
     [UICommand]
-    public Task ShowAsync(string kind, CancellationToken cancellationToken)
-        => EditorOf(kind).ShowAsync(cancellationToken);
+    public async Task ShowAsync(string kind, CancellationToken cancellationToken)
+    {
+        await EditorOf(kind).ShowAsync(cancellationToken).ConfigureAwait(false);
+
+        if (kind == ConnectionKind)
+            await SyncConnectionPresetsAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The editor of a kind by the name the page's buttons carry.</summary>
+    private IDocumentEditor EditorOf(string kind)
+        => kind switch
+        {
+            ConnectionKind => Connection,
+            FormatKind => Format,
+            SystemPromptKind => SystemPrompt,
+            PromptKind => Prompt,
+            SamplersKind => Samplers,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a kind of document the settings edit.")
+        };
 
     /// <summary>Writes a kind's editor into its document, as a field lets go of its value.</summary>
     [UICommand]
@@ -152,6 +184,9 @@ internal sealed partial class SettingsController : ShellController
 
         // The panel shows the same documents: its lists — a renamed one — and the active profile follow the change.
         await LoadGenerationAsync(cancellationToken).ConfigureAwait(false);
+
+        if (kind == ConnectionKind)
+            await SyncConnectionPresetsAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Saves the edited connection and checks whether its server answers.</summary>
@@ -287,7 +322,7 @@ internal sealed partial class SettingsController : ShellController
 
             await editor.CreateAsync(createCopy, chosenName, cancellationToken).ConfigureAwait(false);
             await LoadGenerationAsync(cancellationToken).ConfigureAwait(false);
-            await editor.ShowAsync(cancellationToken).ConfigureAwait(false);
+            await ShowAsync(createKind, cancellationToken).ConfigureAwait(false);
 
             return UICommandResult.Ok([new CloseDialogEffect(RenameDialogKey)]);
         }
@@ -329,7 +364,7 @@ internal sealed partial class SettingsController : ShellController
             editor.Delete();
             await LoadGenerationAsync(cancellationToken).ConfigureAwait(false);
             editor.Choose(null);
-            await editor.ShowAsync(cancellationToken).ConfigureAwait(false);
+            await ShowAsync(kind, cancellationToken).ConfigureAwait(false);
         }
 
         return UICommandResult.Ok([new CloseDialogEffect(DeleteDialogKey)]);

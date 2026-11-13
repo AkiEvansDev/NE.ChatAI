@@ -41,7 +41,7 @@ internal sealed partial class CardRow : RecursiveObservable, IBindableItem, ICon
 }
 
 /// <summary>
-/// The chats panel: the characters, the one last talked to first, or the personas, the default one first — either narrowed by a
+/// The chats panel: the characters, the personas and the worlds — each with its active one first and the rest by name, narrowed by a
 /// search over their names and by their tags, and a new one made beside the search; a character picked shows its chats and opens
 /// the last one — or starts one, having none — with a new chat and its editor dialog at hand; a persona or world picked opens its
 /// editor dialog.
@@ -84,7 +84,7 @@ internal abstract partial class ShellController
     protected IReadOnlyList<StoredDocument<World>> KnownWorlds { get; private set; } = [];
 
     /// <summary>The open chat's character, which the panel shows each time it opens.</summary>
-    private string? _openCharacterId;
+    protected string? OpenCharacterId { get; set; }
 
     /// <summary>The character whose chats the panel shows; none, and it shows the characters.</summary>
     private string? _panelCharacterId;
@@ -201,28 +201,20 @@ internal abstract partial class ShellController
         ShowWorlds();
     }
 
-    /// <summary>The characters, the one last talked to first, then the rest by name.</summary>
+    /// <summary>The characters, the active chat's one first, then the rest by name.</summary>
     private void ShowCharacters()
     {
-        Dictionary<string, DateTimeOffset> lastAt = [with(StringComparer.Ordinal)];
-
-        foreach (ChatSummary chat in _chats)
-        {
-            if (chat.CharacterId is string id && (!lastAt.TryGetValue(id, out DateTimeOffset at) || chat.LastAt > at))
-                lastAt[id] = chat.LastAt;
-        }
-
         CharacterRows.Clear();
 
         IEnumerable<StoredDocument<Character>> shown = _characters
-            .OrderByDescending(stored => lastAt.GetValueOrDefault(stored.Id, DateTimeOffset.MinValue))
+            .OrderByDescending(stored => stored.Id == OpenCharacterId)
             .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
 
         foreach (StoredDocument<Character> stored in shown)
         {
             CardRow row = RowOf(stored.Id, stored.Document, Pictures.CharacterAvatarOf(stored.Id), _characterTagColors);
 
-            row.ActiveVisibility = stored.Id == _openCharacterId ? UIVisibility.Visible : UIVisibility.Collapsed;
+            row.ActiveVisibility = stored.Id == OpenCharacterId ? UIVisibility.Visible : UIVisibility.Collapsed;
             CharacterRows.Add(row);
         }
 
@@ -239,14 +231,14 @@ internal abstract partial class ShellController
         return row;
     }
 
-    /// <summary>The personas, the default one first, then the rest by name.</summary>
+    /// <summary>The personas, the active one first, then the rest by name.</summary>
     private void ShowPersonas()
     {
         PersonaRows.Clear();
 
         var activePersonaId = ActivePersonaId ?? DefaultPersonaId;
         IEnumerable<StoredDocument<Persona>> shown = KnownPersonas
-            .OrderByDescending(stored => stored.Id == DefaultPersonaId)
+            .OrderByDescending(stored => stored.Id == activePersonaId)
             .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
 
         foreach (StoredDocument<Persona> stored in shown)
@@ -261,13 +253,14 @@ internal abstract partial class ShellController
         PersonasEmpty = new UIPhrase(KnownPersonas.Count == 0 ? "chatai.chats.no-personas" : "chatai.chats.no-match");
     }
 
-    /// <summary>The worlds, by name.</summary>
+    /// <summary>The worlds, the active one first, then the rest by name.</summary>
     private void ShowWorlds()
     {
         WorldRows.Clear();
 
         IEnumerable<StoredDocument<World>> shown = KnownWorlds
-            .OrderBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
+            .OrderByDescending(stored => stored.Id == ActiveWorldId)
+            .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
 
         foreach (StoredDocument<World> stored in shown)
         {
@@ -326,7 +319,7 @@ internal abstract partial class ShellController
     /// </summary>
     protected async Task FollowChatAsync(string chatId, string? characterId, CancellationToken cancellationToken)
     {
-        _openCharacterId = characterId;
+        OpenCharacterId = characterId;
         _panelCharacterId = characterId;
 
         if (_chats.Any(chat => chat.Id == chatId))
@@ -341,9 +334,8 @@ internal abstract partial class ShellController
     }
 
     /// <summary>
-    /// A chat just written to: its row takes the new last words and goes to the top, and its character's row to the top of the
-    /// characters, the newest first as a read would put them; a message with no words yet — a thought cut short — leaves the row's
-    /// words as they were. Called under the runtime's lock.
+    /// A chat just written to: its row takes the new last words and goes to the top; a message with no words yet — a thought cut
+    /// short — leaves the row's words as they were. Called under the runtime's lock.
     /// </summary>
     protected void ShowLastWords(string chatId, string lastText)
     {
@@ -356,16 +348,13 @@ internal abstract partial class ShellController
 
             _ = ChatEntries.Move(chatId, 0);
         }
-
-        if (_openCharacterId is string characterId)
-            _ = CharacterRows.Move(characterId, 0);
     }
 
     /// <summary>The chats panel opening reads the chats as they are now and shows the open chat's character.</summary>
     [UICommand]
     public Task LoadChatsPanelAsync(CancellationToken cancellationToken)
     {
-        _panelCharacterId = _openCharacterId;
+        _panelCharacterId = OpenCharacterId;
 
         return LoadChatsAsync(cancellationToken);
     }
@@ -404,7 +393,7 @@ internal abstract partial class ShellController
         if (!Slug.IsValidId(cardId))
             return UICommandResult.Ok();
 
-        if (IsGenerating && scope == TagScope.Character && cardId == _openCharacterId)
+        if (IsGenerating && scope == TagScope.Character && cardId == OpenCharacterId)
             return Notify("chatai.chat.busy", UIColorStyle.Info);
 
         string? name;
@@ -467,7 +456,7 @@ internal abstract partial class ShellController
         if (cardId is null || !Slug.IsValidId(cardId))
             return UICommandResult.Ok([new CloseDialogEffect(dialogKey)]);
 
-        if (IsGenerating && list == CharactersList && cardId == _openCharacterId)
+        if (IsGenerating && list == CharactersList && cardId == OpenCharacterId)
             return UICommandResult.Ok([new CloseDialogEffect(dialogKey), new ShowNotificationEffect("chatai.chat.busy", UIColorStyle.Info)]);
 
         List<ClientEffect> effects = [new CloseDialogEffect(dialogKey)];
@@ -500,8 +489,8 @@ internal abstract partial class ShellController
             default:
                 _ = await Chats.DeleteCharacterAsync(cardId, cancellationToken).ConfigureAwait(false);
 
-                if (_openCharacterId == cardId)
-                    _openCharacterId = null;
+                if (OpenCharacterId == cardId)
+                    OpenCharacterId = null;
 
                 break;
         }
@@ -522,7 +511,7 @@ internal abstract partial class ShellController
     [UICommand]
     public async Task<UICommandResult> OpenCharacterAsync(string characterId, CancellationToken cancellationToken)
     {
-        if (IsGenerating && characterId != _openCharacterId)
+        if (IsGenerating && characterId != OpenCharacterId)
             return Notify("chatai.chat.busy", UIColorStyle.Info);
 
         _panelCharacterId = characterId;

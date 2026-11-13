@@ -348,7 +348,7 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
                     .SetAppearance(UIInputAppearance.Filled)
                     .SetWrapLines(true)
                     .SetStatusBar(false)
-                    .SetLineNumbers(false)
+                    .SetLineNumbers(true)
                     .SetCompletions(false)
                     .SetIsReadOnly(true)
                     .SetHeight(UILayoutLength.Fill())

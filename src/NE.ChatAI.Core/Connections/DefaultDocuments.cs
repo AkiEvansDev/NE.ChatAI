@@ -17,7 +17,8 @@ namespace NE.ChatAI.Connections;
 /// </summary>
 public static class DefaultDocuments
 {
-    /// <summary>The documents the first connection names.</summary>
+    /// <summary>The first connection laid down on an empty data folder, and the documents it names.</summary>
+    public const string ConnectionId = "koboldcpp-d0000001";
     public const string FormatId = "gemma-4-d1000001";
     public const string SystemPromptId = "roleplay-d2000001";
     public const string PromptId = "roleplay-d3000001";

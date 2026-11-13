@@ -13,9 +13,6 @@ internal sealed partial class ConnectionDraft : RecursiveObservable, IDocumentDr
     public partial string Name { get; set; } = string.Empty;
 
     [RecursiveMember]
-    public partial string Backend { get; set; } = nameof(BackendKind.KoboldCpp);
-
-    [RecursiveMember]
     public partial string Address { get; set; } = string.Empty;
 
     [RecursiveMember]
@@ -39,7 +36,6 @@ internal sealed partial class ConnectionDraft : RecursiveObservable, IDocumentDr
     public void Show(ConnectionProfile connection)
     {
         Name = connection.Name;
-        Backend = connection.Backend.ToString();
         Address = connection.Address?.ToString() ?? string.Empty;
         ContextAuto = connection.ContextLength.Auto;
         ContextValue = connection.ContextLength.Value;
@@ -54,7 +50,6 @@ internal sealed partial class ConnectionDraft : RecursiveObservable, IDocumentDr
         => kept with
         {
             Name = Name.Trim(),
-            Backend = Enum.TryParse(Backend, out BackendKind backend) ? backend : kept.Backend,
             Address = Uri.TryCreate(Address.Trim(), UriKind.Absolute, out Uri? address) ? address : kept.Address,
             ContextLength = new ContextLength { Auto = ContextAuto, Value = (int)ContextValue },
             Instruct = Instruct,

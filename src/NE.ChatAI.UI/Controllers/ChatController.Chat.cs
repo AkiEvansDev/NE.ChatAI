@@ -264,7 +264,6 @@ internal sealed partial class ChatController
             }
 
             var note = ChatNote.TrimEnd('\r', '\n');
-            ChatNote = note;
             chatId = OpenChatId;
             _chat = changed = _chat with { AuthorsNote = string.IsNullOrWhiteSpace(note) ? null : note };
         }, cancellationToken).ConfigureAwait(false);

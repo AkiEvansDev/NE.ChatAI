@@ -4,6 +4,7 @@ using System.Linq.Expressions;
 using NE.ChatAI.Controllers;
 using NE.ChatAI.Samplers;
 using NE.ChatAI.Storage;
+using NE.Colors;
 
 namespace NE.ChatAI.Views;
 
@@ -45,11 +46,8 @@ internal static class SettingsEditors
 
         return Editor(SettingsController.ConnectionKind, static x => x.ConnectionOptions, static x => x.Connection,
             Card(null,
-                UIForm.Row(
-                    Select("chatai.settings.connection.backend", Backends, static x => x.Connection.Draft.Backend, SettingsController.ConnectionKind),
-                    Text("chatai.settings.connection.address", static x => x.Connection.Draft.Address, SettingsController.ConnectionKind)
-                        .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Connect), "chatai.connection.check").OnClick(nameof(SettingsController.CheckEditedConnectionAsync)))
-                ),
+                Text("chatai.settings.connection.address", static x => x.Connection.Draft.Address, SettingsController.ConnectionKind)
+                    .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Connect), "chatai.connection.check").OnClick(nameof(SettingsController.CheckEditedConnectionAsync))),
                 UIForm.Row(
                     contextAuto,
                     Number("chatai.generation.context.length", static x => x.Connection.Draft.ContextValue, SettingsController.ConnectionKind, 512, 1048576, 1024).EnabledWhen(contextAuto, false)
@@ -194,7 +192,11 @@ internal static class SettingsEditors
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
     /// <summary>A Markdown field with roleplay speech, narration and SillyTavern macro styling and completions.</summary>
-    /// <remarks>Filled named here: a code input starts ghost, as a listing to read, and here it stands among the form's filled fields.</remarks>
+    /// <remarks>
+    /// Filled named here: a code input starts ghost, as a listing to read, and here it stands among the form's filled fields.
+    /// <c>DebounceMilliseconds</c> commits scripted edits (<c>Enter</c>, <c>Tab</c>, undo, completions) that prevent the browser's native
+    /// <c>change</c> on blur.
+    /// </remarks>
     public static CodeInputComponent MacroInput(string? title, int rows)
     {
         CodeInputComponent input = StyleMacroCode(new CodeInputComponent())
@@ -202,18 +204,21 @@ internal static class SettingsEditors
             .SetRows(rows)
             .SetWrapLines(true)
             .SetStatusBar(false)
-            .SetLineNumbers(false)
+            .SetLineNumbers(true)
+            .SetDebounceMilliseconds(240)
             .SetCompletionTriggers("{{")
             .SetCompletionItems(MacroCompletions);
 
         return title is null ? input : input.SetTitle(title);
     }
 
-    /// <summary>Styles a Markdown code input for roleplay prompts and cards: muted italic narration, accent speech, macros and section markers.</summary>
+    /// <summary>Styles a Markdown code input for roleplay prompts and cards: muted narration, speech, control tags, directives and value macros.</summary>
     public static CodeInputComponent StyleMacroCode(CodeInputComponent input)
     {
-        UIMarkdownTextStyle speech = new() { Color = UIThemeColor.Accent };
-        UIMarkdownTextStyle macro = new() { Color = UIThemeColor.Danger };
+        UIMarkdownTextStyle speech = new() { Color = SpeechColor };
+        UIMarkdownTextStyle control = new() { Color = MacroConditionColor };
+        UIMarkdownTextStyle directive = new() { Color = UIThemeColor.Muted, Italic = true };
+        UIMarkdownTextStyle macro = new() { Color = MacroValueColor, FontWeight = 600 };
         UIMarkdownTextStyle marker = new() { Color = UIThemeColor.Warning, FontWeight = 600 };
 
         return input
@@ -223,8 +228,13 @@ internal static class SettingsEditors
             .AddSpanStyle("\"", "\"", speech)
             .AddSpanStyle("“", "”", speech)
             .AddSpanStyle("«", "»", speech)
+            .AddTokenStyle("{{else}}", control)
+            .AddTokenStyle("{{trim}}", directive)
+            .AddTokenStyle("{{newline}}", directive)
+            .AddTokenStyle("{{noop}}", directive)
+            .AddSpanStyle("{{#", "}}", control)
+            .AddSpanStyle("{{/", "}}", control)
             .AddSpanStyle("{{", "}}", macro)
-            .AddSpanStyle("[", "]", new UIMarkdownTextStyle { Color = UIThemeColor.Warning })
             .AddTokenStyle("<START>", marker);
     }
 
@@ -426,11 +436,20 @@ internal static class SettingsEditors
             )
         );
 
-    private static readonly OptionItem[] Backends =
-    [
-        new() { Id = "KoboldCpp", Title = "koboldcpp", IsContent = true },
-        new() { Id = "OpenRouter", Title = "OpenRouter", IsContent = true }
-    ];
+    private static readonly UIThemeColor MacroValueColor = UIThemeColor.Create(
+        UIThemeDefaults.LightPalette.Primary,
+        new ColorVariant(UIThemeDefaults.DarkPalette.Primary.Name, ColorAdjustment.Tint, 4)
+    );
+
+    private static readonly UIThemeColor MacroConditionColor = UIThemeColor.Create(
+        UIThemeDefaults.LightPalette.Info,
+        new ColorVariant(UIThemeDefaults.DarkPalette.Info.Name, ColorAdjustment.Tint, 4)
+    );
+
+    private static readonly UIThemeColor SpeechColor = UIThemeColor.Create(
+        UIThemeDefaults.LightPalette.Accent,
+        new ColorVariant(UIThemeDefaults.DarkPalette.Accent.Name, ColorAdjustment.Tint, 4)
+    );
 
     private static readonly OptionItem[] NamesBehaviors =
     [
@@ -468,11 +487,11 @@ internal static class SettingsEditors
         new() { Label = "{{wiAfter}}", Detail = "World info after story", Kind = "regex" },
         new() { Label = "{{mesExamples}}", Detail = "Formatted example dialogues", Kind = "regex" },
         new() { Label = "{{mesExamplesRaw}}", Detail = "Raw example dialogues", Kind = "regex" },
-        new() { Label = "{{newline}}", Detail = "Line break", Kind = "regex" },
-        new() { Label = "{{noop}}", Detail = "Empty placeholder", Kind = "regex" },
-        new() { Label = "{{trim}}", Detail = "Trim surrounding whitespace", Kind = "regex" },
-        new() { Label = "{{#if …}}", InsertText = "{{#if ", Detail = "Conditional block", Kind = "meta" },
-        new() { Label = "{{else}}", Detail = "Else branch", Kind = "meta" },
-        new() { Label = "{{/if}}", Detail = "End conditional block", Kind = "meta" }
+        new() { Label = "{{newline}}", Detail = "Line break", Kind = "meta" },
+        new() { Label = "{{noop}}", Detail = "Empty placeholder", Kind = "meta" },
+        new() { Label = "{{trim}}", Detail = "Trim surrounding whitespace", Kind = "meta" },
+        new() { Label = "{{#if …}}", InsertText = "{{#if ", Detail = "Conditional block", Kind = "keyword" },
+        new() { Label = "{{else}}", Detail = "Else branch", Kind = "keyword" },
+        new() { Label = "{{/if}}", Detail = "End conditional block", Kind = "keyword" }
     ];
 }

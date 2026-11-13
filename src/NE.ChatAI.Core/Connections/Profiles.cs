@@ -79,20 +79,24 @@ public static class Profiles
 
         _ = await DefaultDocuments.LayDownAsync(data, cancellationToken).ConfigureAwait(false);
 
-        var connection = await data.Connections.CreateAsync(new ConnectionProfile
-        {
-            Name = "koboldcpp",
-            Backend = BackendKind.KoboldCpp,
-            Address = koboldCppAddress,
-            Instruct = DefaultDocuments.FormatId,
-            SystemPrompt = DefaultDocuments.SystemPromptId,
-            Prompt = DefaultDocuments.PromptId,
-            Samplers = DefaultDocuments.SamplersId
-        }, cancellationToken).ConfigureAwait(false);
+        await data.Connections.WriteAsync(
+            DefaultDocuments.ConnectionId,
+            new ConnectionProfile
+            {
+                Name = "koboldcpp",
+                Backend = BackendKind.KoboldCpp,
+                Address = koboldCppAddress,
+                Instruct = DefaultDocuments.FormatId,
+                SystemPrompt = DefaultDocuments.SystemPromptId,
+                Prompt = DefaultDocuments.PromptId,
+                Samplers = DefaultDocuments.SamplersId
+            },
+            cancellationToken
+        ).ConfigureAwait(false);
 
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
-        await data.WriteSettingsAsync(settings with { Connection = connection }, cancellationToken).ConfigureAwait(false);
+        await data.WriteSettingsAsync(settings with { Connection = DefaultDocuments.ConnectionId }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

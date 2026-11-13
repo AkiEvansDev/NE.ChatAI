@@ -59,9 +59,13 @@ internal sealed partial class SettingsController
 
         ImportSelectionId = null;
         ImportResults.Clear();
+        var importedArchiveSettings = false;
 
         foreach (UIUploadFile file in selection.Files)
-            await ImportFileAsync(file, cancellationToken).ConfigureAwait(false);
+        {
+            if (await ImportFileAsync(file, cancellationToken).ConfigureAwait(false))
+                importedArchiveSettings = true;
+        }
 
         await LoadGenerationAsync(cancellationToken).ConfigureAwait(false);
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
@@ -69,31 +73,30 @@ internal sealed partial class SettingsController
 
         ActiveProfile? profile = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false);
 
-        if (Connection.Id is null)
+        if (importedArchiveSettings || Connection.Id is null || !Data.Connections.Exists(Connection.Id))
+        {
             Connection.Choose(profile?.ConnectionId);
+            await ShowAsync(ConnectionKind, cancellationToken).ConfigureAwait(false);
+        }
 
-        if (Format.Id is null)
-            Format.Choose(profile?.Connection.Instruct);
+        if (!importedArchiveSettings || Connection.Visibility != UIVisibility.Visible)
+        {
+            Format.Choose(Format.Id ?? profile?.Connection.Instruct);
+            SystemPrompt.Choose(SystemPrompt.Id ?? profile?.Connection.SystemPrompt);
+            Prompt.Choose(Prompt.Id ?? profile?.Connection.Prompt);
+            Samplers.Choose(Samplers.Id ?? profile?.Connection.Samplers);
 
-        if (SystemPrompt.Id is null)
-            SystemPrompt.Choose(profile?.Connection.SystemPrompt);
-
-        if (Prompt.Id is null)
-            Prompt.Choose(profile?.Connection.Prompt);
-
-        if (Samplers.Id is null)
-            Samplers.Choose(profile?.Connection.Samplers);
-
-        foreach (var kind in Kinds)
-            await ShowAsync(kind, cancellationToken).ConfigureAwait(false);
+            foreach (var kind in Kinds)
+                await EditorOf(kind).ShowAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    private async Task ImportFileAsync(UIUploadFile file, CancellationToken cancellationToken)
+    private async Task<bool> ImportFileAsync(UIUploadFile file, CancellationToken cancellationToken)
     {
         if (file.Size > MaxImportBytes)
         {
             Report(file, new UIPhrase("chatai.import.too-large"));
-            return;
+            return false;
         }
 
         byte[] content;
@@ -107,15 +110,12 @@ internal sealed partial class SettingsController
         }
 
         if (DataArchive.IsZip(content))
-        {
-            await ImportArchiveAsync(file, content, cancellationToken).ConfigureAwait(false);
-            return;
-        }
+            return await ImportArchiveAsync(file, content, cancellationToken).ConfigureAwait(false);
 
         if (PngText.IsPng(content) || LooksLikeCard(content))
         {
             await ImportCardAsync(file, content, cancellationToken).ConfigureAwait(false);
-            return;
+            return false;
         }
 
         SillyTavernPresets presets;
@@ -134,19 +134,21 @@ internal sealed partial class SettingsController
             Report(file, new UIPhrase("chatai.import.unknown"));
         else
             await ImportPresetsAsync(file, presets, cancellationToken).ConfigureAwait(false);
+
+        return false;
     }
 
     private void Report(UIUploadFile file, UIPhrase result)
         => ImportResults.Add(new ImportLine { Id = ImportResults.Count.ToString(CultureInfo.InvariantCulture), FileName = file.FileName, Result = result });
 
-    private async Task ImportArchiveAsync(UIUploadFile file, byte[] content, CancellationToken cancellationToken)
+    private async Task<bool> ImportArchiveAsync(UIUploadFile file, byte[] content, CancellationToken cancellationToken)
     {
         DataArchiveImportSummary summary = await DataArchive.ImportAsync(Data, content, cancellationToken).ConfigureAwait(false);
 
         if (summary.IsEmpty)
         {
             Report(file, new UIPhrase("chatai.import.unknown"));
-            return;
+            return false;
         }
 
         if (summary.Settings || summary.Presets > 0)
@@ -164,6 +166,8 @@ internal sealed partial class SettingsController
 
         if (summary.Chats > 0)
             Report(file, UIPhrase.Of("chatai.import.archive.chats", ("count", summary.Chats.ToString(CultureInfo.InvariantCulture))));
+
+        return summary.Settings || summary.Presets > 0;
     }
 
     /// <summary>A card's JSON names its spec, or carries the V1 fields a preset never has.</summary>
@@ -295,7 +299,7 @@ internal sealed partial class SettingsController
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var kind in Kinds)
-            await ShowAsync(kind, cancellationToken).ConfigureAwait(false);
+            await EditorOf(kind).ShowAsync(cancellationToken).ConfigureAwait(false);
 
         return written;
     }

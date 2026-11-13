@@ -115,6 +115,6 @@ internal sealed partial class DocumentEditor<T, TDraft> : RecursiveObservable, I
     {
         RecursiveCollection<OptionItem> options = _options();
 
-        Id = id ?? (options.Count == 0 ? null : options[0].Id);
+        Id = id is not null && Store().Exists(id) ? id : (options.Count == 0 ? null : options[0].Id);
     }
 }

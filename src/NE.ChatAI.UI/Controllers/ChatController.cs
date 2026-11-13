@@ -309,6 +309,7 @@ internal sealed partial class ChatController : ShellController
 
         if (_chat is null)
         {
+            OpenCharacterId = null;
             ActivePersonaId = null;
             ActiveWorldId = null;
             ShowCards();
@@ -387,6 +388,7 @@ internal sealed partial class ChatController : ShellController
         _character = null;
         _persona = null;
         _personaId = null;
+        OpenCharacterId = null;
         ActivePersonaId = null;
         ActiveWorldId = null;
         _editingId = null;
