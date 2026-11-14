@@ -115,6 +115,7 @@ internal static class ChatsPanel
         => new ItemsViewComponent(id)
             .SetVerticalScroll(UIScrollMode.Disabled)
             .SetRowHoverable(true)
+            .SetRowBleed(true)
             .BindItems(rows)
             .FilterBy(SearchId, IInputComponent.ValueProperty, nameof(CardRow.Name))
             .FilterBy(TagFilterId, MultiSelectComponent.ValueProperty, nameof(CardRow.Tags), UIComparisonOperator.In)
@@ -128,18 +129,18 @@ internal static class ChatsPanel
     private static ContainerComponent CreateCardRow(bool showEdit)
     {
         StackPanelComponent actions = showEdit
-            ? UIButtons.Toolbar(
+            ? UILayout.Row(4,
                 UIIconButtons.Edit().SetSize(UISize.Small).OnClick(nameof(ShellController.EditPanelCardAsync), UIAction.ArgCurrentItemKey("cardId")),
                 UIIconButtons.Delete().SetSize(UISize.Small).OnClick(nameof(ShellController.AskDeletePanelCard), UIAction.ArgCurrentItemKey("cardId"))
             )
-            : UIButtons.Toolbar(
+            : UILayout.Row(4,
                 UIIconButtons.Delete().SetSize(UISize.Small).OnClick(nameof(ShellController.AskDeletePanelCard), UIAction.ArgCurrentItemKey("cardId"))
             );
 
         return new ContainerComponent()
             .SetColumn(1, UIGridUnit.Auto())
             .SetColumn(24, UIGridUnit.Auto())
-            .SetPadding(UIThickness.Symmetric(8, 6))
+            .SetPadding(UIThickness.Symmetric(0, 2))
             .AddChild(Avatar<CardRow>(static x => x.Avatar, UIBindingScope.Relative).SetMargin(UIThickness.All(0, 0, 12, 0)).SetPlacement(1, 1, 1, 1))
             .AddChild(UILayout.Stack(4,
                     UILayout.Row(8,
@@ -189,6 +190,7 @@ internal static class ChatsPanel
         => new ItemsViewComponent("chatai-chat-list")
             .SetVerticalScroll(UIScrollMode.Disabled)
             .SetRowHoverable(true)
+            .SetRowBleed(true)
             .SetSelectionMode(UISelectionMode.One)
             .BindSelectedKey<ShellController>(static x => x.OpenChatId, mode: UIBindingMode.OneWay)
             .BindItems<ShellController>(static x => x.ChatEntries)
@@ -201,7 +203,7 @@ internal static class ChatsPanel
     private static ContainerComponent CreateChatRow()
         => new ContainerComponent()
             .SetColumn(24, UIGridUnit.Auto())
-            .SetPadding(UIThickness.Symmetric(8, 6))
+            .SetPadding(UIThickness.Symmetric(0, 2))
             .AddChild(new TextComponent()
                 .AsBody()
                 .BindTitle<MenuItem>(static x => x.Title, UIBindingScope.Relative)

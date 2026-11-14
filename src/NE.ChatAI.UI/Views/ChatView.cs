@@ -19,6 +19,12 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
 
     private const double AvatarSize = 40;
 
+    /// <summary>Matches the small header action buttons so hiding message tools while streaming never shifts the feed.</summary>
+    private const double MessageHeaderHeight = 28;
+
+    /// <summary>Reserves the avatar's top offset, height, gap and token caption (2 + 40 + 4 + 16) before tokens are counted.</summary>
+    private const double AuthorColumnHeight = 62;
+
     public static string ViewKey => "chatai.chat";
 
     protected override string PageTitle => "chatai.chat.header";
@@ -91,6 +97,7 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
                     RowAction(UIIconButtons.Cancel(), static x => x.EditorVisibility, nameof(ChatController.CancelEditAsync)),
                     RowAction(UIIconButtons.Delete(), static x => x.EditorVisibility, nameof(ChatController.AskDeleteAsync))
                 )
+                .SetMinHeight(UILayoutLength.Absolute(MessageHeaderHeight))
                 .SetPlacement(2, 1, 23, 1)
             )
             .AddChild(UILayout.Stack(4,
@@ -122,6 +129,7 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
                     .SetHorizontalAlignment(UIAlignment.Center)
                     .BindVisibility<ChatMessageItem>(static x => x.TokenCountVisibility, UIBindingScope.Relative)
             )
+            .SetMinHeight(UILayoutLength.Absolute(AuthorColumnHeight))
             .SetMargin(UIThickness.All(0, 0, 12, 0));
 
     /// <summary>A button beside the author, shown by the row's <paramref name="visibility"/>: Edit at rest; Done, Cancel and Delete while edited.</summary>

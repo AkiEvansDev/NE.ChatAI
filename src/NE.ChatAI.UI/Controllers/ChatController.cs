@@ -688,9 +688,21 @@ internal sealed partial class ChatController : ShellController
             if (ReferenceEquals(item, Messages.Live))
             {
                 item.ToolsVisibility = UIVisibility.Collapsed;
-                item.SwipeVisibility = UIVisibility.Collapsed;
                 item.HasPrevious = false;
                 item.HasNext = false;
+
+                if (_chat?.Messages.FirstOrDefault(message => message.Id == item.Id) is ChatMessage liveMessage)
+                {
+                    var total = _liveKind == ReplyKind.Variant ? liveMessage.Variants.Count + 1 : liveMessage.Variants.Count;
+                    var currentIndex = _liveKind == ReplyKind.Variant ? total : Math.Clamp(liveMessage.Chosen, 0, Math.Max(0, liveMessage.Variants.Count - 1)) + 1;
+                    item.VariantLabel = string.Create(CultureInfo.InvariantCulture, $"{currentIndex}/{total}");
+                    item.SwipeVisibility = total > 1 ? UIVisibility.Visible : UIVisibility.Collapsed;
+                }
+                else
+                {
+                    item.SwipeVisibility = UIVisibility.Collapsed;
+                }
+
                 continue;
             }
 
