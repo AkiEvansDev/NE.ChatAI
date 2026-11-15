@@ -167,9 +167,6 @@ internal abstract partial class ShellController
     [RecursiveMember]
     public partial string CharacterPostHistoryInstructions { get; set; } = string.Empty;
 
-    [RecursiveMember]
-    public partial string CharacterCreatorNotes { get; set; } = string.Empty;
-
     /// <summary>The character's author's note, added to the global one and the chat's.</summary>
     [RecursiveMember]
     public partial string CharacterAuthorsNote { get; set; } = string.Empty;
@@ -347,7 +344,6 @@ internal abstract partial class ShellController
         CharacterExampleMessages = card.ExampleMessages.TrimEnd('\r', '\n');
         CharacterSystemPrompt = card.SystemPrompt?.TrimEnd('\r', '\n') ?? string.Empty;
         CharacterPostHistoryInstructions = card.PostHistoryInstructions?.TrimEnd('\r', '\n') ?? string.Empty;
-        CharacterCreatorNotes = card.CreatorNotes.TrimEnd('\r', '\n');
         CharacterAuthorsNote = card.AuthorsNote?.TrimEnd('\r', '\n') ?? string.Empty;
         CharacterBackground.Show(Pictures.CharacterBackgroundOf(cardId));
     }
@@ -515,7 +511,6 @@ internal abstract partial class ShellController
             ExampleMessages = CharacterExampleMessages.TrimEnd('\r', '\n'),
             SystemPrompt = string.IsNullOrWhiteSpace(CharacterSystemPrompt) ? null : CharacterSystemPrompt.TrimEnd('\r', '\n'),
             PostHistoryInstructions = string.IsNullOrWhiteSpace(CharacterPostHistoryInstructions) ? null : CharacterPostHistoryInstructions.TrimEnd('\r', '\n'),
-            CreatorNotes = CharacterCreatorNotes.TrimEnd('\r', '\n'),
             AuthorsNote = string.IsNullOrWhiteSpace(CharacterAuthorsNote) ? null : CharacterAuthorsNote.TrimEnd('\r', '\n')
         };
     }

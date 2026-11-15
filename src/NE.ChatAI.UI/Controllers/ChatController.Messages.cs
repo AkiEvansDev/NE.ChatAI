@@ -270,6 +270,8 @@ internal sealed partial class ChatController
                 item.ShowThought(null, _hideThoughts, thinking: false);
             }
 
+            Chat preTurnChat = _chat;
+
             if (kind == ReplyKind.Remake)
             {
                 IReadOnlyList<ChatRecord> keptRecords = ChatRecords.DropInsertionsFrom(_chat.Messages, _chat.Records, at);
@@ -281,7 +283,7 @@ internal sealed partial class ChatController
                 }
             }
 
-            job = BeginReply(profile, chatId, _chat, kind, item, [.. _chat.Messages.Take(at)], kind == ReplyKind.Continuation ? message.Current.Text : null);
+            job = BeginReply(profile, chatId, preTurnChat, kind, item, [.. _chat.Messages.Take(at)], kind == ReplyKind.Continuation ? message.Current.Text : null);
 
             if (at < _chat.Messages.Count - 1)
                 Messages.Reread(endsAtLive: true);

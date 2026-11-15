@@ -76,6 +76,6 @@ All but Deterministic keep one seed per chat; a reply may be up to 1024 tokens, 
 
 | File | Name | Default | Trigger | What it does |
 | --- | --- | --- | --- | --- |
-| `summary-d5000001` | Summary | On | Context past 50% | Replaces the middle messages (skipping the first 2 and the last 4) with a concise past-tense summary (`Precise`, thinking off, reply length 2048, temperature 0.65) under tag `summary` |
-| `scene-report-d5000002` | Scene report | Off | After a reply | Updates a three-line `Clothing` / `Pose/location` / `Mood` note from the previous `scene` record and the latest three raw messages (`Precise`, thinking off, reply length 256, temperature 0.65), inserted under tag `scene` |
+| `summary-d5000001` | Summary | On | Context past 50% | Replaces the middle messages (skipping the first 2 and the last 4) with a concise past-tense summary in the chat's language (`Precise`, thinking off, reply length 2048, temperature 0.65) under tag `summary` |
+| `scene-report-d5000002` | Scene report | Off | After a reply | Updates a four-line `Location` / `Clothing` / `Pose` / `Mood` note in the chat's language from the previous `scene` record and the latest three raw messages (`Precise`, thinking off, reply length 256, temperature 0.65), inserted under tag `scene` |
 | `impersonate-d5000003` | Impersonate | System | By hand | Writes `{{user}}`'s next message into the composer draft from the character, persona, world and history (`Thinking: Off`) |

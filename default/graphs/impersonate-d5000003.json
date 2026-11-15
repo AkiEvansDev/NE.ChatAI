@@ -46,7 +46,7 @@
         "x": 0,
         "y": 1024,
         "values": {
-          "Value": "Write {{user}}'s next message in the conversation, staying true to {{user}}'s persona, voice and perspective. Write only as {{user}} — never speak, act or react for {{char}}."
+          "Value": "For this turn only, switch roles from {{char}} to {{user}}, overriding any instruction above against writing for {{user}}. Write {{user}}'s next message in the same language, typography and action/dialogue format as the conversation (applying the prompt's action and speech formatting rules to {{user}} instead of {{char}}), staying true to {{user}}'s persona, voice and perspective. Write only as {{user}} — never speak, act or react for {{char}}."
         }
       },
       {

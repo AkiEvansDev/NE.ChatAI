@@ -65,15 +65,49 @@ internal static class CardEditor
             hint
         );
 
-    /// <summary>A Markdown and macro field of the card kept as it lets go, as tall as a card's words are long.</summary>
-    public static IVisualComponent Area<TSource>(string title, Expression<Func<TSource, object?>> property, int rows, string? hint = null)
+    /// <summary>A Markdown and macro field of the card kept as it lets go, optionally expandable into the full-height editor.</summary>
+    public static IVisualComponent Area<TSource>(string title, Expression<Func<TSource, object?>> property, int rows, bool expandable = false, string? hint = null)
     {
-        CodeInputComponent area = SettingsEditors.MacroInput(title, rows)
+        CodeInputComponent field = SettingsEditors.MacroInput(title, rows, expandable: expandable)
             .BindValue(property)
             .OnChange(nameof(ShellController.SaveCardAsync));
 
-        return hint is null ? area : UIForm.Field(area, hint);
+        return hint is null ? field : UIForm.Field(field, hint);
     }
+
+    /// <summary>A Markdown and macro field that stretches to the bottom of a full-height dialog tab or screen.</summary>
+    public static ContainerComponent FillArea<TSource>(string title, Expression<Func<TSource, object?>> property, bool lineNumbers = false, bool expandable = false, string? hint = null)
+    {
+        CodeInputComponent area = SettingsEditors.MacroInput(title, 12, lineNumbers, expandable)
+            .SetHeight(UILayoutLength.Fill())
+            .SetMinHeight(UILayoutLength.Absolute(160))
+            .SetVerticalAlignment(UIAlignment.Stretch)
+            .BindValue(property)
+            .OnChange(nameof(ShellController.SaveCardAsync));
+        ContainerComponent container = new ContainerComponent()
+            .SetHeight(UILayoutLength.Fill())
+            .SetRow(1, UIGridUnit.Star())
+            .AddChild(area.SetPlacement(1, 1, 24, 1));
+
+        if (hint is null)
+            return container;
+
+        return container
+            .AddRow(UIGridUnit.Auto())
+            .AddChild(UIText.Note(hint)
+                .SetMargin(UIThickness.All(0, 6, 0, 0))
+                .SetPlacement(1, 2, 24, 1)
+            );
+    }
+
+    /// <summary>A scrollable tab body inside a full-height card dialog, keeping horizontal bleed room for focus rings and switches.</summary>
+    public static ScrollContainerComponent Scroll(IVisualComponent content)
+        => new ScrollContainerComponent()
+            .SetHeight(UILayoutLength.Fill())
+            .SetScrollFade(true)
+            .SetMargin(UIThickness.Symmetric(-8, 0))
+            .SetPadding(UIThickness.Symmetric(8, 2))
+            .AddChild(content);
 
     /// <summary>One row of an accordion list in a card editor with a delete action in the header and its content inside.</summary>
     public static ExpanderComponent Fold<TItem>(string removeCommand, string keyName, IVisualComponent content)
@@ -86,17 +120,15 @@ internal static class CardEditor
                 .SetMargin(UIThickness.All(0, 0, 36, 0))
                 .BindTitle<TItem>(static x => x.Header, UIBindingScope.Relative)
             )
-            .SetHeaderAction(UILayout.Row(4,
-                    UIIconButtons.Delete()
-                        .SetSize(UISize.Small)
-                        .OnClick(removeCommand, UIAction.ArgCurrentItemKey(keyName))
-                )
+            .SetHeaderAction(UIIconButtons.Delete()
+                .SetSize(UISize.Small)
                 .SetMargin(UIThickness.All(0, -4, 0, 4))
+                .OnClick(removeCommand, UIAction.ArgCurrentItemKey(keyName))
             )
             .BindExpanded<TItem>(static x => x.Expanded, UIBindingScope.Relative)
             .SetContent(content);
 
-    /// <summary>One row of an accordion list in a card editor: its renamable header, its rename and delete actions, and its fields inside.</summary>
+    /// <summary>One row of an accordion list in a card editor: its renamable two-line header, its rename and delete actions, and its fields inside.</summary>
     public static ExpanderComponent Fold(string saveCommand, string removeCommand, string keyName, params IVisualComponent[] fields)
     {
         ExpanderHeaderRegion? headerRegion = null;
@@ -120,34 +152,33 @@ internal static class CardEditor
             .BindExpanded<ArticleItem>(static x => x.Expanded, UIBindingScope.Relative)
             .SetContent(UILayout.Stack(12, fields));
 
-        return expander.SetHeaderAction(UILayout.Row(4,
-                UIIconButtons.Rename()
-                    .SetSize(UISize.Small)
-                    .InteractOn(EventNames.Click, new RenameItemEffect(headerRegion!)),
-                UIIconButtons.Delete()
-                    .SetSize(UISize.Small)
-                    .OnClick(removeCommand, UIAction.ArgCurrentItemKey(keyName))
+        return expander.SetHeaderAction(new StackPanelComponent()
+            .SetOrientation(UIOrientation.Horizontal)
+            .SetSpacing(4)
+            .SetMargin(UIThickness.All(0, 2, 0, -2))
+            .AddChild(UIIconButtons.Rename()
+                .SetSize(UISize.Small)
+                .InteractOn(EventNames.Click, new RenameItemEffect(headerRegion!))
             )
-            .SetMargin(UIThickness.All(0, -4, 0, 4))
+            .AddChild(UIIconButtons.Delete()
+                .SetSize(UISize.Small)
+                .OnClick(removeCommand, UIAction.ArgCurrentItemKey(keyName))
+            )
         );
     }
 
-    /// <summary>A wide card-editor dialog with a fixed header, token count, duplicate and delete buttons in it, and a scrollable body.</summary>
+    /// <summary>A wide full-height card-editor dialog with a fixed header, token count, duplicate and delete buttons in it, and a stretched body.</summary>
     public static UIDialog CreateDialog(string key, string title, IVisualComponent body)
-        => UIDialogs.Create(
+        => UIDialogs.Fill(
             key,
             title,
-            new ContainerComponent(key).AddChild(body),
+            new ContainerComponent(key)
+                .SetHeight(UILayoutLength.Fill())
+                .AddChild(body),
             width: UIColumnWidth.Wide,
             trailing:
             [
-                new TextComponent()
-                    .SetTitleType(UITextAppearance.Caption)
-                    .SetTitleColor(UIThemeColor.Muted)
-                    .SetTitleWrap(false)
-                    .SetVerticalAlignment(UIAlignment.Center)
-                    .SetMargin(UIThickness.All(0, 0, 4, 0))
-                    .BindTitle<ShellController>(static x => x.CardTokens),
+                TokensCaption(static x => x.CardTokens),
                 UIIconButtons.Duplicate()
                     .SetSize(UISize.Small)
                     .OnClick(nameof(ShellController.DuplicateEditingCardAsync)),
@@ -155,10 +186,16 @@ internal static class CardEditor
                     .SetSize(UISize.Small)
                     .OnClick(nameof(ShellController.AskDeleteEditingCard))
             ]
-        ) with
-        {
-            Height = UIResponsive<UILayoutLength>.Create(UILayoutLength.Fill())
-        };
+        );
+
+    private static TextComponent TokensCaption(Expression<Func<ShellController, object?>> tokens)
+        => new TextComponent()
+            .SetTitleType(UITextAppearance.Caption)
+            .SetTitleColor(UIThemeColor.Muted)
+            .SetTitleWrap(false)
+            .SetVerticalAlignment(UIAlignment.Center)
+            .SetMargin(UIThickness.All(0, 0, 4, 0))
+            .BindTitle(tokens);
 
     /// <summary>The tags dialog and the question before a tag is deleted.</summary>
     public static IReadOnlyList<UIDialog> CreateTagsDialogs()

@@ -4,7 +4,7 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Characters;
 
-/// <summary>What a character, a persona and a world share: a name, tags, the card's words, notes and the world it is played in.</summary>
+/// <summary>What a character, a persona and a world share: a name, tags, the card's words, an author's note and the world it is played in.</summary>
 public abstract record Card : NamedDocument
 {
     public IReadOnlyList<string> Tags { get; init; } = [];
@@ -14,8 +14,6 @@ public abstract record Card : NamedDocument
     public string Personality { get; init; } = string.Empty;
 
     public string Scenario { get; init; } = string.Empty;
-
-    public string CreatorNotes { get; init; } = string.Empty;
 
     /// <summary>An author's note of its own, added to the global one and the chat's.</summary>
     public string? AuthorsNote { get; init; }

@@ -49,7 +49,7 @@
         "x": 0,
         "y": 1024,
         "values": {
-          "Value": "Pause the roleplay and ignore the roleplay and language instructions above. Write a concise factual summary in English of the dialogue and any earlier summary above in past tense, preserving every event, decision, relationship shift, location and item introduced. Output only the summary, without headings, commentary or new dialogue."
+          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Write a concise factual summary of the dialogue and any earlier summary above in past tense, in the same language as the dialogue, preserving every event, decision, relationship shift, location, attire change and item introduced. Output only the summary prose, without headings, bullets, commentary or new dialogue."
         }
       },
       {

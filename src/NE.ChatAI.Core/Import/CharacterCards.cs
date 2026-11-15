@@ -115,7 +115,6 @@ public static class CharacterCards
             Description = (JsonValues.String(data, "description") ?? string.Empty).TrimEnd('\r', '\n'),
             Personality = (JsonValues.String(data, "personality") ?? string.Empty).TrimEnd('\r', '\n'),
             Scenario = (JsonValues.String(data, "scenario") ?? string.Empty).TrimEnd('\r', '\n'),
-            CreatorNotes = (JsonValues.String(data, "creator_notes") ?? JsonValues.String(data, "creatorcomment") ?? string.Empty).TrimEnd('\r', '\n'),
             ExampleMessages = (JsonValues.String(data, "mes_example") ?? string.Empty).TrimEnd('\r', '\n'),
             FirstMessages = firstMessages,
             // A card's own prompts are trimmed as SillyTavern trims them, so one of spaces alone is none.

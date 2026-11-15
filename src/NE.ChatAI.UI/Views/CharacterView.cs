@@ -11,24 +11,32 @@ internal static class CharacterView
     public static UIDialog CreateDialog()
         => CardEditor.CreateDialog(ShellController.CharacterDialogKey, "chatai.character.title",
             new TabsComponent("chatai-character-tabs")
-                .AddTab("card", "chatai.character.card", UILayout.Stack(16,
-                    CardEditor.CreateHead(),
-                    CardEditor.WorldField("chatai.character.world.hint"),
-                    CardEditor.Area<ShellController>("chatai.character.description", static x => x.CardDescription, 20),
-                    CardEditor.Area<ShellController>("chatai.character.personality", static x => x.CharacterPersonality, 6),
-                    CardEditor.Area<ShellController>("chatai.character.scenario", static x => x.CharacterScenario, 6)
-                ))
-                .AddTab("greetings", "chatai.character.greetings", CreateGreetings())
-                .AddTab("examples", "chatai.character.examples",
-                    CardEditor.Area<ShellController>("chatai.character.example-messages", static x => x.CharacterExampleMessages, 24, "chatai.character.example-messages.hint")
+                .SetHeight(UILayoutLength.Fill())
+                .AddTab("card", "chatai.character.card",
+                    CardEditor.Scroll(
+                        UILayout.Stack(16,
+                            CardEditor.CreateHead(),
+                            CardEditor.WorldField("chatai.character.world.hint"),
+                            CardEditor.Area<ShellController>("chatai.character.description", static x => x.CardDescription, 20, expandable: true),
+                            CardEditor.Area<ShellController>("chatai.character.personality", static x => x.CharacterPersonality, 6, expandable: true),
+                            CardEditor.Area<ShellController>("chatai.character.scenario", static x => x.CharacterScenario, 6, expandable: true)
+                        )
+                    )
                 )
-                .AddTab("more", "chatai.character.more", UILayout.Stack(16,
-                    PictureFields.Background<ShellController>("chatai.character.background", "chatai.character.background.hint", static x => x.CharacterBackground, nameof(ShellController.SaveCharacterBackgroundAsync), nameof(ShellController.RemoveCharacterBackgroundAsync), static x => x.CardName, static x => x.CardAvatar.Value),
-                    CardEditor.Area<ShellController>("chatai.character.authors-note", static x => x.CharacterAuthorsNote, 4, "chatai.character.authors-note.hint"),
-                    CardEditor.Area<ShellController>("chatai.character.system-prompt", static x => x.CharacterSystemPrompt, 8, "chatai.character.system-prompt.hint"),
-                    CardEditor.Area<ShellController>("chatai.character.post-history", static x => x.CharacterPostHistoryInstructions, 8, "chatai.character.post-history.hint"),
-                    CardEditor.Area<ShellController>("chatai.character.creator-notes", static x => x.CharacterCreatorNotes, 8, "chatai.character.creator-notes.hint")
-                ))
+                .AddTab("greetings", "chatai.character.greetings", CardEditor.Scroll(CreateGreetings()))
+                .AddTab("examples", "chatai.character.examples",
+                    CardEditor.FillArea<ShellController>("chatai.character.example-messages", static x => x.CharacterExampleMessages, lineNumbers: true, hint: "chatai.character.example-messages.hint")
+                )
+                .AddTab("more", "chatai.character.more",
+                    CardEditor.Scroll(
+                        UILayout.Stack(16,
+                            PictureFields.Background<ShellController>("chatai.character.background", "chatai.character.background.hint", static x => x.CharacterBackground, nameof(ShellController.SaveCharacterBackgroundAsync), nameof(ShellController.RemoveCharacterBackgroundAsync), static x => x.CardName, static x => x.CardAvatar.Value),
+                            CardEditor.Area<ShellController>("chatai.character.authors-note", static x => x.CharacterAuthorsNote, 4, hint: "chatai.character.authors-note.hint"),
+                            CardEditor.Area<ShellController>("chatai.character.system-prompt", static x => x.CharacterSystemPrompt, 8, hint: "chatai.character.system-prompt.hint"),
+                            CardEditor.Area<ShellController>("chatai.character.post-history", static x => x.CharacterPostHistoryInstructions, 8, hint: "chatai.character.post-history.hint")
+                        )
+                    )
+                )
         );
 
     /// <summary>The first messages in an accordion, the first line and delete in each header and a borderless ghost editor inside, a new chat opening with them as variants.</summary>

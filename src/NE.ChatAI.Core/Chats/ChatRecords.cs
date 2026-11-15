@@ -16,6 +16,9 @@ public sealed record ChatHistorySlice(IReadOnlyList<PromptMessage> Messages, str
 /// </summary>
 public static class ChatRecords
 {
+    /// <summary>How many active-branch records sharing a tag are kept across distinct anchors: the current one and one previous backup.</summary>
+    public const int MaxActivePerTag = 2;
+
     /// <summary>The history as the main prompt sends it: active non-stale replacements substituted and insertions placed after their message.</summary>
     public static IReadOnlyList<PromptMessage> ProjectHistory(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records)
     {
@@ -41,6 +44,7 @@ public static class ChatRecords
             return RawTurns(messages);
 
         Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, (int Anchor, int Span, int RecordIndex)>? latestByTag = SelectLatestNonStaleByTag(records, indexById, messages);
         List<(int First, int Last, int Order, ChatRecord Record)> replacements = [];
         Dictionary<int, List<ChatRecord>> insertions = [];
 
@@ -49,6 +53,9 @@ public static class ChatRecords
             ChatRecord record = records[i];
 
             if (record.Stale)
+                continue;
+
+            if (record.Tag is string tag && latestByTag is not null && latestByTag.TryGetValue(tag, out (int Anchor, int Span, int RecordIndex) latest) && latest.RecordIndex != i)
                 continue;
 
             if (TryResolveRange(record, indexById, out var first, out var last))
@@ -126,6 +133,51 @@ public static class ChatRecords
             map[messages[i].Id] = i;
 
         return map;
+    }
+
+    private static Dictionary<string, (int Anchor, int Span, int RecordIndex)>? SelectLatestNonStaleByTag(IReadOnlyList<ChatRecord> records, Dictionary<string, int> indexById, IReadOnlyList<ChatMessage> messages)
+    {
+        Dictionary<string, (int Anchor, int Span, int RecordIndex)>? bestByTag = null;
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            ChatRecord record = records[i];
+
+            if (record.Stale || record.Tag is not string tag || !TryResolveActiveAnchor(record, indexById, messages, out var anchor, out var span))
+                continue;
+
+            bestByTag ??= [with(StringComparer.Ordinal)];
+
+            if (!bestByTag.TryGetValue(tag, out (int Anchor, int Span, int RecordIndex) current)
+                || anchor > current.Anchor
+                || (anchor == current.Anchor && span >= current.Span))
+            {
+                bestByTag[tag] = (anchor, span, i);
+            }
+        }
+
+        return bestByTag;
+    }
+
+    private static bool TryResolveActiveAnchor(ChatRecord record, Dictionary<string, int> indexById, IReadOnlyList<ChatMessage> messages, out int anchorIndex, out int span)
+    {
+        if (TryResolveRange(record, indexById, out var first, out var last))
+        {
+            anchorIndex = last;
+            span = last - first;
+            return true;
+        }
+
+        if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex) && IsVariantActive(record, messages[afterIndex]))
+        {
+            anchorIndex = afterIndex;
+            span = 0;
+            return true;
+        }
+
+        anchorIndex = -1;
+        span = 0;
+        return false;
     }
 
     private static bool TryResolveRange(ChatRecord record, Dictionary<string, int> indexById, out int first, out int last)
@@ -214,29 +266,94 @@ public static class ChatRecords
         return null;
     }
 
-    /// <summary>Finds the active timeline's latest record carrying <paramref name="tag"/>, stale or current; <c>null</c> when none matches.</summary>
-    public static ChatRecord? FindByTag(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records, string? tag)
+    /// <summary>The message id under which <paramref name="record"/> renders its folded block in the feed, or <c>null</c> when inactive or superseded by a newer active record of the same tag.</summary>
+    public static string? VisibleAnchorMessageId(ChatRecord record, IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(records);
+
+        if (AnchorMessageId(record, messages) is not string anchorId)
+            return null;
+
+        if (record.Tag is not string tag)
+            return anchorId;
+
+        Dictionary<string, int> indexById = IndexMap(messages);
+
+        if (!TryResolveActiveAnchor(record, indexById, messages, out var ownAnchor, out var ownSpan))
+            return null;
+
+        var passedSelf = false;
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            ChatRecord other = records[i];
+
+            if (ReferenceEquals(other, record) || other.Id == record.Id)
+            {
+                passedSelf = true;
+                continue;
+            }
+
+            if (!string.Equals(other.Tag, tag, StringComparison.Ordinal)
+                || !TryResolveActiveAnchor(other, indexById, messages, out var otherAnchor, out var otherSpan))
+            {
+                continue;
+            }
+
+            if (otherAnchor > ownAnchor
+                || (otherAnchor == ownAnchor && (otherSpan > ownSpan || (otherSpan == ownSpan && passedSelf))))
+            {
+                return null;
+            }
+        }
+
+        return anchorId;
+    }
+
+    /// <summary>Finds the active timeline's latest record carrying <paramref name="tag"/> (optionally strictly before <paramref name="beforeAnchorId"/>), stale or current; <c>null</c> when none matches.</summary>
+    public static ChatRecord? FindByTag(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records, string? tag, string? beforeAnchorId = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
         ArgumentNullException.ThrowIfNull(records);
 
-        if (string.IsNullOrWhiteSpace(tag))
+        if (string.IsNullOrWhiteSpace(tag) || records.Count == 0 || messages.Count == 0)
             return null;
 
         var trimmed = tag.Trim();
+        Dictionary<string, int> indexById = IndexMap(messages);
+        var cutoff = -1;
+        var hasCutoff = beforeAnchorId is not null && indexById.TryGetValue(beforeAnchorId, out cutoff);
+        ChatRecord? best = null;
+        var bestAnchor = -1;
+        var bestSpan = -1;
 
-        for (var i = records.Count - 1; i >= 0; i--)
+        for (var i = 0; i < records.Count; i++)
         {
             ChatRecord record = records[i];
 
-            if (string.Equals(record.Tag, trimmed, StringComparison.Ordinal) && AnchorMessageId(record, messages) is not null)
-                return record;
+            if (!string.Equals(record.Tag, trimmed, StringComparison.Ordinal)
+                || !TryResolveActiveAnchor(record, indexById, messages, out var anchorIndex, out var span))
+            {
+                continue;
+            }
+
+            if (hasCutoff && anchorIndex >= cutoff)
+                continue;
+
+            if (best is null || anchorIndex > bestAnchor || (anchorIndex == bestAnchor && span >= bestSpan))
+            {
+                best = record;
+                bestAnchor = anchorIndex;
+                bestSpan = span;
+            }
         }
 
-        return null;
+        return best;
     }
 
-    /// <summary>Commits <paramref name="written"/> records and <paramref name="generations"/> onto <paramref name="chat"/>, replacing earlier active-branch records with matching tags.</summary>
+    /// <summary>Commits <paramref name="written"/> records and <paramref name="generations"/> onto <paramref name="chat"/>, keeping the current and one previous active-branch record per tag.</summary>
     public static Chat PutMany(Chat chat, IReadOnlyList<ChatRecord> written, IReadOnlyList<GenerationRecord> generations)
     {
         ArgumentNullException.ThrowIfNull(chat);
@@ -247,33 +364,32 @@ public static class ChatRecords
             return chat;
 
         List<ChatRecord> records = [.. chat.Records];
+        Dictionary<string, int>? indexById = written.Count > 0 ? IndexMap(chat.Messages) : null;
 
         for (var i = 0; i < written.Count; i++)
         {
             ChatRecord incoming = NormalizeRecord(written[i], chat.Messages);
-            var replaced = false;
 
-            if (incoming.Tag is string tag)
+            if (incoming.Tag is string tag && indexById is not null && TryResolveActiveAnchor(incoming, indexById, chat.Messages, out var incomingAnchor, out _))
             {
+                // Replace any active record of the same tag at the same anchor in place so re-runs do not evict the previous turn's backup.
                 for (var j = records.Count - 1; j >= 0; j--)
                 {
-                    if (string.Equals(records[j].Tag, tag, StringComparison.Ordinal) && AnchorMessageId(records[j], chat.Messages) is not null)
+                    if (string.Equals(records[j].Tag, tag, StringComparison.Ordinal)
+                        && TryResolveActiveAnchor(records[j], indexById, chat.Messages, out var existingAnchor, out _)
+                        && existingAnchor == incomingAnchor)
                     {
-                        if (!replaced)
-                        {
-                            records[j] = incoming;
-                            replaced = true;
-                        }
-                        else
-                        {
-                            records.RemoveAt(j);
-                        }
+                        records.RemoveAt(j);
                     }
                 }
-            }
 
-            if (!replaced)
                 records.Add(incoming);
+                TrimActiveTagHistory(records, tag, indexById, chat.Messages);
+            }
+            else
+            {
+                records.Add(incoming);
+            }
         }
 
         IReadOnlyList<GenerationRecord> allGenerations = generations.Count == 0 ? chat.Generations : [.. chat.Generations, .. generations];
@@ -302,6 +418,46 @@ public static class ChatRecords
             && record.Variant == variant
             ? record
             : record with { Tag = trimmed, Text = text, Thought = thought, Variant = variant };
+    }
+
+    private static void TrimActiveTagHistory(List<ChatRecord> records, string tag, Dictionary<string, int> indexById, IReadOnlyList<ChatMessage> messages)
+    {
+        List<(int ListIndex, int Anchor, int Span)> active = [];
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            if (string.Equals(records[i].Tag, tag, StringComparison.Ordinal)
+                && TryResolveActiveAnchor(records[i], indexById, messages, out var anchor, out var span))
+            {
+                active.Add((i, anchor, span));
+            }
+        }
+
+        if (active.Count <= MaxActivePerTag)
+            return;
+
+        active.Sort(static (left, right) =>
+        {
+            var byAnchor = left.Anchor.CompareTo(right.Anchor);
+
+            if (byAnchor != 0)
+                return byAnchor;
+
+            var bySpan = left.Span.CompareTo(right.Span);
+
+            return bySpan != 0 ? bySpan : left.ListIndex.CompareTo(right.ListIndex);
+        });
+
+        var removeCount = active.Count - MaxActivePerTag;
+        List<int> removeIndices = [with(removeCount)];
+
+        for (var i = 0; i < removeCount; i++)
+            removeIndices.Add(active[i].ListIndex);
+
+        removeIndices.Sort();
+
+        for (var i = removeIndices.Count - 1; i >= 0; i--)
+            records.RemoveAt(removeIndices[i]);
     }
 
     /// <summary>Stamps <paramref name="variant"/> on any insertion record anchored to <paramref name="messageId"/> that was saved without an explicit variant index.</summary>

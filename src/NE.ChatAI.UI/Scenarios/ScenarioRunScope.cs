@@ -18,6 +18,7 @@ namespace NE.ChatAI.Scenarios;
 internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvider
 {
     private readonly Dictionary<string, MessageSlice> _slicesByNode = [with(StringComparer.Ordinal)];
+    private UINodeNetwork? _network;
 
     public required DataFolder Data { get; init; }
 
@@ -189,5 +190,93 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         }
 
         return null;
+    }
+
+    /// <summary>Finds the earliest target anchor message id written by an enabled writer node carrying <paramref name="tag"/>, so a reader of the same tag skips a record already sitting at that anchor.</summary>
+    public string? ResolveOverwrittenAnchor(string? tag)
+    {
+        if (Chat.Messages.Count == 0 || string.IsNullOrWhiteSpace(tag))
+            return null;
+
+        var trimmed = tag.Trim();
+        UINodeNetwork network = _network ??= ScenarioCatalog.Instance.Materialize(Document);
+        string? earliestAnchorId = null;
+        var earliestIndex = int.MaxValue;
+
+        for (var i = 0; i < network.Nodes.Length; i++)
+        {
+            UINodeInstance instance = network.Nodes[i];
+            var writerTag = ResolveWriterTag(network, instance);
+
+            if (!string.Equals(writerTag, trimmed, StringComparison.Ordinal))
+                continue;
+
+            var anchorId = ResolveWriterAnchor(network, instance);
+
+            if (anchorId is null)
+                continue;
+
+            var index = ChatEditing.IndexOf(Chat.Messages, anchorId);
+
+            if (index >= 0 && index < earliestIndex)
+            {
+                earliestIndex = index;
+                earliestAnchorId = anchorId;
+            }
+        }
+
+        return earliestAnchorId;
+    }
+
+    private static string? ResolveWriterTag(UINodeNetwork network, UINodeInstance instance)
+    {
+        var direct = instance.Node switch
+        {
+            InsertRecordNode insert => insert.Tag,
+            ReplaceRecordNode replace => replace.Tag,
+            _ => null
+        };
+
+        if (direct is null)
+            return null;
+
+        for (var i = 0; i < network.Connections.Length; i++)
+        {
+            UINodeConnection connection = network.Connections[i];
+
+            if (string.Equals(connection.To.Id, instance.Id, StringComparison.Ordinal)
+                && string.Equals(connection.ToPin, nameof(InsertRecordNode.Tag), StringComparison.Ordinal))
+            {
+                return connection.From.Node is TextNode textNode && !string.IsNullOrWhiteSpace(textNode.Value)
+                    ? textNode.Value.Trim()
+                    : null;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(direct) ? null : direct.Trim();
+    }
+
+    private string? ResolveWriterAnchor(UINodeNetwork network, UINodeInstance writer)
+    {
+        for (var i = 0; i < network.Connections.Length; i++)
+        {
+            UINodeConnection connection = network.Connections[i];
+
+            if (!string.Equals(connection.To.Id, writer.Id, StringComparison.Ordinal)
+                || !string.Equals(connection.ToPin, nameof(ReplaceRecordNode.Slice), StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (_slicesByNode.TryGetValue(connection.From.Id, out MessageSlice? slice))
+                return slice.LastMessageId;
+
+            if (connection.From.Node is MessagesNode messages)
+                return ChatRecords.Slice(Chat.Messages, Chat.Records, messages.SkipStart, messages.SkipEnd, messages.Last, messages.Raw).LastMessageId;
+
+            return null;
+        }
+
+        return writer.Node is InsertRecordNode ? Chat.Messages[^1].Id : null;
     }
 }

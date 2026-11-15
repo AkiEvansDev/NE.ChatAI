@@ -58,7 +58,7 @@
         "x": 0,
         "y": 1024,
         "values": {
-          "Value": "Pause the roleplay and ignore the roleplay and language instructions above. Write in English only. State the current scene in three short factual lines — Clothing:, Pose/location:, Mood: — based strictly on the latest messages above, updating the previous report only where those messages changed it (or establishing it from the latest messages when there is none; use the character card only for baseline attire not specified in the messages, and ignore example dialogues or general habits in the card). Output only the three lines, with no prose, headings or narration."
+          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Write in the same language as the latest messages above. State the current scene in four short factual lines in this exact order — Location:, Clothing:, Pose:, Mood: in English, or Место:, Одежда:, Поза:, Настроение: in Russian (translate the four labels if the chat uses another language) — based strictly on the latest messages, updating the previous report only where those messages changed it, or establishing it when there is none. Use {{char}}'s card only for baseline attire of the active outfit when unspecified in the messages, ignoring example dialogues and general habits. Include {{char}} (and {{user}} where the scene specifies their attire or position) in Clothing and Pose; Mood describes {{char}} only. Output only the four lines, with no bullets, bold, asterisks, quotes or extra text."
         }
       },
       {

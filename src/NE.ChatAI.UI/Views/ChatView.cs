@@ -335,23 +335,13 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
         ];
 
     private static UIDialog CreatePromptDialog()
-    {
-        UIDialog dialog = UIDialogs.Create(ChatController.PromptDialogKey, "chatai.chat.prompt.title", new ContainerComponent(), width: UIColumnWidth.Wide);
-        StackPanelComponent original = (StackPanelComponent)dialog.Content;
-        IVisualComponent header = original.Children[0];
-
-        return dialog with
-        {
-            Height = UIResponsive<UILayoutLength>.Create(UILayoutLength.Fill()),
-            Content = new ContainerComponent()
-                .SetWidth(original.Width)
+        => UIDialogs.Fill(ChatController.PromptDialogKey, "chatai.chat.prompt.title",
+            new ContainerComponent()
+                .SetHeight(UILayoutLength.Fill())
                 .SetRow(1, UIGridUnit.Auto())
-                .AddRow(UIGridUnit.Auto())
                 .AddRow(UIGridUnit.Star())
                 .SetSpacing(12)
-                .SetHeight(UILayoutLength.Fill())
-                .AddChild(new ContainerComponent().AddChild(header).SetPlacement(1, 1, 24, 1))
-                .AddChild(UIText.Note().BindDescription<ChatController>(static x => x.PromptSummary).SetPlacement(1, 2, 24, 1))
+                .AddChild(UIText.Note().BindDescription<ChatController>(static x => x.PromptSummary).SetPlacement(1, 1, 24, 1))
                 .AddChild(SettingsEditors.StyleMacroCode(new CodeInputComponent())
                     .SetAppearance(UIInputAppearance.Filled)
                     .SetWrapLines(true)
@@ -362,8 +352,8 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
                     .SetHeight(UILayoutLength.Fill())
                     .SetVerticalAlignment(UIAlignment.Stretch)
                     .BindValue<ChatController>(static x => x.PromptText)
-                    .SetPlacement(1, 3, 24, 1)
-                )
-        };
-    }
+                    .SetPlacement(1, 2, 24, 1)
+                ),
+            width: UIColumnWidth.Wide
+        );
 }

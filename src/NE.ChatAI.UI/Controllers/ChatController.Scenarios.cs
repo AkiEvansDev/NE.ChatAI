@@ -72,6 +72,7 @@ internal sealed partial class ChatController
     private StreamingRecord? _streamingRecord;
     private string? _draftGenerationId;
     private readonly List<string> _draftContinuations = [];
+    private readonly HashSet<string> _hiddenBackupRecordIds = [with(StringComparer.Ordinal)];
 
     private async Task ShowScenarioMenuAsync(CancellationToken cancellationToken)
     {
@@ -290,6 +291,7 @@ internal sealed partial class ChatController
 
             chatId = OpenChatId;
             _generating = true;
+            CaptureHiddenBackupRecords(_chat);
             CloseOpenEditors();
             RefreshRealizedMessages();
             RefreshRealizedRecords();
@@ -313,6 +315,22 @@ internal sealed partial class ChatController
         }
 
         return UICommandResult.Ok();
+    }
+
+    private void CaptureHiddenBackupRecords(Chat chat)
+    {
+        _hiddenBackupRecordIds.Clear();
+
+        for (var i = 0; i < chat.Records.Count; i++)
+        {
+            ChatRecord record = chat.Records[i];
+
+            if (ChatRecords.AnchorMessageId(record, chat.Messages) is not null
+                && ChatRecords.VisibleAnchorMessageId(record, chat.Messages, chat.Records) is null)
+            {
+                _ = _hiddenBackupRecordIds.Add(record.Id);
+            }
+        }
     }
 
     private async Task RunManualScenarioJobAsync(string chatId, StoredDocument<Scenario> scenario, CancellationToken lifetime)
@@ -504,6 +522,7 @@ internal sealed partial class ChatController
             _streamingRecord = null;
             _generating = false;
             _generation = null;
+            _hiddenBackupRecordIds.Clear();
             ShowSendButton(stops: false);
             RefreshRealizedMessages();
             RefreshRealizedRecords();
@@ -533,7 +552,10 @@ internal sealed partial class ChatController
                 if (hideSavedInsertions && record.Replaces is not { Count: >= 2 })
                     continue;
 
-                if (ChatRecords.AnchorMessageId(record, chat.Messages) == item.Id)
+                if (_generating && _hiddenBackupRecordIds.Contains(record.Id))
+                    continue;
+
+                if (ChatRecords.VisibleAnchorMessageId(record, chat.Messages, chat.Records) == item.Id)
                     desired.Add((record.Id, FormatRecordTitle(record, ResolveRecordName(record)), record.Text, false));
             }
         }

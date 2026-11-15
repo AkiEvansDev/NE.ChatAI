@@ -21,23 +21,37 @@ internal static class WorldView
     public static UIDialog CreateDialog()
         => CardEditor.CreateDialog(ShellController.WorldDialogKey, "chatai.world.title",
             new TabsComponent("chatai-world-tabs")
-                .AddTab("overview", "chatai.world.overview", UILayout.Stack(16,
-                    CardEditor.CreateHead(),
-                    CardEditor.Area<ShellController>("chatai.world.overview", static x => x.CardDescription, 20, "chatai.world.overview.hint")
-                ))
-                .AddTab("articles", "chatai.world.articles", UILayout.Stack(16,
-                    UIForm.Field(new NumberInputComponent()
-                            .SetTitle("chatai.world.scan-depth")
-                            .SetShowStepper(true)
-                            .SetMin(1)
-                            .SetMax(64)
-                            .SetStep(1)
-                            .BindValue<ShellController>(static x => x.WorldScanDepth)
-                            .OnChange(nameof(ShellController.SaveCardAsync)),
-                        "chatai.world.scan-depth.hint"
-                    ),
-                    CreateArticles()
-                ))
+                .SetHeight(UILayoutLength.Fill())
+                .AddTab("overview", "chatai.world.overview",
+                    new ContainerComponent()
+                        .SetHeight(UILayoutLength.Fill())
+                        .SetRow(1, UIGridUnit.Auto())
+                        .AddRow(UIGridUnit.Star())
+                        .AddChild(CardEditor.CreateHead()
+                            .SetMargin(UIThickness.All(0, 0, 0, 16))
+                            .SetPlacement(1, 1, 24, 1)
+                        )
+                        .AddChild(CardEditor.FillArea<ShellController>("chatai.world.overview", static x => x.CardDescription, expandable: true, hint: "chatai.world.overview.hint")
+                            .SetPlacement(1, 2, 24, 1)
+                        )
+                )
+                .AddTab("articles", "chatai.world.articles",
+                    CardEditor.Scroll(
+                        UILayout.Stack(16,
+                            UIForm.Field(new NumberInputComponent()
+                                    .SetTitle("chatai.world.scan-depth")
+                                    .SetShowStepper(true)
+                                    .SetMin(1)
+                                    .SetMax(64)
+                                    .SetStep(1)
+                                    .BindValue<ShellController>(static x => x.WorldScanDepth)
+                                    .OnChange(nameof(ShellController.SaveCardAsync)),
+                                "chatai.world.scan-depth.hint"
+                            ),
+                            CreateArticles()
+                        )
+                    )
+                )
         );
 
     /// <summary>The articles in an accordion, each its fields with its rename and remove in the header; then a new one.</summary>
@@ -73,7 +87,7 @@ internal static class WorldView
                                 .OnChange(nameof(ShellController.SaveCardAsync))
                                 .SetVerticalAlignment(UIAlignment.End)
                         ),
-                        SettingsEditors.MacroInput(null, 12)
+                        SettingsEditors.MacroInput("chatai.world.article.text", 12, expandable: true)
                             .SetPlaceholder("chatai.world.article.text")
                             .BindValue<ArticleItem>(static x => x.Text, UIBindingScope.Relative)
                             .OnChange(nameof(ShellController.SaveCardAsync))

@@ -207,7 +207,8 @@ internal sealed class RecordNode : IGraphNode
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
-        ChatRecord? record = ChatRecords.FindByTag(scope.Chat.Messages, scope.Chat.Records, Tag);
+        var beforeAnchorId = scope.ResolveOverwrittenAnchor(Tag);
+        ChatRecord? record = ChatRecords.FindByTag(scope.Chat.Messages, scope.Chat.Records, Tag, beforeAnchorId);
         Found = record is not null;
         Stale = record?.Stale ?? false;
         Text = record?.Text ?? string.Empty;

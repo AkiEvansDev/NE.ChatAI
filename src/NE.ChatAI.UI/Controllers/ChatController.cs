@@ -658,6 +658,7 @@ internal sealed partial class ChatController : ShellController
         _generating = true;
         _liveKind = kind;
         Messages.Live = item;
+        CaptureHiddenBackupRecords(preTurnChat);
         CloseOpenEditors();
         item.ShowLoading(kind != ReplyKind.Continuation);
         RefreshRealizedMessages();
@@ -962,6 +963,7 @@ internal sealed partial class ChatController : ShellController
             {
                 _generating = false;
                 _generation = null;
+                _hiddenBackupRecordIds.Clear();
             }
 
             if (_chat is not null)

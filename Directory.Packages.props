@@ -1,7 +1,7 @@
 <Project>
 
   <PropertyGroup>
-    <NEStandardVersion>2.7.2</NEStandardVersion>
+    <NEStandardVersion>2.8.2</NEStandardVersion>
   </PropertyGroup>
 
   <ItemGroup>

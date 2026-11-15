@@ -181,13 +181,13 @@ internal static class SettingsEditors
     public static StackPanelComponent CreateSystemPrompt()
         => Editor(SettingsController.SystemPromptKind, static x => x.SystemPromptOptions, static x => x.SystemPrompt,
             Card(null,
-                Code("chatai.settings.system-prompt.content", static x => x.SystemPrompt.Draft.Content, SettingsController.SystemPromptKind, 24)
+                Code("chatai.settings.system-prompt.content", static x => x.SystemPrompt.Draft.Content, SettingsController.SystemPromptKind, 24, expandable: true)
             )
         );
 
     /// <summary>A document's text with macros in it, kept as it lets go.</summary>
-    private static CodeInputComponent Code(string title, Expression<Func<SettingsController, object?>> value, string kind, int rows)
-        => MacroInput(title, rows)
+    private static CodeInputComponent Code(string title, Expression<Func<SettingsController, object?>> value, string kind, int rows, bool lineNumbers = false, bool expandable = false)
+        => MacroInput(title, rows, lineNumbers, expandable)
             .BindValue(value)
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
@@ -197,19 +197,25 @@ internal static class SettingsEditors
     /// <c>DebounceMilliseconds</c> commits scripted edits (<c>Enter</c>, <c>Tab</c>, undo, completions) that prevent the browser's native
     /// <c>change</c> on blur.
     /// </remarks>
-    public static CodeInputComponent MacroInput(string? title, int rows)
+    public static CodeInputComponent MacroInput(string? title, int rows, bool lineNumbers = false, bool expandable = false)
     {
         CodeInputComponent input = StyleMacroCode(new CodeInputComponent())
             .SetAppearance(UIInputAppearance.Filled)
             .SetRows(rows)
             .SetWrapLines(true)
             .SetStatusBar(false)
-            .SetLineNumbers(true)
+            .SetLineNumbers(lineNumbers)
             .SetDebounceMilliseconds(240)
             .SetCompletionTriggers("{{")
             .SetCompletionItems(MacroCompletions);
 
-        return title is null ? input : input.SetTitle(title);
+        if (title is not null)
+            _ = input.SetTitle(title);
+
+        if (expandable)
+            _ = input.SetExpandable(static expand => expand.SetWidth(UIColumnWidth.Wide).SetLineNumbers(true).SetAppearance(UIInputAppearance.Ghost));
+
+        return input;
     }
 
     /// <summary>Styles a Markdown code input for roleplay prompts and cards: muted narration, speech, control tags, directives and value macros.</summary>
@@ -241,7 +247,7 @@ internal static class SettingsEditors
     public static StackPanelComponent CreatePrompt()
         => Editor(SettingsController.PromptKind, static x => x.PromptOptions, static x => x.Prompt,
             Card(null,
-                UIForm.Field(Code("chatai.settings.prompt.story", static x => x.Prompt.Draft.StoryString, SettingsController.PromptKind, 24), "chatai.settings.prompt.story.hint"),
+                UIForm.Field(Code("chatai.settings.prompt.story", static x => x.Prompt.Draft.StoryString, SettingsController.PromptKind, 18, lineNumbers: true), "chatai.settings.prompt.story.hint"),
                 UIForm.Row(
                     Text("chatai.settings.prompt.example-separator", static x => x.Prompt.Draft.ExampleSeparator, SettingsController.PromptKind),
                     Text("chatai.settings.prompt.chat-start", static x => x.Prompt.Draft.ChatStart, SettingsController.PromptKind)
