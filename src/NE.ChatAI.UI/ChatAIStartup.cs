@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using Microsoft.AspNetCore.DataProtection;
@@ -10,6 +11,7 @@ using NE.ChatAI.Chats;
 using NE.ChatAI.Controllers;
 using NE.ChatAI.Hosting;
 using NE.ChatAI.Localization;
+using NE.ChatAI.Plugins;
 using NE.ChatAI.Secrets;
 using NE.ChatAI.Storage;
 using NE.ChatAI.Views;
@@ -42,7 +44,8 @@ internal sealed class ChatAIStartup : UIStartupBase
             return new SecretStore(
                 Path.Combine(provider.GetRequiredService<DataFolder>().Root, "secrets.json"),
                 provider.GetRequiredService<IDataProtectionProvider>(),
-                name => configuration[$"{ChatAIOptions.Section}:Secrets:{name}"]
+                name => configuration[$"{ChatAIOptions.Section}:Secrets:{name}"],
+                () => ConfiguredSecretNames(configuration)
             );
         });
 
@@ -56,6 +59,16 @@ internal sealed class ChatAIStartup : UIStartupBase
             .RemoveAllLoggers();
         _ = services.AddSingleton<KoboldCppClients>();
 
+        _ = services.AddHttpClient(PluginManager.HttpClientName, static http =>
+            {
+                http.BaseAddress = new Uri("https://api.github.com/");
+                http.Timeout = TimeSpan.FromSeconds(30);
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("NE.ChatAI/1.0");
+                http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+            })
+            .RemoveAllLoggers();
+        _ = services.AddSingleton<PluginManager>();
+
         _ = services.AddSingleton(TimeProvider.System);
         _ = services.AddSingleton<ChatLibrary>();
         _ = services.AddSingleton<PictureContent>();
@@ -64,6 +77,15 @@ internal sealed class ChatAIStartup : UIStartupBase
         _ = services.AddSingleton<IUserSessionResolver>(static provider => provider.GetRequiredService<UserSessionResolver>());
 
         _ = services.AddHostedService<FirstStart>();
+    }
+
+    private static IEnumerable<string> ConfiguredSecretNames(IConfiguration configuration)
+    {
+        foreach (IConfigurationSection child in configuration.GetSection($"{ChatAIOptions.Section}:Secrets").GetChildren())
+        {
+            if (!string.IsNullOrEmpty(child.Value) && Slug.IsValidId(child.Key))
+                yield return child.Key;
+        }
     }
 
     protected override void ConfigureApplication(UIApplicationBuilder application)
@@ -93,6 +115,7 @@ internal sealed class ChatAIStartup : UIStartupBase
         _ = application.Route<ChatView, ChatController>(AppRoutes.Home);
         _ = application.Route<SettingsView, SettingsController>(AppRoutes.Settings);
         _ = application.Route<ScenarioView, ScenarioController>(AppRoutes.Scenarios);
+        _ = application.Route<PluginsView, PluginsController>(AppRoutes.Plugins);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using NE.ChatAI.Prompts;
 using NE.ChatAI.Storage;
@@ -44,6 +45,9 @@ public sealed record AppSettings : Document
 
     /// <summary>The tags a world is given, each with the colour its badge is drawn in.</summary>
     public IReadOnlyList<TagStyle> WorldTags { get; init; } = [];
+
+    /// <summary>Alias tags assigned to global gallery images (<c>imageId -&gt; tag</c>).</summary>
+    public IReadOnlyDictionary<string, string> ImageTags { get; init; } = FrozenDictionary<string, string>.Empty;
 }
 
 /// <summary>A tag and its colour, written as the UI writes a colour; none, and the badge takes the theme's quiet one.</summary>

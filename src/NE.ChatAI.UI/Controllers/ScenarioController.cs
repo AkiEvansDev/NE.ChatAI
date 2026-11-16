@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
-using NE.ChatAI.Backends.KoboldCpp;
 using NE.ChatAI.Chats;
 using NE.ChatAI.Connections;
 using NE.ChatAI.Hosting;
+using NE.ChatAI.Plugins;
 using NE.ChatAI.Scenarios;
 using NE.ChatAI.Storage;
 
@@ -30,10 +29,9 @@ internal sealed partial class ScenarioController : ShellController
     public const string CopyAction = "copy";
     public const string DeleteAction = "delete";
 
-    private readonly Lock _abortLock = new();
+    private readonly ActiveGenerations _activeGenerations = new();
     private readonly UINodeRuns _runs;
-    private KoboldCppClient? _kobold;
-    private string? _genKey;
+    private Action? _unsubscribeCatalog;
     private string? _renamingId;
     private string? _deletingId;
     private bool _creatingScenario;
@@ -41,7 +39,7 @@ internal sealed partial class ScenarioController : ShellController
 
     public ScenarioController()
     {
-        _runs = new UINodeRuns(CanvasId, ScenarioCatalog.Instance, () => Sheet, sheet => Sheet = sheet) { ShowRunPanel = true };
+        _runs = new UINodeRuns(CanvasId, () => Catalog, () => Sheet, sheet => Sheet = sheet) { ShowRunPanel = true };
     }
 
     [RecursiveMember(false)]
@@ -62,6 +60,9 @@ internal sealed partial class ScenarioController : ShellController
     public partial bool ScenarioEnabled { get; set; }
 
     [RecursiveMember]
+    public partial bool ScenarioPinned { get; set; }
+
+    [RecursiveMember]
     public partial string TriggerKind { get; set; } = nameof(ScenarioTriggerKind.Manual);
 
     [RecursiveMember]
@@ -69,6 +70,9 @@ internal sealed partial class ScenarioController : ShellController
 
     [RecursiveMember]
     public partial UIVisibility TriggerVisibility { get; set; } = UIVisibility.Collapsed;
+
+    [RecursiveMember]
+    public partial UINodeCatalog Catalog { get; set; } = ScenarioCatalog.BuiltIn;
 
     [RecursiveMember]
     public partial UIPhrase? SheetTitle { get; set; }
@@ -114,13 +118,50 @@ internal sealed partial class ScenarioController : ShellController
         return choices;
     }
 
+    protected override async Task OnAttachedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)
+    {
+        await base.OnAttachedAsync(navigation, cancellationToken).ConfigureAwait(false);
+        EnsureCatalogSubscription();
+    }
+
     protected override async Task OnNavigatedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(navigation);
 
+        EnsureCatalogSubscription();
         _ = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false);
         var named = navigation.TryGetParameter(AppRoutes.CardParameter, out var id) ? id : null;
         await LoadScenariosAsync(named, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void EnsureCatalogSubscription()
+    {
+        if (_unsubscribeCatalog is null && Context.Services.GetService<PluginManager>() is PluginManager plugins)
+        {
+            plugins.CatalogChanged += OnPluginCatalogChanged;
+            _unsubscribeCatalog = () => plugins.CatalogChanged -= OnPluginCatalogChanged;
+        }
+
+        Catalog = ScenarioCatalog.Resolve(Context.Services);
+    }
+
+    private void OnPluginCatalogChanged(UINodeCatalog catalog)
+        => Context.Runtime.Post(_ =>
+        {
+            Catalog = catalog;
+
+            return Task.CompletedTask;
+        });
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _unsubscribeCatalog?.Invoke();
+            _unsubscribeCatalog = null;
+        }
+
+        base.Dispose(disposing);
     }
 
     private async Task LoadScenariosAsync(string? preferredId, CancellationToken cancellationToken)
@@ -185,6 +226,7 @@ internal sealed partial class ScenarioController : ShellController
         var isSystem = chosen.Document.System;
         ScenarioId = chosen.Id;
         ScenarioEnabled = chosen.Document.Enabled;
+        ScenarioPinned = chosen.Document.Pinned;
         TriggerKind = chosen.Document.Trigger.Kind.ToString();
         TriggerSharePercent = Math.Clamp(Math.Round((decimal)chosen.Document.Trigger.Share * 100m), 5m, 95m);
         TriggerVisibility = isSystem ? UIVisibility.Collapsed : UIVisibility.Visible;
@@ -263,7 +305,7 @@ internal sealed partial class ScenarioController : ShellController
 
         ScenarioTriggerKind kind = Enum.TryParse(TriggerKind, out ScenarioTriggerKind parsed) ? parsed : current.Trigger.Kind;
         var share = Math.Clamp((double)(TriggerSharePercent / 100m), 0.05, 0.95);
-        Scenario updated = current with { Enabled = ScenarioEnabled, Trigger = new ScenarioTrigger { Kind = kind, Share = share } };
+        Scenario updated = current with { Enabled = ScenarioEnabled, Pinned = ScenarioPinned, Trigger = new ScenarioTrigger { Kind = kind, Share = share } };
 
         await Data.Scenarios.WriteAsync(id, updated, cancellationToken).ConfigureAwait(false);
     }
@@ -327,8 +369,10 @@ internal sealed partial class ScenarioController : ShellController
 
         if (id is not null && name.Length > 0 && Slug.IsValidId(id) && await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is { System: false } current)
         {
-            await Data.Scenarios.WriteAsync(id, current with { Name = name }, cancellationToken).ConfigureAwait(false);
-            await LoadScenariosAsync(id, cancellationToken).ConfigureAwait(false);
+            var newId = await DocumentRenames.SaveScenarioAsync(Data, id, current with { Name = name }, cancellationToken).ConfigureAwait(false);
+            await LoadScenariosAsync(newId, cancellationToken).ConfigureAwait(false);
+
+            return UICommandResult.Ok([new CloseDialogEffect(RenameDialogKey), new PushAddressEffect(new Dictionary<string, object?> { [AppRoutes.CardParameter] = newId })]);
         }
 
         return UICommandResult.Ok([new CloseDialogEffect(RenameDialogKey)]);
@@ -381,6 +425,7 @@ internal sealed partial class ScenarioController : ShellController
         {
             activeId = ScenarioId;
             sheet = Sheet;
+            Catalog = ScenarioCatalog.Resolve(Context.Services);
         }, cancellationToken).ConfigureAwait(false);
 
         var targetId = sheet.Key ?? activeId;
@@ -396,16 +441,9 @@ internal sealed partial class ScenarioController : ShellController
         var lastChatId = (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).LastChat;
         Chat previewChat = (lastChatId is not null ? await Chats.ReadAsync(lastChatId, cancellationToken).ConfigureAwait(false) : null) ?? new Chat();
         KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
-        ScenarioRunScope scope = await ScenarioExecutor.CreateScopeAsync(Context.Services, Data, clients, previewChat, targetId, current.Name, sheet, commitToChat: false, SetActiveGeneration, onStreamChunkAsync: null, cancellationToken).ConfigureAwait(false);
+        ScenarioRunScope scope = await ScenarioExecutor.CreateScopeAsync(Context.Services, Data, clients, previewChat, targetId, current.Name, sheet, commitToChat: false, _activeGenerations, onStreamChunkAsync: null, cancellationToken, chatId: lastChatId).ConfigureAwait(false);
 
-        try
-        {
-            _ = await _runs.SavedAsync(Context.SendEffectsAsync, Context.Runtime.InvokeAsync, scope, reason ?? string.Empty, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            SetActiveGeneration(null, null);
-        }
+        _ = await _runs.SavedAsync(Context.SendEffectsAsync, Context.Runtime.InvokeAsync, scope, reason ?? string.Empty, cancellationToken).ConfigureAwait(false);
 
         UINodeDocument? afterRun = null;
 
@@ -421,40 +459,11 @@ internal sealed partial class ScenarioController : ShellController
         return UICommandResult.Ok();
     }
 
-    private void SetActiveGeneration(KoboldCppClient? kobold, string? genKey)
-    {
-        lock (_abortLock)
-        {
-            _kobold = kobold;
-            _genKey = genKey;
-        }
-    }
-
-    /// <summary>Stops the preview run on the canvas and aborts any model call it had in flight.</summary>
+    /// <summary>Stops the preview run on the canvas and aborts every model call it has in flight.</summary>
     [UICommand]
     public async Task StopRunAsync(CancellationToken cancellationToken)
     {
         _runs.Stop();
-
-        KoboldCppClient? kobold;
-        string? genKey;
-
-        lock (_abortLock)
-        {
-            kobold = _kobold;
-            genKey = _genKey;
-        }
-
-        if (kobold is null || genKey is null)
-            return;
-
-        try
-        {
-            await kobold.AbortAsync(genKey, cancellationToken).ConfigureAwait(false);
-        }
-        catch (HttpRequestException exception)
-        {
-            Context.Logger.LogBackendFailure(exception);
-        }
+        await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), cancellationToken).ConfigureAwait(false);
     }
 }

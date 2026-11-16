@@ -24,6 +24,8 @@ internal sealed class SettingsView : ShellView, IUIViewDefinition
             .AddTab("samplers", "chatai.settings.samplers", SettingsEditors.CreateSamplers())
             .AddTab("notes", "chatai.settings.notes", SettingsEditors.CreateAuthorsNote())
             .AddTab("phrases", "chatai.settings.phrases", SettingsEditors.CreatePhrases())
+            .AddTab("gallery", "chatai.settings.gallery", SettingsEditors.CreateGallery())
+            .AddTab("secrets", "chatai.settings.secrets", SettingsEditors.CreateSecrets())
             .AddTab("import", "chatai.settings.import", SettingsEditors.CreateImport());
 
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
@@ -32,9 +34,25 @@ internal sealed class SettingsView : ShellView, IUIViewDefinition
             UIDialogs.Form(SettingsController.RenameDialogKey, "chatai.settings.rename.title", null,
                 new TextInputComponent()
                     .SetTitle("chatai.settings.name")
-                    .BindValue<SettingsController>(static x => x.RenameName)
-                    .OnEnter(nameof(SettingsController.RenameAsync)),
+                    .BindValue<SettingsController>(static x => x.RenameName),
                 UIButtons.Primary("chatai.settings.rename").OnClick(nameof(SettingsController.RenameAsync))
+            ),
+            UIDialogs.BoundForm<SettingsController>(SettingsController.SecretDialogKey, static x => x.SecretDialogTitle, null,
+                UILayout.Stack(12,
+                    new TextInputComponent()
+                        .SetTitle("chatai.secrets.name")
+                        .SetPlaceholder("deepl-api-key")
+                        .AsContent(TextInputComponent.PlaceholderProperty)
+                        .SetAutocomplete(UIAutocomplete.Off)
+                        .BindIsReadOnly<SettingsController>(static x => x.SecretNameReadOnly)
+                        .BindValue<SettingsController>(static x => x.SecretName),
+                    new TextInputComponent()
+                        .SetTitle("chatai.secrets.value")
+                        .SetType(UITextInputType.Password)
+                        .SetAutocomplete(UIAutocomplete.NewPassword)
+                        .BindValue<SettingsController>(static x => x.SecretValue)
+                ),
+                UIButtons.Primary(UIStandardAction.Save).OnClickShowingLoading(nameof(SettingsController.SaveSecretAsync))
             ),
             UIDialogs.BoundConfirm<SettingsController>(SettingsController.DeleteDialogKey, "chatai.settings.delete.title", static x => x.DeleteQuestion, "chatai.settings.delete", nameof(SettingsController.DeleteAsync)),
             UIDialogs.Confirm(SettingsController.RestoreDefaultsDialogKey, "chatai.import.defaults.restore.title", (UIPhrase?)"chatai.import.defaults.restore.question", "chatai.import.defaults.restore.confirm", nameof(SettingsController.RestoreDefaultsAsync))

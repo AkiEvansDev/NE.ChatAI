@@ -48,6 +48,7 @@ internal sealed partial class DocumentEditor<T, TDraft> : RecursiveObservable, I
     where TDraft : RecursiveObservable, IDocumentDraft<T>, new()
 {
     private DocumentStore<T>? _store;
+    private Func<string, T, CancellationToken, Task<string>>? _save;
     private Func<T> _blank = static () => throw new InvalidOperationException("The editor is not attached to its store.");
     private Func<RecursiveCollection<OptionItem>> _options = static () => [];
 
@@ -62,12 +63,13 @@ internal sealed partial class DocumentEditor<T, TDraft> : RecursiveObservable, I
 
     public string? Name => Id is null ? null : Draft.Name;
 
-    /// <summary>The kind's store, the document New makes, and the list the page chooses from.</summary>
-    public void Attach(DocumentStore<T> store, Func<T> blank, Func<RecursiveCollection<OptionItem>> options)
+    /// <summary>The kind's store, the document New makes, the list the page chooses from, and an optional rename-aware writer.</summary>
+    public void Attach(DocumentStore<T> store, Func<T> blank, Func<RecursiveCollection<OptionItem>> options, Func<string, T, CancellationToken, Task<string>>? save = null)
     {
         _store = store;
         _blank = blank;
         _options = options;
+        _save = save;
     }
 
     public async Task ShowAsync(CancellationToken cancellationToken)
@@ -87,8 +89,15 @@ internal sealed partial class DocumentEditor<T, TDraft> : RecursiveObservable, I
 
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (Id is not null && await Store().ReadAsync(Id, cancellationToken).ConfigureAwait(false) is T kept)
-            await Store().WriteAsync(Id, Draft.Apply(kept), cancellationToken).ConfigureAwait(false);
+        if (Id is not string currentId || await Store().ReadAsync(currentId, cancellationToken).ConfigureAwait(false) is not T kept)
+            return;
+
+        T updated = Draft.Apply(kept);
+
+        if (_save is not null)
+            Id = await _save(currentId, updated, cancellationToken).ConfigureAwait(false);
+        else
+            await Store().WriteAsync(currentId, updated, cancellationToken).ConfigureAwait(false);
     }
 
     /// <remarks>For a copy <paramref name="name"/>'s <c>{name}</c> is the original's name; for a new one it is dropped.</remarks>

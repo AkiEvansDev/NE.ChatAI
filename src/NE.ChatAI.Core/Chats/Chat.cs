@@ -151,6 +151,36 @@ public sealed record ChatRecord
     public bool Stale { get; init; }
 }
 
+/// <summary>Where a scenario-selected picture is shown in the chat.</summary>
+public enum ChatVisualTarget
+{
+    Stage,
+    Background
+}
+
+/// <summary>A scenario-written visual change (<see cref="ChatVisualTarget.Stage"/> or <see cref="ChatVisualTarget.Background"/>) anchored to a point on the chat timeline.</summary>
+public sealed record ChatVisual
+{
+    public required string Id { get; init; }
+
+    /// <summary>The id of the scenario document that wrote this visual.</summary>
+    public string? Scenario { get; init; }
+
+    public ChatVisualTarget Target { get; init; }
+
+    /// <summary>The id of the message this visual takes effect immediately after; <c>null</c> when set before the chat's first message.</summary>
+    public string? After { get; init; }
+
+    /// <summary>The zero-based variant index of the <see cref="After"/> message this visual belongs to; <c>null</c> when <see cref="After"/> is <c>null</c> or before variant switches.</summary>
+    public int? Variant { get; init; }
+
+    /// <summary>Canonical image key (<c>global.&lt;id&gt;</c>, <c>&lt;char-id&gt;.&lt;id&gt;</c> or <c>chat/&lt;chat-id&gt;/&lt;id&gt;</c>), or <c>null</c> when clearing <see cref="Target"/> from this turn onward.</summary>
+    public string? Image { get; init; }
+
+    /// <summary>The id of the generation record that selected or produced this visual, when one did.</summary>
+    public string? Generation { get; init; }
+}
+
 /// <summary>A chat with a character: its messages, what scenarios wrote into it, and every model call made for it.</summary>
 public sealed record Chat : NamedDocument
 {
@@ -168,6 +198,8 @@ public sealed record Chat : NamedDocument
     public IReadOnlyList<ChatMessage> Messages { get; init; } = [];
 
     public IReadOnlyList<ChatRecord> Records { get; init; } = [];
+
+    public IReadOnlyList<ChatVisual> Visuals { get; init; } = [];
 
     public IReadOnlyList<GenerationRecord> Generations { get; init; } = [];
 }

@@ -6,6 +6,7 @@ using NE.ChatAI.Connections;
 using NE.ChatAI.Prompts;
 using NE.ChatAI.Samplers;
 using NE.ChatAI.Settings;
+using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
@@ -89,11 +90,11 @@ internal sealed partial class SettingsController : ShellController
     {
         await base.OnAttachedAsync(navigation, cancellationToken).ConfigureAwait(false);
 
-        Connection.Attach(Data.Connections, NewConnection, () => ConnectionOptions);
-        Format.Attach(Data.ModelFormats, static () => ModelFormat.Gemma4, () => FormatOptions);
-        SystemPrompt.Attach(Data.SystemPrompts, static () => new SystemPromptPreset(), () => SystemPromptOptions);
-        Prompt.Attach(Data.Prompts, static () => new PromptPreset(), () => PromptOptions);
-        Samplers.Attach(Data.Samplers, static () => new SamplerPreset(), () => SamplerOptions);
+        Connection.Attach(Data.Connections, NewConnection, () => ConnectionOptions, (id, doc, ct) => DocumentRenames.SaveConnectionAsync(Data, id, doc, ct));
+        Format.Attach(Data.ModelFormats, static () => ModelFormat.Gemma4, () => FormatOptions, (id, doc, ct) => DocumentRenames.SaveFormatAsync(Data, id, doc, ct));
+        SystemPrompt.Attach(Data.SystemPrompts, static () => new SystemPromptPreset(), () => SystemPromptOptions, (id, doc, ct) => DocumentRenames.SaveSystemPromptAsync(Data, id, doc, ct));
+        Prompt.Attach(Data.Prompts, static () => new PromptPreset(), () => PromptOptions, (id, doc, ct) => DocumentRenames.SavePromptAsync(Data, id, doc, ct));
+        Samplers.Attach(Data.Samplers, static () => new SamplerPreset(), () => SamplerOptions, (id, doc, ct) => DocumentRenames.SaveSamplersAsync(Data, id, doc, ct));
 
         ActiveProfile? profile = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false);
 
@@ -151,6 +152,8 @@ internal sealed partial class SettingsController : ShellController
         NoteDepth = settings.AuthorsNotePlacement.Depth;
         NoteRole = settings.AuthorsNotePlacement.Role.ToString();
         ShowPhrases(settings);
+        ShowGlobalGallery(settings.ImageTags);
+        await LoadSecretsAsync(cancellationToken).ConfigureAwait(false);
         Background.Show(Pictures.AppBackground());
     }
 
@@ -187,6 +190,8 @@ internal sealed partial class SettingsController : ShellController
 
         if (kind == ConnectionKind)
             await SyncConnectionPresetsAsync(cancellationToken).ConfigureAwait(false);
+        else if (Connection.Visibility == UIVisibility.Visible)
+            await Connection.ShowAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Saves the edited connection and checks whether its server answers.</summary>

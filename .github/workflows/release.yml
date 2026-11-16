@@ -1,5 +1,5 @@
 # Runs in the public mirror when a release tag is pushed by the private repository's sync, or by hand.
-# Builds self-contained win-x64 and linux-x64 archives and publishes the GitHub Release with the launchers.
+# Builds self-contained win-x64 and linux-x64 archives and publishes the GitHub Release.
 name: Release
 
 on:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, e.g. 1.0.0 or 1.0.0-rc.1.'
+        description: 'Version to release, e.g. 1.4.0 or 1.4.0-rc.1.'
         required: true
         type: string
 

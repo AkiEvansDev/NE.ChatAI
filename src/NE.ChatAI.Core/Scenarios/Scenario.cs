@@ -3,11 +3,14 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Scenarios;
 
-/// <summary>When a scenario runs automatically once a reply finishes.</summary>
+/// <summary>When an enabled scenario runs automatically.</summary>
 public enum ScenarioTriggerKind
 {
     /// <summary>Runs only when started by hand from the chat's menu or the canvas.</summary>
     Manual,
+
+    /// <summary>Runs on a non-empty composer draft when Send is pressed, before the message enters the chat.</summary>
+    BeforeSend,
 
     /// <summary>Runs once every finished reply is written.</summary>
     AfterReply,
@@ -16,7 +19,7 @@ public enum ScenarioTriggerKind
     ContextShare
 }
 
-/// <summary>The rule that starts an enabled scenario after a reply.</summary>
+/// <summary>The rule that starts an enabled scenario automatically.</summary>
 public sealed record ScenarioTrigger
 {
     public ScenarioTriggerKind Kind { get; init; } = ScenarioTriggerKind.Manual;
@@ -43,7 +46,10 @@ public sealed record Scenario : NamedDocument
     /// <summary>Whether the scenario runs on its trigger across every chat.</summary>
     public bool Enabled { get; init; }
 
-    /// <summary>Where the scenario stands among the others when several run after one reply.</summary>
+    /// <summary>Whether the scenario also stands directly in the chat's root extras menu.</summary>
+    public bool Pinned { get; init; }
+
+    /// <summary>Where the scenario stands among the others when several run in one batch.</summary>
     public int Order { get; init; }
 
     public ScenarioTrigger Trigger { get; init; } = new();

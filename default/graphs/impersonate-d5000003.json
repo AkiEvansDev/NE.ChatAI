@@ -68,7 +68,10 @@
         "id": "draft",
         "type": "chat.draft",
         "x": 928,
-        "y": 384
+        "y": 384,
+        "values": {
+          "Mode": "Continue"
+        }
       }
     ],
     "edges": [

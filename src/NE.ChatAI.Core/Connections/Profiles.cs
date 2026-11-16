@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using NE.ChatAI.Prompts;
 using NE.ChatAI.Samplers;
+using NE.ChatAI.Scenarios;
 using NE.ChatAI.Settings;
 using NE.ChatAI.Storage;
 
@@ -71,8 +73,8 @@ public static class Profiles
                 await DefaultDocuments.LayDownScenariosAsync(data, cancellationToken).ConfigureAwait(false);
             else if (!data.Scenarios.Exists(DefaultDocuments.ImpersonateScenarioId))
                 _ = await DefaultDocuments.EnsureScenarioAsync(data, DefaultDocuments.ImpersonateScenarioId, cancellationToken).ConfigureAwait(false);
-            else if (await data.Scenarios.ReadAsync(DefaultDocuments.ImpersonateScenarioId, cancellationToken).ConfigureAwait(false) is { System: false } impersonate)
-                await data.Scenarios.WriteAsync(DefaultDocuments.ImpersonateScenarioId, impersonate with { System = true }, cancellationToken).ConfigureAwait(false);
+            else if (await data.Scenarios.ReadAsync(DefaultDocuments.ImpersonateScenarioId, cancellationToken).ConfigureAwait(false) is Scenario impersonate)
+                await UpgradeImpersonateAsync(data, impersonate, cancellationToken).ConfigureAwait(false);
 
             return;
         }
@@ -97,6 +99,37 @@ public static class Profiles
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
         await data.WriteSettingsAsync(settings with { Connection = DefaultDocuments.ConnectionId }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task UpgradeImpersonateAsync(DataFolder data, Scenario impersonate, CancellationToken cancellationToken)
+    {
+        Scenario updated = impersonate.System ? impersonate : impersonate with { System = true };
+
+        if (updated.Sheet is JsonElement sheetElement && JsonNode.Parse(sheetElement.GetRawText()) is JsonObject sheet && sheet["nodes"] is JsonArray nodes)
+        {
+            var patched = false;
+
+            foreach (JsonNode? item in nodes)
+            {
+                if (item is not JsonObject node || (string?)node["type"] != "chat.draft")
+                    continue;
+
+                JsonObject values = node["values"] as JsonObject ?? [];
+
+                if (values.ContainsKey("Mode"))
+                    continue;
+
+                values["Mode"] = "Continue";
+                node["values"] = values;
+                patched = true;
+            }
+
+            if (patched)
+                updated = updated with { Sheet = JsonSerializer.SerializeToElement(sheet, DocumentJson.Options) };
+        }
+
+        if (!ReferenceEquals(updated, impersonate))
+            await data.Scenarios.WriteAsync(DefaultDocuments.ImpersonateScenarioId, updated, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

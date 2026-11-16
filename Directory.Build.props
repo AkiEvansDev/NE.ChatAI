@@ -1,6 +1,9 @@
 <Project>
 
   <PropertyGroup>
+    <InMonorepo>true</InMonorepo>
+    <CoreVersion>1.4.0</CoreVersion>
+    <Version>$(CoreVersion)</Version>
     <TargetFramework>net11.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
@@ -10,8 +13,9 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
     <IsPackable>false</IsPackable>
+    <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
     <!-- Core, UI and Web share one namespace tree: NE.ChatAI.Prompts in Core, NE.ChatAI.Views in UI. -->
-    <RootNamespace Condition="$(MSBuildProjectName.StartsWith('NE.ChatAI.')) and !$(MSBuildProjectName.EndsWith('.Tests'))">NE.ChatAI</RootNamespace>
+    <RootNamespace Condition="$(MSBuildProjectName.StartsWith('NE.ChatAI.')) and !$(MSBuildProjectName.StartsWith('NE.ChatAI.Plugins')) and !$(MSBuildProjectName.EndsWith('.Tests'))">NE.ChatAI</RootNamespace>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
 

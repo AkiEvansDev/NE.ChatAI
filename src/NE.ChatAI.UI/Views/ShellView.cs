@@ -113,11 +113,12 @@ internal abstract class ShellView : UIViewBase
                     UIIconButtons.Close().SetOpensDrawer(UISide.Left).SetSize(UISize.Small)
                 ),
                 GenerationPanel.Create(),
-                new StackPanelComponent()
-                    .SetOrientation(UIOrientation.Horizontal)
+                new WrapPanelComponent()
                     .SetSpacing(16)
+                    .SetLineSpacing(8)
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.settings").SetIcon(AppIcons.Outline(AppIcons.Settings)).SetUrl(AppRoutes.Settings))
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.scenarios").SetIcon(AppIcons.Outline(AppIcons.Scenarios)).SetUrl(AppRoutes.Scenarios))
+                    .AddChild(new LinkComponent().SetTitle("chatai.nav.plugins").SetIcon(AppIcons.Outline(AppIcons.Plugins)).SetUrl(AppRoutes.Plugins))
             );
 
     /// <summary>A panel's fixed head, its scrollable body taking the room left, and the links at its foot.</summary>

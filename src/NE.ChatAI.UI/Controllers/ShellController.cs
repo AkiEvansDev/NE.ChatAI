@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -92,7 +93,40 @@ internal abstract partial class ShellController : UIControllerBase
         }
     }
 
+    /// <summary>Reads every picture uploaded under <paramref name="selectionId"/> in order, with its original file name and content type.</summary>
+    protected async Task<List<(string FileName, byte[] Content, string? ContentType)>> ReadUploadedPicturesAsync(string? selectionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(selectionId))
+            return [];
+
+        UIUploadSelection selection = await Context.Uploads.GetSelectionAsync(Context.Handle, selectionId, cancellationToken).ConfigureAwait(false);
+        List<(string FileName, byte[] Content, string? ContentType)> files = [with(selection.Files.Length)];
+
+        for (var i = 0; i < selection.Files.Length; i++)
+        {
+            UIUploadFile entry = selection.Files[i];
+
+            if (entry.Size is <= 0 or > Views.PictureFields.MaxBackgroundBytes)
+                continue;
+
+            UIUploadedFile opened = await Context.Uploads.OpenAsync(Context.Handle, entry.FileId, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            await using (opened.ConfigureAwait(false))
+            {
+                using MemoryStream content = new();
+                await opened.Content.CopyToAsync(content, cancellationToken).ConfigureAwait(false);
+                files.Add((entry.FileName, content.ToArray(), opened.Metadata.ContentType));
+            }
+        }
+
+        return files;
+    }
+
     /// <summary>A command's answer that is only a toast.</summary>
     protected static UICommandResult Notify(string key, UIColorStyle style)
         => UICommandResult.Ok([new ShowNotificationEffect(key, style)]);
+
+    /// <summary>A command's answer that is only a parameterized toast.</summary>
+    protected static UICommandResult Notify(UIPhrase message, UIColorStyle style)
+        => UICommandResult.Ok([new ShowNotificationEffect(message, style)]);
 }

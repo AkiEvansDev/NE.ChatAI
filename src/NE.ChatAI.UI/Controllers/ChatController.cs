@@ -152,6 +152,11 @@ internal sealed partial class ChatController : ShellController
     public const string FeedId = "chatai-feed";
     public const string ComposerId = "chatai-composer";
     public const string ComposerFormId = "chatai-composer-form";
+    public const string StageSplitId = "chatai-stage-split";
+    public const string StageSplitterId = "chatai-stage-splitter";
+
+    public static readonly UIResponsive<UIGridPlacement> FullChatPlacement = UIResponsive<UIGridPlacement>.Create(new UIGridPlacement(1, 1, 24, 3), xl: new UIGridPlacement(1, 1, 24, 1));
+    public static readonly UIResponsive<UIGridPlacement> SplitChatPlacement = UIResponsive<UIGridPlacement>.Create(new UIGridPlacement(1, 3, 24, 1), xl: new UIGridPlacement(12, 1, 13, 1));
 
     /// <summary>The reader's name in a chat with no persona, as SillyTavern names them.</summary>
     private const string DefaultUserName = "User";
@@ -162,20 +167,21 @@ internal sealed partial class ChatController : ShellController
     /// <summary>How many messages the feed reads at a time, from the end back.</summary>
     public const int WindowSize = 30;
 
-    private readonly Lock _abortLock = new();
+    private readonly ActiveGenerations _activeGenerations = new();
     private bool _generating;
     private ReplyKind? _liveKind;
     private CancellationTokenSource? _generation;
-    private string? _genKey;
-    private KoboldCppClient? _kobold;
 
     private Chat? _chat;
     private Character? _character;
+    private IReadOnlyDictionary<string, string>? _globalImageTags;
 
     /// <summary>The persona the chat is written as: its own, else the default one; none, and the reader is "User".</summary>
     private Persona? _persona;
     private string? _personaId;
     private bool _hideThoughts;
+    private bool _stageHiddenByUser;
+    private bool _hasActiveStage;
 
     [RecursiveMember(false)]
     public MessageSource Messages { get; } = new();
@@ -193,6 +199,7 @@ internal sealed partial class ChatController : ShellController
         Entry(ImpersonateAction, AppIcons.Impersonate, "chatai.chat.extras.impersonate"),
         new MenuItem { Id = "chat-separator", Kind = UIMenuItemKind.Separator },
         Entry(ScenariosAction, AppIcons.Scenarios, "chatai.chat.extras.scenarios"),
+        new MenuItem { Id = StageAction, Title = "chatai.chat.extras.stage", Icon = AppIcons.Outline(AppIcons.Stage), Kind = UIMenuItemKind.Check, Enabled = false },
         new MenuItem { Id = PersonaAction, Title = "chatai.chat.extras.persona", Icon = AppIcons.Outline(AppIcons.Persona), Kind = UIMenuItemKind.Select },
         Entry(NoteAction, AppIcons.AuthorNotes, "chatai.chat.extras.author-notes"),
         new MenuItem { Id = "chat-context-separator", Kind = UIMenuItemKind.Separator },
@@ -223,6 +230,18 @@ internal sealed partial class ChatController : ShellController
     /// <summary>The picture behind the chat: its character's, else the application's; none, and it stands on the theme.</summary>
     [RecursiveMember]
     public partial string? Background { get; set; }
+
+    /// <summary>The active stage visual's served picture address when stage mode is open.</summary>
+    [RecursiveMember]
+    public partial string? StageImage { get; set; }
+
+    /// <summary>Whether the adaptive stage pane is shown alongside or above the chat column.</summary>
+    [RecursiveMember]
+    public partial UIVisibility StageVisibility { get; set; } = UIVisibility.Collapsed;
+
+    /// <summary>The chat column's responsive grid placement: full page at rest, or bottom/right split when the stage pane is shown.</summary>
+    [RecursiveMember]
+    public partial UIResponsive<UIGridPlacement> ChatPlacement { get; set; } = FullChatPlacement;
 
     /// <summary>The fill behind the central chat column when the message background setting is on.</summary>
     [RecursiveMember]
@@ -255,7 +274,9 @@ internal sealed partial class ChatController : ShellController
         if (_generating)
             return;
 
-        var chatId = navigation.TryGetParameter(AppRoutes.ChatParameter, out var named) ? named : OpenChatId ?? (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).LastChat;
+        AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        _globalImageTags = settings.ImageTags;
+        var chatId = navigation.TryGetParameter(AppRoutes.ChatParameter, out var named) ? named : OpenChatId ?? settings.LastChat;
 
         if (chatId is not null && chatId == OpenChatId && _chat is not null)
             return;
@@ -266,7 +287,47 @@ internal sealed partial class ChatController : ShellController
         if (_chat is not null)
             await ClearOpenChatAsync(cancellationToken).ConfigureAwait(false);
         else
+            RefreshVisuals();
+    }
+
+    private void RefreshVisuals()
+    {
+        if (_chat is null)
+        {
             Background = Pictures.BackgroundOf(null);
+            _hasActiveStage = false;
+            StageImage = null;
+            StageVisibility = UIVisibility.Collapsed;
+            ChatPlacement = FullChatPlacement;
+            SyncStageMenuItem();
+            return;
+        }
+
+        var scenarioBg = ChatVisuals.ResolveActive(_chat.Messages, _chat.Visuals, ChatVisualTarget.Background);
+        Background = (scenarioBg is null ? null : Pictures.VisualAddressOf(scenarioBg, _chat.Character, _character?.ImageTags, _globalImageTags))
+            ?? Pictures.BackgroundOf(_chat.Character, OpenChatId);
+
+        var scenarioStage = ChatVisuals.ResolveActive(_chat.Messages, _chat.Visuals, ChatVisualTarget.Stage);
+        var stageAddress = scenarioStage is null ? null : Pictures.VisualAddressOf(scenarioStage, _chat.Character, _character?.ImageTags, _globalImageTags);
+        _hasActiveStage = stageAddress is not null;
+
+        if (!_hasActiveStage)
+            _stageHiddenByUser = false;
+
+        var showStage = _hasActiveStage && !_stageHiddenByUser;
+        StageImage = showStage ? stageAddress : null;
+        StageVisibility = showStage ? UIVisibility.Visible : UIVisibility.Collapsed;
+        ChatPlacement = showStage ? SplitChatPlacement : FullChatPlacement;
+        SyncStageMenuItem();
+    }
+
+    private void SyncStageMenuItem()
+    {
+        if (!Extras.TryGet(StageAction, out MenuItem? item))
+            return;
+
+        item.Enabled = _hasActiveStage;
+        item.Checked = _hasActiveStage && !_stageHiddenByUser;
     }
 
     /// <summary>
@@ -296,6 +357,7 @@ internal sealed partial class ChatController : ShellController
     private async Task RefreshOpenChatPresentationAsync(CancellationToken cancellationToken)
     {
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        _globalImageTags = settings.ImageTags;
         ApplyChatSurface(settings.MessageBackground);
         BackgroundDim = Math.Clamp(settings.BackgroundDim, 0, 1);
 
@@ -305,22 +367,26 @@ internal sealed partial class ChatController : ShellController
             return;
         }
 
-        Background = Pictures.BackgroundOf(_chat?.Character, OpenChatId);
-
         if (_chat is null)
         {
             OpenCharacterId = null;
             ActivePersonaId = null;
             ActiveWorldId = null;
+            RefreshVisuals();
             ShowCards();
             return;
         }
 
+        if (!_generating && OpenChatId is string currentChatId && await Chats.ReadAsync(currentChatId, cancellationToken).ConfigureAwait(false) is Chat persisted)
+            _chat = persisted;
+
+        OpenCharacterId = _chat.Character;
         _character = _chat.Character is string characterId ? await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
         _personaId = _chat.Persona is string own && Slug.IsValidId(own) && Data.Personas.Exists(own) ? own : DefaultPersonaId;
         _persona = _personaId is null ? null : await Data.Personas.ReadAsync(_personaId, cancellationToken).ConfigureAwait(false);
         ActivePersonaId = _personaId;
         ActiveWorldId = ResolveActiveWorldId();
+        RefreshVisuals();
         ShowCards();
 
         if (Messages.Items.Count == 0 && (_chat.Messages.Count > 0 || Messages.Live is not null))
@@ -396,14 +462,15 @@ internal sealed partial class ChatController : ShellController
         _liveKind = null;
         _askedId = null;
         _editingRecordId = null;
-        _streamingRecord = null;
+        _streamingRecords.Clear();
         _draftGenerationId = null;
         _draftContinuations.Clear();
+        _stageHiddenByUser = false;
         ChatSeed = null;
         OpenChatId = null;
-        Background = Pictures.BackgroundOf(null);
         ChatBackground.Show(null);
         EmptyFeed = new UIPhrase("chatai.chat.none");
+        RefreshVisuals();
         ShowCards();
         Messages.Attach(static () => [], ItemOf);
         await Messages.LoadWindowAsync(new UIItemWindowRequest(UIItemAnchor.End, WindowSize), cancellationToken).ConfigureAwait(false);
@@ -422,18 +489,23 @@ internal sealed partial class ChatController : ShellController
         _liveKind = null;
         _askedId = null;
         _editingRecordId = null;
-        _streamingRecord = null;
+        _streamingRecords.Clear();
         _draftGenerationId = null;
         _draftContinuations.Clear();
+        _stageHiddenByUser = false;
         ChatSeed = chat.Seed;
+        AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        _globalImageTags = settings.ImageTags;
+        ApplyChatSurface(settings.MessageBackground);
+
         _character = chat.Character is string characterId ? await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
         _personaId = chat.Persona is string own && Slug.IsValidId(own) && Data.Personas.Exists(own) ? own : DefaultPersonaId;
-        Background = Pictures.BackgroundOf(chat.Character, chatId);
+        OpenChatId = chatId;
         ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
+        RefreshVisuals();
         _persona = _personaId is null ? null : await Data.Personas.ReadAsync(_personaId, cancellationToken).ConfigureAwait(false);
         ActivePersonaId = _personaId;
         ActiveWorldId = ResolveActiveWorldId();
-        OpenChatId = chatId;
         await FollowChatAsync(chatId, chat.Character, cancellationToken).ConfigureAwait(false);
         EmptyFeed = new UIPhrase("chatai.chat.empty");
 
@@ -442,9 +514,6 @@ internal sealed partial class ChatController : ShellController
         ShowLastActions();
         RefreshLoadedStatistics();
         await ShowChatListsAsync(cancellationToken).ConfigureAwait(false);
-
-        AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        ApplyChatSurface(settings.MessageBackground);
 
         if (settings.LastChat != chatId)
             await Data.WriteSettingsAsync(settings with { LastChat = chatId }, cancellationToken).ConfigureAwait(false);
@@ -538,6 +607,7 @@ internal sealed partial class ChatController : ShellController
         ChatMessage? last = _generating || _chat is null || _chat.Messages.Count == 0 ? null : _chat.Messages[^1];
         var reply = last?.Role == MessageRole.Character;
         var greeting = reply && IsGreeting(last!.Id);
+        var canRunScenario = !_generating && _chat is not null;
 
         foreach (MenuItem entry in Extras)
         {
@@ -545,12 +615,13 @@ internal sealed partial class ChatController : ShellController
             {
                 RefreshAction or ContinueAction => reply && !greeting,
                 VariantAction => reply,
-                ImpersonateAction => last is not null,
+                ImpersonateAction => canRunScenario,
                 PersonaAction => !_generating && _chat is not null && entry.Items.Count > 1,
                 NoteAction => !_generating && _chat is not null,
                 StatisticsAction or PromptAction => _chat is not null,
+                StageAction => _hasActiveStage,
                 ScenariosAction => !_generating,
-                _ => entry.Enabled
+                _ => entry.Id.StartsWith(PinnedScenarioPrefix, StringComparison.Ordinal) ? canRunScenario : entry.Enabled
             };
         }
 
@@ -584,6 +655,8 @@ internal sealed partial class ChatController : ShellController
         if (profile is null)
             return refusal!;
 
+        List<StoredDocument<Scenario>> beforeSend = await BeforeSendCandidatesAsync(cancellationToken).ConfigureAwait(false);
+        BeforeSendJob? beforeJob = null;
         ReplyJob? job = null;
         var busy = false;
 
@@ -600,36 +673,23 @@ internal sealed partial class ChatController : ShellController
             if (text.Length == 0 && (_chat.Messages.Count == 0 || _chat.Messages[^1].Role != MessageRole.User))
                 return;
 
-            Chat preTurnChat = _chat;
-            ChatMessageItem reply = RowOf(ChatLibrary.NewMessageId(), MessageRole.Character, greeting: false);
-
-            if (text.Length > 0)
+            if (text.Length > 0 && beforeSend.Count > 0)
             {
-                var draftGeneration = _draftGenerationId;
-                IReadOnlyList<string>? draftContinuations = _draftContinuations.Count > 0 ? [.. _draftContinuations] : null;
-                ChatMessage message = new()
-                {
-                    Id = ChatLibrary.NewMessageId(),
-                    Role = MessageRole.User,
-                    Variants = [new MessageVariant { Text = text, Generation = draftGeneration, Continuations = draftContinuations }],
-                    At = DateTimeOffset.UtcNow
-                };
-
-                _chat = ChatEditing.Append(_chat, message, null, _chat.Seed);
-                Draft = string.Empty;
-                _draftGenerationId = null;
-                _draftContinuations.Clear();
-
-                Messages.Add(ItemOf(message));
-                ShowLastWords(chatId, text);
+                beforeJob = BeginBeforeSend(profile, chatId, beforeSend);
+                return;
             }
 
-            Messages.Add(reply);
-            job = BeginReply(profile, chatId, preTurnChat, ReplyKind.Message, reply, _chat.Messages, null);
+            job = AppendUserMessageAndBeginReply(profile, chatId, text);
         }, cancellationToken).ConfigureAwait(false);
 
         if (busy)
             return Notify("chatai.chat.busy", UIColorStyle.Info);
+
+        if (beforeJob is not null)
+        {
+            Context.Runtime.Start(lifetime => SendAfterScenariosAsync(beforeJob, lifetime));
+            return UICommandResult.Ok();
+        }
 
         if (job is null)
             return UICommandResult.Ok();
@@ -652,21 +712,17 @@ internal sealed partial class ChatController : ShellController
         return (profile, null);
     }
 
-    /// <summary>A reply about to be written, under the runtime's lock: the composer turns to Stop, its extras go.</summary>
-    private ReplyJob BeginReply(ActiveProfile profile, string chatId, Chat preTurnChat, ReplyKind kind, ChatMessageItem item, IReadOnlyList<ChatMessage> history, string? continued)
+    private BeforeSendJob BeginBeforeSend(ActiveProfile profile, string chatId, IReadOnlyList<StoredDocument<Scenario>> scenarios)
     {
         _generating = true;
-        _liveKind = kind;
-        Messages.Live = item;
-        CaptureHiddenBackupRecords(preTurnChat);
+        CaptureHiddenBackupRecords(_chat!);
         CloseOpenEditors();
-        item.ShowLoading(kind != ReplyKind.Continuation);
         RefreshRealizedMessages();
         RefreshRealizedRecords();
         ShowSendButton(stops: true);
         ShowLastActions();
 
-        return new ReplyJob(profile, chatId, _chat!, preTurnChat, kind, item, history, continued);
+        return new BeforeSendJob(profile, chatId, scenarios);
     }
 
     private void CloseOpenEditors()
@@ -727,6 +783,114 @@ internal sealed partial class ChatController : ShellController
         SendTooltip = new UIPhrase(action.Title);
     }
 
+    private ReplyJob AppendUserMessageAndBeginReply(ActiveProfile profile, string chatId, string text)
+    {
+        Chat preTurnChat = _chat!;
+        ChatMessageItem reply = RowOf(ChatLibrary.NewMessageId(), MessageRole.Character, greeting: false);
+
+        if (text.Length > 0)
+        {
+            var draftGeneration = _draftGenerationId;
+            IReadOnlyList<string>? draftContinuations = _draftContinuations.Count > 0 ? [.. _draftContinuations] : null;
+            ChatMessage message = new()
+            {
+                Id = ChatLibrary.NewMessageId(),
+                Role = MessageRole.User,
+                Variants = [new MessageVariant { Text = text, Generation = draftGeneration, Continuations = draftContinuations }],
+                At = DateTimeOffset.UtcNow
+            };
+
+            _chat = ChatEditing.Append(_chat!, message, null, _chat!.Seed);
+            Draft = string.Empty;
+            _draftGenerationId = null;
+            _draftContinuations.Clear();
+
+            Messages.Add(ItemOf(message));
+            ShowLastWords(chatId, text);
+        }
+
+        Messages.Add(reply);
+
+        return BeginReply(profile, chatId, preTurnChat, ReplyKind.Message, reply, _chat!.Messages, null);
+    }
+
+    /// <summary>A reply about to be written, under the runtime's lock: the composer turns to Stop, its extras go.</summary>
+    private ReplyJob BeginReply(ActiveProfile profile, string chatId, Chat preTurnChat, ReplyKind kind, ChatMessageItem item, IReadOnlyList<ChatMessage> history, string? continued)
+    {
+        _generating = true;
+        _liveKind = kind;
+        Messages.Live = item;
+        CaptureHiddenBackupRecords(preTurnChat);
+        CloseOpenEditors();
+        item.ShowLoading(kind != ReplyKind.Continuation);
+        RefreshRealizedMessages();
+        RefreshRealizedRecords();
+        ShowSendButton(stops: true);
+        ShowLastActions();
+
+        return new ReplyJob(profile, chatId, _chat!, preTurnChat, kind, item, history, continued);
+    }
+
+    private async Task SendAfterScenariosAsync(BeforeSendJob beforeJob, CancellationToken lifetime)
+    {
+        ReplyJob? replyJob = null;
+
+        using (CancellationTokenSource generation = CancellationTokenSource.CreateLinkedTokenSource(lifetime))
+        {
+            Chat? startChat = null;
+
+            await Context.Runtime.InvokeAsync(() =>
+            {
+                _generation = generation;
+                startChat = _chat;
+            }, lifetime).ConfigureAwait(false);
+
+            if (startChat is null)
+            {
+                if (!lifetime.IsCancellationRequested)
+                    await ReleaseGenerationAsync().ConfigureAwait(false);
+
+                return;
+            }
+
+            var succeeded = await RunBeforeSendBatchAsync(beforeJob.ChatId, startChat, beforeJob.Scenarios, generation.Token).ConfigureAwait(false);
+
+            if (!succeeded || generation.IsCancellationRequested)
+            {
+                if (!lifetime.IsCancellationRequested)
+                    await ReleaseGenerationAsync().ConfigureAwait(false);
+
+                return;
+            }
+
+            await Context.Runtime.InvokeAsync(() =>
+            {
+                _generation = null;
+
+                if (_chat is null || OpenChatId != beforeJob.ChatId)
+                    return;
+
+                var text = Draft.Trim();
+
+                if (text.Length == 0)
+                    return;
+
+                replyJob = AppendUserMessageAndBeginReply(beforeJob.Profile, beforeJob.ChatId, text);
+            }, lifetime).ConfigureAwait(false);
+        }
+
+        if (replyJob is null)
+        {
+            if (!lifetime.IsCancellationRequested)
+                await ReleaseGenerationAsync().ConfigureAwait(false);
+
+            return;
+        }
+
+        await Chats.WriteAsync(replyJob.ChatId, replyJob.Chat, lifetime).ConfigureAwait(false);
+        await GenerateAsync(replyJob, lifetime).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Streams the reply into the job's row, every write under the runtime's lock, until it ends, Stop, or the runtime goes
     /// (<paramref name="lifetime"/>); then keeps it in the chat with its seed and the record of how it was made.
@@ -737,7 +901,9 @@ internal sealed partial class ChatController : ShellController
         // ends finds it alive or finds nothing.
         using CancellationTokenSource generation = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
         ActiveProfile profile = job.Profile;
-        KoboldCppClient kobold = Context.Services.GetRequiredService<KoboldCppClients>().For(profile.Connection.Address!);
+        KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
+        Uri address = profile.Connection.Address!;
+        KoboldCppClient kobold = clients.For(address);
         var genKey = "chatai-" + ChatLibrary.NewMessageId();
         // A continuation goes on from words the model wrote after its thought: what comes is words, with no thought to open.
         ReplyReader reader = new(job.Kind == ReplyKind.Continuation ? new ThoughtFormat() : profile.Format.Thought, job.Kind == ReplyKind.Continuation ? null : CharacterName);
@@ -754,14 +920,12 @@ internal sealed partial class ChatController : ShellController
         var contextLength = 0;
         // What the model sent as it sent it, markers and all: what its tokenizer counts for the record.
         StringBuilder sent = new();
+        IDisposable? serverSlot = null;
 
         try
         {
-            await Context.Runtime.InvokeAsync(() =>
-            {
-                _generation = generation;
-                SetActiveGeneration(kobold, null);
-            }, lifetime).ConfigureAwait(false);
+            await Context.Runtime.InvokeAsync(() => _generation = generation, lifetime).ConfigureAwait(false);
+            serverSlot = await clients.AcquireSlotAsync(address, generation.Token).ConfigureAwait(false);
 
             ResolvedContext context = await ContextLengths.ResolveAsync(profile.Connection, kobold, generation.Token).ConfigureAwait(false);
 
@@ -775,7 +939,7 @@ internal sealed partial class ChatController : ShellController
             Context.Logger.LogPrompt(prompt.Tokens, prompt.Counts, context.Length, prompt.MessagesSent, job.History.Count);
             KoboldGenerateRequest request = KoboldGenerateRequest.From(prompt.Text, profile.Samplers, context.Length, seed.Seed, profile.Format.AllStopSequences(), genKey);
 
-            SetActiveGeneration(kobold, genKey);
+            using IDisposable tracked = _activeGenerations.Track(kobold, genKey);
             generation.Token.ThrowIfCancellationRequested();
 
             started = DateTimeOffset.UtcNow;
@@ -820,11 +984,20 @@ internal sealed partial class ChatController : ShellController
             _ = reader.Complete();
             clock.Stop();
 
-            if (!lifetime.IsCancellationRequested)
+            (int Tokens, TokenCounts Counts) replyCount = (0, TokenCounts.Exact);
+
+            try
             {
-                (int Tokens, TokenCounts Counts) replyCount = streaming ? await CountReplyAsync(kobold, sent.ToString(), prompt).ConfigureAwait(false) : (0, TokenCounts.Exact);
-                await EndAsync(job, reader, seed, streaming ? prompt : null, model, contextLength, started, promptSeconds, clock.Elapsed, replyCount, generation, kobold, canTrigger: streaming && !stopped && !backendFailed).ConfigureAwait(false);
+                if (!lifetime.IsCancellationRequested && streaming)
+                    replyCount = await CountReplyAsync(kobold, sent.ToString(), prompt).ConfigureAwait(false);
             }
+            finally
+            {
+                serverSlot?.Dispose();
+            }
+
+            if (!lifetime.IsCancellationRequested)
+                await EndAsync(job, reader, seed, streaming ? prompt : null, model, contextLength, started, promptSeconds, clock.Elapsed, replyCount, generation, kobold, canTrigger: streaming && !stopped && !backendFailed).ConfigureAwait(false);
         }
     }
 
@@ -947,7 +1120,6 @@ internal sealed partial class ChatController : ShellController
             var cut = Messages.EndsAtLive;
             Messages.Live = null;
             _liveKind = null;
-            SetActiveGeneration(null, null);
 
             // A chat is not left while its reply is written (OnNavigatedAsync waits for it), so the chat open is the job's.
             if (_chat is not null)
@@ -969,6 +1141,7 @@ internal sealed partial class ChatController : ShellController
             if (_chat is not null)
             {
                 ShowEnded(job);
+                RefreshVisuals();
                 RefreshRealizedMessages();
                 RefreshRealizedRecords();
                 RefreshLoadedStatistics();
@@ -1031,41 +1204,12 @@ internal sealed partial class ChatController : ShellController
         ShowLastWords(job.ChatId, _chat.Messages.Count == 0 ? string.Empty : _chat.Messages[^1].Current.Text);
     }
 
-    private void SetActiveGeneration(KoboldCppClient? kobold, string? genKey)
-    {
-        lock (_abortLock)
-        {
-            _kobold = kobold;
-            _genKey = genKey;
-        }
-    }
-
-    /// <summary>Stops the reply or scenario being written: the server stops generating, and the stream ends where it stood.</summary>
+    /// <summary>Stops the reply or scenarios being written: every active server call aborts, and streams end where they stood.</summary>
     [UICommand]
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        string? genKey;
-        KoboldCppClient? kobold;
-
-        lock (_abortLock)
-        {
-            genKey = _genKey;
-            kobold = _kobold;
-        }
-
         await Context.Runtime.InvokeAsync(() => _generation?.Cancel(), cancellationToken).ConfigureAwait(false);
-
-        if (genKey is null || kobold is null)
-            return;
-
-        try
-        {
-            await kobold.AbortAsync(genKey, cancellationToken).ConfigureAwait(false);
-        }
-        catch (HttpRequestException exception)
-        {
-            Context.Logger.LogBackendFailure(exception);
-        }
+        await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Writes the chat's own seed as the panel sets it; while a reply is written the chat is the reply's, so the field goes back.</summary>
@@ -1105,6 +1249,8 @@ internal sealed partial class ChatController : ShellController
 
     /// <summary>A reply to write: what it is made with and for, the chat before the turn started, the row it streams into, the history the prompt holds, and the words it goes on from.</summary>
     private sealed record ReplyJob(ActiveProfile Profile, string ChatId, Chat Chat, Chat PreTurnChat, ReplyKind Kind, ChatMessageItem Item, IReadOnlyList<ChatMessage> History, string? Continued);
+
+    private sealed record BeforeSendJob(ActiveProfile Profile, string ChatId, IReadOnlyList<StoredDocument<Scenario>> Scenarios);
 }
 
 internal static partial class ChatLog

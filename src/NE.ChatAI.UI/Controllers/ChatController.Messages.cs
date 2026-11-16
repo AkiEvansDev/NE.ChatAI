@@ -102,6 +102,7 @@ internal sealed partial class ChatController
             if (asNew)
                 Messages.Reread();
 
+            RefreshVisuals();
             RefreshRealizedRecords();
             RefreshLoadedStatistics();
             ShowMessage(messageId);
@@ -275,15 +276,17 @@ internal sealed partial class ChatController
             if (kind == ReplyKind.Remake)
             {
                 IReadOnlyList<ChatRecord> keptRecords = ChatRecords.DropInsertionsFrom(_chat.Messages, _chat.Records, at);
+                IReadOnlyList<ChatVisual> keptVisuals = ChatVisuals.DropFrom(_chat.Messages, _chat.Visuals, at);
 
-                if (!ReferenceEquals(keptRecords, _chat.Records))
+                if (!ReferenceEquals(keptRecords, _chat.Records) || !ReferenceEquals(keptVisuals, _chat.Visuals))
                 {
-                    _chat = savedChat = _chat with { Records = keptRecords };
+                    _chat = savedChat = _chat with { Records = keptRecords, Visuals = keptVisuals };
                     savedChatId = chatId;
                 }
             }
 
             job = BeginReply(profile, chatId, preTurnChat, kind, item, [.. _chat.Messages.Take(at)], kind == ReplyKind.Continuation ? message.Current.Text : null);
+            RefreshVisuals();
 
             if (at < _chat.Messages.Count - 1)
                 Messages.Reread(endsAtLive: true);
@@ -363,6 +366,7 @@ internal sealed partial class ChatController
             if (followed)
                 Messages.Reread();
 
+            RefreshVisuals();
             RefreshRealizedRecords();
             RefreshLoadedStatistics();
             ShowMessage(messageId);
@@ -403,6 +407,7 @@ internal sealed partial class ChatController
 
             chatId = OpenChatId;
             _chat = changed = fromHere ? ChatEditing.DeleteFrom(_chat, messageId) : ChatEditing.Delete(_chat, messageId);
+            RefreshVisuals();
             RefreshRealizedRecords();
             RefreshLoadedStatistics();
 

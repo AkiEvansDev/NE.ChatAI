@@ -2,6 +2,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/NE.ChatAI.Core/NE.ChatAI.Core.csproj" />
+    <Project Path="src/NE.ChatAI.Plugins/NE.ChatAI.Plugins.csproj" />
     <Project Path="src/NE.ChatAI.UI/NE.ChatAI.UI.csproj" />
     <Project Path="src/NE.ChatAI.Web/NE.ChatAI.Web.csproj" />
   </Folder>

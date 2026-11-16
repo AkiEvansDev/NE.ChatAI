@@ -228,13 +228,24 @@ internal static class ChatsPanel
                 null,
                 new TextInputComponent()
                     .SetTitle("chatai.card.name")
-                    .BindValue<ShellController>(static x => x.NewCardName)
-                    .OnEnter(nameof(ShellController.CreateCardAsync)),
+                    .BindValue<ShellController>(static x => x.NewCardName),
                 UIButtons.Primary("chatai.card.create").OnClick(nameof(ShellController.CreateCardAsync))
             ),
             CharacterView.CreateDialog(),
             PersonaView.CreateDialog(),
             WorldView.CreateDialog(),
+            UIDialogs.Form(
+                ShellController.GalleryTagDialogKey,
+                "chatai.gallery.tag.title",
+                (UIPhrase?)"chatai.gallery.tag.description",
+                new TextInputComponent()
+                    .SetTitle("chatai.gallery.tag.field")
+                    .SetPlaceholder("happy")
+                    .AsContent(TextInputComponent.PlaceholderProperty)
+                    .SetAutocomplete(UIAutocomplete.Off)
+                    .BindValue<ShellController>(static x => x.GalleryTagInput),
+                UIButtons.Primary(UIStandardAction.Save).OnClick(nameof(ShellController.SaveGalleryTagAsync))
+            ),
             .. CardEditor.CreateTagsDialogs(),
             UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteCharacterDialogKey, "chatai.character.delete.title", static x => x.DeleteCardQuestion, "chatai.character.delete", nameof(ShellController.DeletePanelCardAsync)),
             UIDialogs.BoundConfirm<ShellController>(ShellController.DeletePersonaDialogKey, "chatai.persona.delete.title", static x => x.DeleteCardQuestion, "chatai.persona.delete", nameof(ShellController.DeletePanelCardAsync)),

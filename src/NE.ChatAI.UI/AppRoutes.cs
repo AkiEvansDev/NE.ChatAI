@@ -13,6 +13,9 @@ internal static class AppRoutes
     /// <summary>The node-sheet editor for auxiliary scenarios.</summary>
     public const string Scenarios = "/scenarios";
 
+    /// <summary>Installed scenario plugins and updates from GitHub releases.</summary>
+    public const string Plugins = "/plugins";
+
     /// <summary>Which chat the home page shows.</summary>
     public const string ChatParameter = "chat";
 

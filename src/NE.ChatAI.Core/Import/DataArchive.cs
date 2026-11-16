@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -44,6 +45,7 @@ public static class DataArchive
     private const string PromptsFolder = "prompts";
     private const string SamplersFolder = "samplers";
     private const string ScenariosFolder = "graphs";
+    private const string ImagesFolder = "images";
     private const string CharactersFolder = "characters";
     private const string PersonasFolder = "personas";
     private const string WorldsFolder = "worlds";
@@ -86,6 +88,7 @@ public static class DataArchive
             if (scopes.HasFlag(DataArchiveScopes.Settings))
             {
                 await AddRootBackgroundAsync(archive, data.Root, cancellationToken).ConfigureAwait(false);
+                await AddPictureFolderAsync(archive, Path.Combine(data.Root, ImagesFolder), ImagesFolder, cancellationToken).ConfigureAwait(false);
                 await AddStoreFilesAsync(archive, data.Root, ConnectionsFolder, cancellationToken).ConfigureAwait(false);
                 await AddStoreFilesAsync(archive, data.Root, FormatsFolder, cancellationToken).ConfigureAwait(false);
                 await AddStoreFilesAsync(archive, data.Root, SystemPromptsFolder, cancellationToken).ConfigureAwait(false);
@@ -134,6 +137,27 @@ public static class DataArchive
             await output.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
     }
 
+    private static async Task AddPictureFolderAsync(ZipArchive archive, string directory, string archivePrefix, CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(directory))
+            return;
+
+        foreach (var file in Directory.EnumerateFiles(directory).OrderBy(static path => path, StringComparer.Ordinal))
+        {
+            var id = Path.GetFileNameWithoutExtension(file);
+            var ext = Path.GetExtension(file);
+
+            if (Slug.IsValidId(id) && IsPictureExtension(ext))
+                await AddFileEntryAsync(archive, $"{archivePrefix}/{id}{ext.ToLowerInvariant()}", file, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static bool IsPictureExtension(string extension)
+        => extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
+
     private static async Task AddStoreFilesAsync(ZipArchive archive, string root, string folderName, CancellationToken cancellationToken)
     {
         var directory = Path.Combine(root, folderName);
@@ -173,6 +197,9 @@ public static class DataArchive
                 if (IsAllowedCardFile(fileName, documentFileName))
                     await AddFileEntryAsync(archive, $"{folderName}/{id}/{fileName}", file, cancellationToken).ConfigureAwait(false);
             }
+
+            if (folderName == CharactersFolder)
+                await AddPictureFolderAsync(archive, Path.Combine(folder, ImagesFolder), $"{folderName}/{id}/{ImagesFolder}", cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -193,12 +220,6 @@ public static class DataArchive
             && IsPictureExtension(ext);
     }
 
-    private static bool IsPictureExtension(string extension)
-        => extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
-
     private static async Task AddChatFilesAsync(ZipArchive archive, DataFolder data, CancellationToken cancellationToken)
     {
         await AddStoreFilesAsync(archive, data.Root, ChatsFolder, cancellationToken).ConfigureAwait(false);
@@ -212,8 +233,13 @@ public static class DataArchive
         {
             var id = Path.GetFileNameWithoutExtension(file);
 
-            if (Slug.IsValidId(id) && ChatPictures.PathOf(data, id) is string picturePath)
+            if (!Slug.IsValidId(id))
+                continue;
+
+            if (ChatPictures.PathOf(data, id) is string picturePath)
                 await AddFileEntryAsync(archive, $"{ChatsFolder}/{Path.GetFileName(picturePath)}", picturePath, cancellationToken).ConfigureAwait(false);
+
+            await AddPictureFolderAsync(archive, Path.Combine(directory, id, ImagesFolder), $"{ChatsFolder}/{id}/{ImagesFolder}", cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -238,6 +264,7 @@ public static class DataArchive
         var placeholderConnectionId = manifest.Settings ? await FindDefaultConnectionPlaceholderAsync(data, cancellationToken).ConfigureAwait(false) : null;
 
         (string FileName, byte[] Content)? rootBackground = null;
+        var globalImagesImported = false;
         var presets = 0;
         var characters = 0;
         var personas = 0;
@@ -246,7 +273,9 @@ public static class DataArchive
         List<string> importedConnections = [];
         HashSet<string> validCards = [with(StringComparer.Ordinal)];
         List<(string Folder, string Id, string FileName, byte[] Content)> companionFiles = [];
+        List<(string CharId, string ImageId, string Ext, byte[] Content)> characterImages = [];
         List<(string Id, string Ext, byte[] Content)> chatPictures = [];
+        List<(string ChatId, string ImageId, string Ext, byte[] Content)> chatMedia = [];
 
         foreach ((var path, var content) in entries.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {
@@ -289,6 +318,23 @@ public static class DataArchive
                 continue;
             }
 
+            if (parts.Length == 2 && parts[0] == ImagesFolder && manifest.Settings)
+            {
+                var id = Path.GetFileNameWithoutExtension(parts[1]);
+                var ext = Path.GetExtension(parts[1]);
+
+                if (Slug.IsValidId(id) && IsPictureExtension(ext))
+                {
+                    var globalFolder = GalleryPictures.GlobalFolderOf(data);
+                    _ = Directory.CreateDirectory(globalFolder);
+                    PictureFiles.Delete(globalFolder, id);
+                    await AtomicFile.WriteAsync(Path.Combine(globalFolder, id + ext.ToLowerInvariant()), content, cancellationToken).ConfigureAwait(false);
+                    globalImagesImported = true;
+                }
+
+                continue;
+            }
+
             if (parts.Length == 2 && parts[0] == ChatsFolder && manifest.Chats)
             {
                 var id = Path.GetFileNameWithoutExtension(parts[1]);
@@ -319,6 +365,22 @@ public static class DataArchive
                 {
                     companionFiles.Add((parts[0], parts[1], parts[2], content));
                 }
+
+                continue;
+            }
+
+            if (parts.Length == 4 && parts[2] == ImagesFolder && Slug.IsValidId(parts[1]))
+            {
+                var imageId = Path.GetFileNameWithoutExtension(parts[3]);
+                var ext = Path.GetExtension(parts[3]);
+
+                if (!Slug.IsValidId(imageId) || !IsPictureExtension(ext))
+                    continue;
+
+                if (parts[0] == CharactersFolder && manifest.Content)
+                    characterImages.Add((parts[1], imageId, ext.ToLowerInvariant(), content));
+                else if (parts[0] == ChatsFolder && manifest.Chats)
+                    chatMedia.Add((parts[1], imageId, ext.ToLowerInvariant(), content));
             }
         }
 
@@ -326,6 +388,17 @@ public static class DataArchive
         {
             if (validCards.Contains($"{folder}/{id}") || CardExists(data, folder, id))
                 await ImportCardFileAsync(data, folder, id, fileName, content, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach ((var charId, var imageId, var ext, var content) in characterImages)
+        {
+            if (validCards.Contains($"{CharactersFolder}/{charId}") || data.Characters.Exists(charId))
+            {
+                var charGalleryFolder = GalleryPictures.CharacterFolderOf(data, charId);
+                _ = Directory.CreateDirectory(charGalleryFolder);
+                PictureFiles.Delete(charGalleryFolder, imageId);
+                await AtomicFile.WriteAsync(Path.Combine(charGalleryFolder, imageId + ext), content, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         foreach ((var id, var ext, var content) in chatPictures)
@@ -337,6 +410,17 @@ public static class DataArchive
             }
         }
 
+        foreach ((var chatId, var imageId, var ext, var content) in chatMedia)
+        {
+            if (data.Chats.Exists(chatId))
+            {
+                var mediaFolder = GalleryPictures.ChatFolderOf(data, chatId);
+                _ = Directory.CreateDirectory(mediaFolder);
+                PictureFiles.Delete(mediaFolder, imageId);
+                await AtomicFile.WriteAsync(Path.Combine(mediaFolder, imageId + ext), content, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         // Replace an untouched first-start connection when an older archive brings connections under a different slug.
         var replacedConnectionId = placeholderConnectionId is not null
             && importedConnections.Count > 0
@@ -345,7 +429,7 @@ public static class DataArchive
             ? placeholderConnectionId
             : null;
         var fallbackConnectionId = replacedConnectionId is not null ? importedConnections[0] : null;
-        var settingsApplied = await ApplySettingsAsync(data, manifest, incomingSettings, rootBackground, replacedConnectionId, fallbackConnectionId, cancellationToken).ConfigureAwait(false);
+        var settingsApplied = await ApplySettingsAsync(data, manifest, incomingSettings, rootBackground, replacedConnectionId, fallbackConnectionId, cancellationToken).ConfigureAwait(false) || globalImagesImported;
 
         return new DataArchiveImportSummary(settingsApplied, presets, characters, personas, worlds, chats);
     }
@@ -430,7 +514,7 @@ public static class DataArchive
     }
 
     private static bool IsKnownRootSegment(string segment)
-        => segment is ManifestFile or SettingsFile or ConnectionsFolder or FormatsFolder or SystemPromptsFolder or PromptsFolder or SamplersFolder or ScenariosFolder or CharactersFolder or PersonasFolder or WorldsFolder or ChatsFolder
+        => segment is ManifestFile or SettingsFile or ConnectionsFolder or FormatsFolder or SystemPromptsFolder or PromptsFolder or SamplersFolder or ScenariosFolder or ImagesFolder or CharactersFolder or PersonasFolder or WorldsFolder or ChatsFolder
             || (string.Equals(Path.GetFileNameWithoutExtension(segment), CardPictures.Background, StringComparison.OrdinalIgnoreCase) && IsPictureExtension(Path.GetExtension(segment)));
 
     private static T? TryDeserialize<T>(byte[] content) where T : Document
@@ -589,7 +673,8 @@ public static class DataArchive
                 PinHash = current.PinHash,
                 Tags = tags,
                 PersonaTags = personaTags,
-                WorldTags = worldTags
+                WorldTags = worldTags,
+                ImageTags = MergeImageTags(GalleryPictures.GlobalFolderOf(data), current.ImageTags, incoming.ImageTags)
             };
 
             await data.WriteSettingsAsync(updated, cancellationToken).ConfigureAwait(false);
@@ -631,6 +716,26 @@ public static class DataArchive
         }
 
         return [.. merged.Values];
+    }
+
+    private static IReadOnlyDictionary<string, string> MergeImageTags(string globalFolder, IReadOnlyDictionary<string, string> current, IReadOnlyDictionary<string, string> incoming)
+    {
+        SortedDictionary<string, string> merged = [with(StringComparer.Ordinal)];
+        HashSet<string> usedTags = [with(StringComparer.Ordinal), GalleryPictures.GlobalScope];
+
+        foreach ((var id, var tag) in incoming)
+        {
+            if (Slug.IsValidId(id) && Slug.IsValidId(tag) && PictureFiles.Find(globalFolder, id) is not null && usedTags.Add(tag))
+                merged[id] = tag;
+        }
+
+        foreach ((var id, var tag) in current)
+        {
+            if (!merged.ContainsKey(id) && Slug.IsValidId(id) && Slug.IsValidId(tag) && PictureFiles.Find(globalFolder, id) is not null && usedTags.Add(tag))
+                merged[id] = tag;
+        }
+
+        return merged.Count == 0 ? FrozenDictionary<string, string>.Empty : merged;
     }
 
     private sealed record ArchiveManifest : Document

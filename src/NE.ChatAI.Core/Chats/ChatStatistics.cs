@@ -134,6 +134,7 @@ public static class ChatStatistics
         CollectActive(chat.Messages, activeIds, messageByGeneration);
         CollectAll(chat.Messages, continuationIds, messageByGeneration);
         CollectRecordGenerations(chat.Messages, chat.Records, activeRecordIds, inactiveRecordIds, messageByGeneration);
+        CollectVisualGenerations(chat.Messages, chat.Visuals, activeRecordIds, inactiveRecordIds, messageByGeneration);
 
         var lastMessageGenIndex = -1;
 
@@ -144,7 +145,7 @@ public static class ChatStatistics
         }
 
         List<GenerationCallSummary> selected = [with(chat.Generations.Count)];
-        var lastTurnActive = chat.Messages.Count > 0;
+        var lastTurnActive = true;
 
         for (var i = 0; i < chat.Generations.Count; i++)
         {
@@ -236,6 +237,27 @@ public static class ChatStatistics
             {
                 _ = activeIds.Add(generationId);
                 _ = messageByGeneration.TryAdd(generationId, anchorId);
+            }
+            else
+            {
+                _ = inactiveIds.Add(generationId);
+            }
+        }
+    }
+
+    private static void CollectVisualGenerations(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatVisual> visuals, HashSet<string> activeIds, HashSet<string> inactiveIds, Dictionary<string, string> messageByGeneration)
+    {
+        foreach (ChatVisual visual in visuals)
+        {
+            if (visual.Generation is not string generationId)
+                continue;
+
+            if (ChatVisuals.IsActive(visual, messages))
+            {
+                _ = activeIds.Add(generationId);
+
+                if (visual.After is string anchorId)
+                    _ = messageByGeneration.TryAdd(generationId, anchorId);
             }
             else
             {

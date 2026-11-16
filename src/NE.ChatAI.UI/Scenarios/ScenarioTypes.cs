@@ -17,6 +17,13 @@ internal enum ScenarioThinking
     Off
 }
 
+/// <summary>How <see cref="WriteDraftNode"/> writes text into the composer's draft field.</summary>
+internal enum DraftWriteMode
+{
+    Replace,
+    Continue
+}
+
 /// <summary>The chat's persona handed out on a node sheet.</summary>
 internal sealed record PersonaCard(Persona Persona, string Name)
 {

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using NE.ChatAI.Storage;
@@ -39,6 +40,10 @@ public sealed record Character : Card
     /// <summary>Instructions put after the history, just before the reply.</summary>
     [JsonPropertyOrder(1)]
     public string? PostHistoryInstructions { get; init; }
+
+    /// <summary>Alias tags assigned to the character's gallery images (<c>imageId -&gt; tag</c>).</summary>
+    [JsonPropertyOrder(1)]
+    public IReadOnlyDictionary<string, string> ImageTags { get; init; } = FrozenDictionary<string, string>.Empty;
 }
 
 /// <summary>The reader's side of a chat: the same card, without what only a played character has.</summary>

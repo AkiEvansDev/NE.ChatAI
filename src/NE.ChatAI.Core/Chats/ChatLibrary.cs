@@ -79,9 +79,11 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
         var name = $"{character?.Name ?? chat.Name} {time.GetUtcNow().ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
         Chat branched = ChatEditing.UpTo(chat, messageId) with { Name = name, Background = null };
         var branchedId = await data.Chats.CreateAsync(branched, cancellationToken).ConfigureAwait(false);
+        var copiedBackground = ChatPictures.Copy(data, chat.Background, branchedId);
+        IReadOnlyList<ChatVisual> copiedVisuals = GalleryPictures.CopyReferencedChatMedia(data, branched.Visuals, branchedId);
 
-        if (ChatPictures.Copy(data, chat.Background, branchedId) is string fileName)
-            await data.Chats.WriteAsync(branchedId, branched with { Background = fileName }, cancellationToken).ConfigureAwait(false);
+        if (copiedBackground is not null || !ReferenceEquals(copiedVisuals, branched.Visuals))
+            await data.Chats.WriteAsync(branchedId, branched with { Background = copiedBackground, Visuals = copiedVisuals }, cancellationToken).ConfigureAwait(false);
 
         return branchedId;
     }
@@ -99,6 +101,7 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
             return false;
 
         ChatPictures.Delete(data, chatId);
+        GalleryPictures.DeleteChatMedia(data, chatId);
         return true;
     }
 
@@ -116,6 +119,7 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
             {
                 _ = data.Chats.Delete(chat.Id);
                 ChatPictures.Delete(data, chat.Id);
+                GalleryPictures.DeleteChatMedia(data, chat.Id);
             }
         }
 

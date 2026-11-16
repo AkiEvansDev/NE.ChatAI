@@ -27,6 +27,10 @@ internal static class AppIcons
     public const string Info = MaterialIcons.Info;
     public const string Scenarios = MaterialIcons.AccountTree;
     public const string Run = MaterialIcons.PlayArrow;
+    public const string Gallery = MaterialIcons.PhotoLibrary;
+    public const string Stage = MaterialIcons.Image;
+    public const string Plugins = MaterialIcons.Extension;
+    public const string Key = MaterialIcons.Key;
 
     public static string Outline(string icon)
         => MaterialIcons.Outlined(icon);

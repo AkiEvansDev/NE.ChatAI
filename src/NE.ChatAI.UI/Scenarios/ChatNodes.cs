@@ -10,6 +10,7 @@ using NE.ChatAI.Backends.KoboldCpp;
 using NE.ChatAI.Characters;
 using NE.ChatAI.Chats;
 using NE.ChatAI.Connections;
+using NE.ChatAI.Hosting;
 using NE.ChatAI.Prompts;
 using NE.ChatAI.Samplers;
 using NE.ChatAI.Storage;
@@ -24,7 +25,8 @@ internal static class ScenarioCatalog
     public const string PromptColor = "var(--ui-color-accent)";
     public const string WriteColor = "var(--ui-color-series-2)";
 
-    public static UINodeCatalog Instance { get; } = UINodeCatalog.FromTypes([
+    public static IReadOnlyList<Type> BuiltInTypes { get; } =
+    [
         .. UINodeKinds.Common,
         typeof(PromptNode),
         typeof(PersonaNode),
@@ -32,12 +34,22 @@ internal static class ScenarioCatalog
         typeof(WorldNode),
         typeof(MessagesNode),
         typeof(RecordNode),
+        typeof(ReadDraftNode),
+        typeof(GalleryNode),
         typeof(CollectorNode),
         typeof(ModelCallNode),
         typeof(ReplaceRecordNode),
         typeof(InsertRecordNode),
-        typeof(WriteDraftNode)
-    ]);
+        typeof(WriteDraftNode),
+        typeof(SetVisualNode)
+    ];
+
+    public static UINodeCatalog BuiltIn { get; } = UINodeCatalog.FromTypes([.. BuiltInTypes]);
+
+    public static UINodeCatalog Instance => BuiltIn;
+
+    public static UINodeCatalog Resolve(IServiceProvider? services)
+        => services?.GetService(typeof(Plugins.PluginManager)) is Plugins.PluginManager plugins ? plugins.Catalog : BuiltIn;
 }
 
 /// <summary>Reads the system prompt of the chat's active connection.</summary>
@@ -215,6 +227,129 @@ internal sealed class RecordNode : IGraphNode
     }
 }
 
+/// <summary>Reads the composer's current draft text, falling back to preview text during a canvas run with an empty composer.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Draft", Description = "The composer's current draft text.", Icon = AppIcons.AuthorNotes, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
+internal sealed class ReadDraftNode : IGraphNode
+{
+    public const string NodeKey = "chat.draft-input";
+
+    [GraphInput(Title = "Preview text", MaxLines = 3, Description = "Used during a canvas preview when the composer draft is empty.")]
+    public string PreviewText { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Text")]
+    public string Text { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Has text")]
+    public bool HasText { get; set; }
+
+    public void Execute(UINodeRunContext context)
+    {
+        ScenarioRunScope scope = ScenarioRunScope.From(context);
+        var text = !scope.CommitToChat && scope.InitialDraft.Length == 0 ? PreviewText : scope.InitialDraft;
+        Text = text;
+        HasText = !string.IsNullOrWhiteSpace(text);
+    }
+}
+
+/// <summary>Lists gallery image keys available to the chat and resolves a key to its served image address.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Gallery", Description = "Lists available gallery keys and resolves a key to an image.", Icon = AppIcons.Gallery, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
+internal sealed class GalleryNode : IGraphNode
+{
+    public const string NodeKey = "chat.gallery";
+
+    [GraphInput(Title = "Key", MaxLength = 120, Placeholder = "happy or global.sunset", Description = "Gallery key to resolve; bare slugs check the character's gallery before global.")]
+    public string Key { get; set; } = string.Empty;
+
+    [GraphInput(Title = "Character gallery", Description = "Includes the open chat's character gallery in the available keys.")]
+    public bool IncludeCharacter { get; set; } = true;
+
+    [GraphInput(Title = "Global gallery", Description = "Includes the global gallery in the available keys.")]
+    public bool IncludeGlobal { get; set; } = true;
+
+    [GraphOutput(Title = "Image", Image = true)]
+    public string Image { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Resolved key")]
+    public string ResolvedKey { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Found")]
+    public bool Found { get; set; }
+
+    [GraphOutput(Title = "Keys")]
+    public string[] Keys { get; set; } = [];
+
+    [GraphOutput(Title = "Available", Description = "Available keys formatted one per line for prompt instructions.")]
+    public string Available { get; set; } = string.Empty;
+
+    public void Execute(UINodeRunContext context)
+    {
+        ScenarioRunScope scope = ScenarioRunScope.From(context);
+        var charId = scope.Chat.Character;
+        List<string> keys = [];
+
+        if (IncludeCharacter && charId is not null)
+        {
+            IReadOnlyList<GalleryImage> charImages = GalleryPictures.ListCharacter(scope.Data, charId, scope.Character?.ImageTags);
+
+            for (var i = 0; i < charImages.Count; i++)
+                keys.Add(charImages[i].CopyKey);
+        }
+
+        if (IncludeGlobal)
+        {
+            IReadOnlyList<GalleryImage> globalImages = GalleryPictures.ListGlobal(scope.Data, scope.Settings.ImageTags);
+
+            for (var i = 0; i < globalImages.Count; i++)
+                keys.Add(globalImages[i].CopyKey);
+        }
+
+        Keys = [.. keys];
+        Available = string.Join('\n', keys);
+
+        if (string.IsNullOrWhiteSpace(Key))
+        {
+            ClearResolved();
+            return;
+        }
+
+        (string Key, string Path)? resolved = GalleryPictures.Resolve(
+            scope.Data,
+            Key,
+            IncludeCharacter ? charId : null,
+            IncludeCharacter ? scope.Character?.ImageTags : null,
+            IncludeGlobal ? scope.Settings.ImageTags : null
+        );
+
+        if (resolved is not (var resolvedKey, _) || !IsScopeEnabled(resolvedKey))
+        {
+            ClearResolved();
+            return;
+        }
+
+        PictureContent? pictures = context.Services?.GetService(typeof(PictureContent)) as PictureContent;
+        Image = pictures?.VisualAddressOf(resolvedKey, charId, scope.Character?.ImageTags, scope.Settings.ImageTags) ?? resolvedKey;
+        ResolvedKey = resolvedKey;
+        Found = true;
+    }
+
+    private void ClearResolved()
+    {
+        Image = string.Empty;
+        ResolvedKey = string.Empty;
+        Found = false;
+    }
+
+    private bool IsScopeEnabled(string resolvedKey)
+    {
+        if (resolvedKey.StartsWith(GalleryPictures.ChatPrefix, StringComparison.Ordinal))
+            return true;
+
+        return resolvedKey.StartsWith(GalleryPictures.GlobalScope + ".", StringComparison.Ordinal)
+            ? IncludeGlobal
+            : IncludeCharacter;
+    }
+}
+
 /// <summary>Assembles prompt blocks from whatever chat inputs and trailing instruction are wired into it.</summary>
 [GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Collector", Description = "Assembles prompt blocks from optional chat parts and a trailing instruction.", Icon = UIGlyphs.Merge, Color = ScenarioCatalog.PromptColor)]
 internal sealed class CollectorNode : IGraphNode
@@ -370,24 +505,27 @@ internal sealed class ModelCallNode : IGraphNodeAsync
 
         SamplerPreset samplers = ApplyOverrides(await ResolveSamplersAsync(scope, profile.Samplers, cancellationToken).ConfigureAwait(false));
         ModelFormat format = ApplyThinking(profile.Format);
-        var feedsDraft = scope.FeedsDraftWriter(context.NodeId);
-        var continuingDraft = feedsDraft && scope.InitialDraft.Length > 0;
+        DraftWriteMode? draftMode = scope.ResolveDraftWriteMode(context.NodeId);
+        var feedsDraft = draftMode is not null;
+        var impersonating = draftMode == DraftWriteMode.Continue;
+        var continuingDraft = impersonating && scope.InitialDraft.Length > 0;
         var hasTopContent = Prompt.Spec.SystemPrompt.Length > 0 || Prompt.Spec.Character is not null || Prompt.Spec.Persona is not null || Prompt.Spec.Lore.Count > 0;
         PromptPreset promptPreset = hasTopContent ? profile.Prompt : profile.Prompt with { ChatStart = string.Empty };
         PromptTurn? instruction = Prompt.Spec.Instruction;
 
-        if (feedsDraft && instruction is not null && instruction.Block == PromptBlocks.Instruction)
+        if (impersonating && instruction is not null && instruction.Block == PromptBlocks.Instruction)
             instruction = instruction with { Block = PromptBlocks.Impersonate };
 
         PromptSpec spec = Prompt.Spec with
         {
             Prompt = promptPreset,
             Instruction = instruction,
-            ReplySpeaker = feedsDraft && string.IsNullOrEmpty(Prompt.Spec.ReplySpeaker) ? scope.UserName : Prompt.Spec.ReplySpeaker,
+            ReplySpeaker = impersonating && string.IsNullOrEmpty(Prompt.Spec.ReplySpeaker) ? scope.UserName : Prompt.Spec.ReplySpeaker,
             Continuation = continuingDraft ? scope.InitialDraft : Prompt.Spec.Continuation
         };
 
         KoboldCppClient kobold = scope.Clients.For(address);
+        using IDisposable serverSlot = await scope.Clients.AcquireSlotAsync(address, cancellationToken).ConfigureAwait(false);
         ResolvedContext resolvedContext = await ContextLengths.ResolveAsync(profile.Connection, kobold, cancellationToken).ConfigureAwait(false);
 
         if (resolvedContext.ServerAway)
@@ -398,7 +536,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         SeedChoice seed = Seeds.Pick(samplers.Seed, scope.Chat.Seed, regenerate: false);
         var genKey = $"ne_{Guid.NewGuid():N}";
         KoboldGenerateRequest request = KoboldGenerateRequest.From(built.Text, samplers, resolvedContext.Length, seed.Seed, format.AllStopSequences(), genKey);
-        ReplyReader reader = new(continuingDraft ? new ThoughtFormat() : format.Thought, feedsDraft && !continuingDraft ? scope.UserName : null);
+        ReplyReader reader = new(continuingDraft ? new ThoughtFormat() : format.Thought, impersonating && !continuingDraft ? scope.UserName : null);
         StringBuilder sent = new();
         Stopwatch clock = new();
         double? promptSeconds = null;
@@ -406,7 +544,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         DateTimeOffset started = DateTimeOffset.UtcNow;
 
         await context.ReportAsync("Generating…", 0.1).ConfigureAwait(false);
-        scope.OnActiveGeneration?.Invoke(kobold, genKey);
+        using IDisposable? active = scope.ActiveGenerations?.Track(kobold, genKey);
         clock.Start();
 
         try
@@ -422,7 +560,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
                     continue;
 
                 if (anchorId is not null && scope.OnStreamChunkAsync is not null)
-                    await scope.OnStreamChunkAsync(anchorId, reader.Text, reader.Thought).ConfigureAwait(false);
+                    await scope.OnStreamChunkAsync(context.NodeId, anchorId, reader.Text, reader.Thought).ConfigureAwait(false);
 
                 if (feedsDraft && scope.OnDraftChunkAsync is not null && reader.Text.Length > 0)
                 {
@@ -440,7 +578,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         finally
         {
             clock.Stop();
-            scope.OnActiveGeneration?.Invoke(null, null);
+            active?.Dispose();
         }
 
         _ = reader.Complete();
@@ -449,7 +587,7 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         GenerationRecord record = new()
         {
             Id = ChatLibrary.NewMessageId(),
-            Purpose = feedsDraft ? GenerationPurpose.Impersonate : scope.ScenarioName,
+            Purpose = impersonating ? GenerationPurpose.Impersonate : scope.ScenarioName,
             Connection = profile.ConnectionId,
             Model = model,
             ContextLength = resolvedContext.Length,
@@ -462,39 +600,43 @@ internal sealed class ModelCallNode : IGraphNodeAsync
             Seconds = clock.Elapsed.TotalSeconds
         };
 
-        scope.Generations.Add(record);
-        scope.LastGenerationId = record.Id;
-        scope.LastThought = reader.Thought.Length == 0 ? null : reader.Thought;
+        scope.RecordGeneration(context.NodeId, record, reader.Thought.Length == 0 ? null : reader.Thought);
         Text = (continuingDraft ? scope.InitialDraft + reader.Text : reader.Text).Trim();
         Thought = reader.Thought.Trim();
 
         await context.LogAsync(string.Create(CultureInfo.InvariantCulture, $"{built.Tokens} prompt + {replyTokens} reply tokens in {clock.Elapsed.TotalSeconds:F1} s.")).ConfigureAwait(false);
     }
 
-    private async Task<ActiveProfile> ResolveProfileAsync(ScenarioRunScope scope, CancellationToken cancellationToken)
+    private Task<ActiveProfile> ResolveProfileAsync(ScenarioRunScope scope, CancellationToken cancellationToken)
     {
         var requested = Connection.Trim();
 
         if (requested.Length == 0)
-            return scope.ActiveProfile ?? throw new UINodeFailureException("No active connection is configured.");
+            return Task.FromResult(scope.ActiveProfile ?? throw new UINodeFailureException("No active connection is configured."));
 
-        StoredDocument<ConnectionProfile>? match = await FindDocumentAsync(scope.Data.Connections, requested, cancellationToken).ConfigureAwait(false)
+        if (scope.PreloadedProfiles is IReadOnlyList<(string Id, ActiveProfile Profile)> preloaded)
+        {
+            for (var i = 0; i < preloaded.Count; i++)
+            {
+                if (string.Equals(preloaded[i].Id, requested, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(preloaded[i].Profile.Connection.Name, requested, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(preloaded[i].Profile);
+                }
+            }
+
+            throw new UINodeFailureException($"The connection profile '{requested}' was not found or has been deleted.");
+        }
+
+        return ResolveProfileFromDiskAsync(scope, requested, cancellationToken);
+    }
+
+    private static async Task<ActiveProfile> ResolveProfileFromDiskAsync(ScenarioRunScope scope, string requested, CancellationToken cancellationToken)
+    {
+        StoredDocument<ConnectionProfile> match = await FindDocumentAsync(scope.Data.Connections, requested, cancellationToken).ConfigureAwait(false)
             ?? throw new UINodeFailureException($"The connection profile '{requested}' was not found or has been deleted.");
 
         return await Profiles.ResolveAsync(scope.Data, match.Id, match.Document, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<SamplerPreset> ResolveSamplersAsync(ScenarioRunScope scope, SamplerPreset fallback, CancellationToken cancellationToken)
-    {
-        var requested = Samplers.Trim();
-
-        if (requested.Length == 0)
-            return fallback;
-
-        StoredDocument<SamplerPreset> match = await FindDocumentAsync(scope.Data.Samplers, requested, cancellationToken).ConfigureAwait(false)
-            ?? throw new UINodeFailureException($"The sampler preset '{requested}' was not found or has been deleted.");
-
-        return match.Document;
     }
 
     private static async Task<StoredDocument<T>?> FindDocumentAsync<T>(DocumentStore<T> store, string idOrName, CancellationToken cancellationToken)
@@ -517,6 +659,38 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         }
 
         return null;
+    }
+
+    private Task<SamplerPreset> ResolveSamplersAsync(ScenarioRunScope scope, SamplerPreset fallback, CancellationToken cancellationToken)
+    {
+        var requested = Samplers.Trim();
+
+        if (requested.Length == 0)
+            return Task.FromResult(fallback);
+
+        if (scope.PreloadedSamplers is IReadOnlyList<StoredDocument<SamplerPreset>> preloaded)
+        {
+            for (var i = 0; i < preloaded.Count; i++)
+            {
+                if (string.Equals(preloaded[i].Id, requested, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(preloaded[i].Document.Name, requested, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(preloaded[i].Document);
+                }
+            }
+
+            throw new UINodeFailureException($"The sampler preset '{requested}' was not found or has been deleted.");
+        }
+
+        return ResolveSamplersFromDiskAsync(scope, requested, cancellationToken);
+    }
+
+    private static async Task<SamplerPreset> ResolveSamplersFromDiskAsync(ScenarioRunScope scope, string requested, CancellationToken cancellationToken)
+    {
+        StoredDocument<SamplerPreset> match = await FindDocumentAsync(scope.Data.Samplers, requested, cancellationToken).ConfigureAwait(false)
+            ?? throw new UINodeFailureException($"The sampler preset '{requested}' was not found or has been deleted.");
+
+        return match.Document;
     }
 
     private SamplerPreset ApplyOverrides(SamplerPreset preset)
@@ -627,7 +801,8 @@ internal sealed class ReplaceRecordNode : IGraphNode
             return;
         }
 
-        scope.StagedRecords.Add(new ChatRecord
+        (var generationId, var thought) = scope.ResolveSourceGeneration(context.NodeId);
+        scope.StageRecord(new ChatRecord
         {
             Id = ChatLibrary.NewMessageId(),
             Scenario = scope.ScenarioId,
@@ -636,8 +811,8 @@ internal sealed class ReplaceRecordNode : IGraphNode
             Role = Role,
             Text = cleaned,
             Template = string.IsNullOrWhiteSpace(Template) ? null : Template.Trim(),
-            Thought = scope.LastThought,
-            Generation = scope.LastGenerationId
+            Thought = thought,
+            Generation = generationId
         });
     }
 }
@@ -681,7 +856,8 @@ internal sealed class InsertRecordNode : IGraphNode
             return;
         }
 
-        scope.StagedRecords.Add(new ChatRecord
+        (var generationId, var thought) = scope.ResolveSourceGeneration(context.NodeId);
+        scope.StageRecord(new ChatRecord
         {
             Id = ChatLibrary.NewMessageId(),
             Scenario = scope.ScenarioId,
@@ -690,14 +866,14 @@ internal sealed class InsertRecordNode : IGraphNode
             Role = Role,
             Text = cleaned,
             Template = string.IsNullOrWhiteSpace(Template) ? null : Template.Trim(),
-            Thought = scope.LastThought,
-            Generation = scope.LastGenerationId
+            Thought = thought,
+            Generation = generationId
         });
     }
 }
 
-/// <summary>Writes generated text into the chat composer's draft field.</summary>
-[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Draft", Description = "Writes text into the chat composer's draft field.", Icon = AppIcons.Impersonate, Color = ScenarioCatalog.WriteColor, AlwaysRuns = true)]
+/// <summary>Writes or continues text in the chat composer's draft field.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Write draft", Description = "Writes or continues text in the chat composer's draft field.", Icon = AppIcons.Impersonate, Color = ScenarioCatalog.WriteColor, AlwaysRuns = true)]
 internal sealed class WriteDraftNode : IGraphNode
 {
     public const string NodeKey = "chat.draft";
@@ -705,21 +881,110 @@ internal sealed class WriteDraftNode : IGraphNode
     [GraphInput(Title = "Text", PinOnly = true)]
     public string Text { get; set; } = string.Empty;
 
+    [GraphInput(Title = "Mode")]
+    public DraftWriteMode Mode { get; set; } = DraftWriteMode.Replace;
+
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
-        var cleaned = Text.Trim();
+        (var generationId, _) = scope.ResolveSourceGeneration(context.NodeId);
+        var combined = Mode == DraftWriteMode.Continue && generationId is null && scope.InitialDraft.Length > 0
+            ? scope.InitialDraft + Text
+            : Text;
+        var cleaned = combined.Trim();
 
         if (cleaned.Length == 0)
             throw new UINodeFailureException("The draft text is empty.");
 
         if (!scope.CommitToChat)
         {
-            context.Log($"Preview: would write draft ({cleaned.Length} chars).");
+            context.Log($"Preview: would write draft ({cleaned.Length} chars, {Mode}).");
             return;
         }
 
-        scope.StagedDraft = cleaned;
-        scope.StagedDraftGenerationId = scope.LastGenerationId;
+        var continued = Mode == DraftWriteMode.Continue && scope.InitialDraft.Length > 0;
+        scope.StageDraft(cleaned, generationId, continued);
+    }
+}
+
+/// <summary>Sets or clears the chat's timeline-bound stage picture or background at the current turn.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Set visual", Description = "Sets or clears the chat's stage picture or background at the current turn.", Icon = AppIcons.Stage, Color = ScenarioCatalog.WriteColor, AlwaysRuns = true)]
+internal sealed class SetVisualNode : IGraphNode
+{
+    public const string NodeKey = "chat.visual";
+
+    [GraphInput(Title = "Target")]
+    public ChatVisualTarget Target { get; set; } = ChatVisualTarget.Stage;
+
+    [GraphInput(Title = "Image", Image = true, Large = true, Placeholder = "happy or global.sunset", Description = "An image output or gallery key (<char>.<id>, global.<id>, or <id>).")]
+    public string Image { get; set; } = string.Empty;
+
+    [GraphInput(Title = "Clear", Description = "Clears the active visual for this target from this turn onward.")]
+    public bool Clear { get; set; }
+
+    [GraphInput(Title = "Slice", PinOnly = true, Description = "Optional slice whose last message anchors the visual; defaults to the chat's last message.")]
+    public MessageSlice? Slice { get; set; }
+
+    [GraphInput(Title = "Ignore missing", Description = "Skips silently instead of failing when the image key is blank or not found.")]
+    public bool IgnoreMissing { get; set; } = true;
+
+    public void Execute(UINodeRunContext context)
+    {
+        ScenarioRunScope scope = ScenarioRunScope.From(context);
+        var afterId = Slice?.LastMessageId ?? (scope.Chat.Messages.Count > 0 ? scope.Chat.Messages[^1].Id : null);
+
+        if (Clear)
+        {
+            if (!scope.CommitToChat)
+            {
+                context.Log($"Preview: would clear {Target}.");
+                return;
+            }
+
+            (var clearGenId, _) = scope.ResolveSourceGeneration(context.NodeId);
+            scope.StageVisual(new ChatVisual
+            {
+                Id = ChatLibrary.NewMessageId(),
+                Scenario = scope.ScenarioId,
+                Target = Target,
+                After = afterId,
+                Image = null,
+                Generation = clearGenId
+            });
+            return;
+        }
+
+        PictureContent? pictures = context.Services?.GetService(typeof(PictureContent)) as PictureContent;
+        (string Key, bool IsPreview)? resolved = pictures is not null
+            ? pictures.TryResolveVisualKey(Image, scope.Chat.Character, scope.Character?.ImageTags, scope.Settings.ImageTags)
+            : GalleryPictures.Resolve(scope.Data, Image, scope.Chat.Character, scope.Character?.ImageTags, scope.Settings.ImageTags) is (var fallbackKey, _) ? (fallbackKey, false) : null;
+
+        if (resolved is not (var resolvedKey, var isPreview))
+        {
+            if (IgnoreMissing)
+            {
+                context.Log($"Skipped: visual '{Image.Trim()}' was not found.");
+                return;
+            }
+
+            throw new UINodeFailureException(string.IsNullOrWhiteSpace(Image) ? $"No image was provided for {Target}." : $"The gallery image '{Image.Trim()}' was not found.");
+        }
+
+        if (!scope.CommitToChat || isPreview)
+        {
+            context.Log($"Preview: would set {Target} to '{resolvedKey}'.");
+            return;
+        }
+
+        (var generationId, _) = scope.ResolveSourceGeneration(context.NodeId);
+        scope.StageVisual(new ChatVisual
+        {
+            Id = ChatLibrary.NewMessageId(),
+            Scenario = scope.ScenarioId,
+            Target = Target,
+            After = afterId,
+            Image = resolvedKey,
+            Generation = generationId
+        });
     }
 }

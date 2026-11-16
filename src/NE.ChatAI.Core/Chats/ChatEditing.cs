@@ -55,7 +55,8 @@ public static class ChatEditing
         return chat with
         {
             Messages = [.. chat.Messages.Take(at), message with { Variants = variants, Chosen = chosen }, .. tail],
-            Records = ChatRecords.PinVariantRecords(chat.Records, message.Id, shown)
+            Records = ChatRecords.PinVariantRecords(chat.Records, message.Id, shown),
+            Visuals = ChatVisuals.PinVariantVisuals(chat.Visuals, message.Id, shown)
         };
     }
 
@@ -107,6 +108,7 @@ public static class ChatEditing
         {
             Messages = [.. chat.Messages.Take(at), message with { Variants = variants, Chosen = variants.Count - 1 }],
             Records = variants.Count > 1 ? ChatRecords.PinVariantRecords(chat.Records, message.Id, shown) : chat.Records,
+            Visuals = variants.Count > 1 ? ChatVisuals.PinVariantVisuals(chat.Visuals, message.Id, shown) : chat.Visuals,
             Generations = Recorded(chat, record)
         };
     }
@@ -124,7 +126,13 @@ public static class ChatEditing
 
         IReadOnlyList<ChatMessage> after = [.. chat.Messages.Take(at), WithCurrent(chat.Messages[at], variant with { Tail = null })];
 
-        return chat with { Messages = after, Records = ChatRecords.OnRolledBack(chat.Messages, chat.Records, after, remadeAt: at), Generations = Recorded(chat, record) };
+        return chat with
+        {
+            Messages = after,
+            Records = ChatRecords.OnRolledBack(chat.Messages, chat.Records, after, remadeAt: at),
+            Visuals = ChatVisuals.OnRolledBack(chat.Messages, chat.Visuals, after, remadeAt: at),
+            Generations = Recorded(chat, record)
+        };
     }
 
     private static ChatMessage WithCurrent(ChatMessage message, MessageVariant variant)
@@ -207,7 +215,12 @@ public static class ChatEditing
 
         IReadOnlyList<ChatMessage> after = [.. chat.Messages.Where(message => message.Id != messageId)];
 
-        return chat with { Messages = after, Records = ChatRecords.OnMessageDeleted(chat.Messages, chat.Records, at, after) };
+        return chat with
+        {
+            Messages = after,
+            Records = ChatRecords.OnMessageDeleted(chat.Messages, chat.Records, at, after),
+            Visuals = ChatVisuals.OnMessageDeleted(chat.Messages, chat.Visuals, at, after)
+        };
     }
 
     /// <summary>The chat up to and with a message, every message after it gone: what a branch into a new chat starts from.</summary>
@@ -227,8 +240,9 @@ public static class ChatEditing
 
         IReadOnlyList<ChatMessage> kept = [.. chat.Messages.Take(at), last];
         IReadOnlyList<ChatRecord> keptRecords = ChatRecords.OnBranchedUpTo(chat.Messages, chat.Records, at, kept);
+        IReadOnlyList<ChatVisual> keptVisuals = ChatVisuals.OnBranchedUpTo(chat.Messages, chat.Visuals, at, kept);
 
-        return chat with { Messages = kept, Records = keptRecords, Generations = KeptGenerations(chat, at, kept, keptRecords) };
+        return chat with { Messages = kept, Records = keptRecords, Visuals = keptVisuals, Generations = KeptGenerations(chat, at, kept, keptRecords, keptVisuals) };
     }
 
     private static ChatMessage WithoutTails(ChatMessage message)
@@ -239,7 +253,7 @@ public static class ChatEditing
         return message with { Variants = [.. message.Variants.Select(static variant => variant.Tail is null ? variant : variant with { Tail = null })] };
     }
 
-    private static IReadOnlyList<GenerationRecord> KeptGenerations(Chat chat, int at, IReadOnlyList<ChatMessage> kept, IReadOnlyList<ChatRecord> keptRecords)
+    private static IReadOnlyList<GenerationRecord> KeptGenerations(Chat chat, int at, IReadOnlyList<ChatMessage> kept, IReadOnlyList<ChatRecord> keptRecords, IReadOnlyList<ChatVisual> keptVisuals)
     {
         if (chat.Generations.Count == 0)
             return chat.Generations;
@@ -257,6 +271,16 @@ public static class ChatEditing
                 _ = keptIds.Add(record.Generation);
         }
 
+        HashSet<string> keptVisualIds = [];
+
+        foreach (ChatVisual visual in keptVisuals)
+        {
+            _ = keptVisualIds.Add(visual.Id);
+
+            if (visual.Generation is not null)
+                _ = keptIds.Add(visual.Generation);
+        }
+
         HashSet<string> droppedIds = [];
         DateTimeOffset earliestDropped = CollectDropped(chat, at, droppedIds);
 
@@ -264,6 +288,12 @@ public static class ChatEditing
         {
             if (!keptRecordIds.Contains(record.Id) && record.Generation is not null && !keptIds.Contains(record.Generation))
                 _ = droppedIds.Add(record.Generation);
+        }
+
+        foreach (ChatVisual visual in chat.Visuals)
+        {
+            if (!keptVisualIds.Contains(visual.Id) && visual.Generation is not null && !keptIds.Contains(visual.Generation))
+                _ = droppedIds.Add(visual.Generation);
         }
 
         var lastKeptIndex = -1;
@@ -383,6 +413,11 @@ public static class ChatEditing
 
         IReadOnlyList<ChatMessage> after = [.. chat.Messages.Take(at)];
 
-        return chat with { Messages = after, Records = ChatRecords.OnRolledBack(chat.Messages, chat.Records, after) };
+        return chat with
+        {
+            Messages = after,
+            Records = ChatRecords.OnRolledBack(chat.Messages, chat.Records, after),
+            Visuals = ChatVisuals.OnRolledBack(chat.Messages, chat.Visuals, after)
+        };
     }
 }

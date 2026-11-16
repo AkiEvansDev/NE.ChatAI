@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NE.ChatAI.Core\NE.ChatAI.Core.csproj" />
+    <ProjectReference Include="..\NE.ChatAI.Plugins\NE.ChatAI.Plugins.csproj" />
   </ItemGroup>
 
   <ItemGroup>

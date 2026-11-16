@@ -192,11 +192,7 @@ internal static class SettingsEditors
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
     /// <summary>A Markdown field with roleplay speech, narration and SillyTavern macro styling and completions.</summary>
-    /// <remarks>
-    /// Filled named here: a code input starts ghost, as a listing to read, and here it stands among the form's filled fields.
-    /// <c>DebounceMilliseconds</c> commits scripted edits (<c>Enter</c>, <c>Tab</c>, undo, completions) that prevent the browser's native
-    /// <c>change</c> on blur.
-    /// </remarks>
+    /// <remarks>Filled named here: a code input starts ghost, as a listing to read, and here it stands among the form's filled fields.</remarks>
     public static CodeInputComponent MacroInput(string? title, int rows, bool lineNumbers = false, bool expandable = false)
     {
         CodeInputComponent input = StyleMacroCode(new CodeInputComponent())
@@ -205,7 +201,6 @@ internal static class SettingsEditors
             .SetWrapLines(true)
             .SetStatusBar(false)
             .SetLineNumbers(lineNumbers)
-            .SetDebounceMilliseconds(240)
             .SetCompletionTriggers("{{")
             .SetCompletionItems(MacroCompletions);
 
@@ -384,6 +379,61 @@ internal static class SettingsEditors
                 .OnClick(nameof(SettingsController.AddPhrase))
                 .SetHorizontalAlignment(UIAlignment.Start)
         );
+
+    /// <summary>The global image gallery (<c>global.&lt;id&gt;</c>), available to scenarios in every chat.</summary>
+    public static CardComponent CreateGallery()
+        => Card(null,
+            PictureFields.Gallery<SettingsController>(
+                "chatai-global-gallery-search",
+                "chatai.gallery.global.description",
+                "chatai.gallery.none",
+                static x => x.GallerySelectionId,
+                nameof(SettingsController.UploadGlobalGalleryAsync),
+                static x => x.GlobalGallery,
+                nameof(SettingsController.ReplaceGlobalGalleryAsync),
+                nameof(SettingsController.GlobalGalleryActionAsync)
+            )
+        );
+
+    /// <summary>Named API keys encrypted in <c>secrets.json</c> (or supplied via <c>ChatAI__Secrets__&lt;name&gt;</c>) for scenario plugins.</summary>
+    public static CardComponent CreateSecrets()
+        => Card(null,
+            UIText.Note("chatai.secrets.description"),
+            new TextInputComponent(SettingsController.SecretSearchId)
+                .SetSearch()
+                .SetDebounceMilliseconds(200)
+                .AddTrailingAction(UIIconButtons.New().OnClick(nameof(SettingsController.AskCreateSecret))),
+            new ItemsViewComponent()
+                .SetVerticalScroll(UIScrollMode.Disabled)
+                .BindItems<SettingsController>(static x => x.Secrets)
+                .FilterBy(SettingsController.SecretSearchId, IInputComponent.ValueProperty, nameof(SecretItem.Name))
+                .SetSpacing(8)
+                .ConfigureDefaultEmptyTemplate(empty => empty.SetTitle("chatai.secrets.none").SetTitleWrap(true))
+                .SetTemplate(CreateSecretRow())
+        );
+
+    private static ContainerComponent CreateSecretRow()
+    {
+        TextComponent slugText = new TextComponent()
+            .BindTitle<SecretItem>(static x => x.Name, UIBindingScope.Relative)
+            .AsSubtitle()
+            .AsContent(TextComponent.TitleProperty);
+
+        return UILayout.Ends(
+            slugText,
+            UIIconButtons.Edit()
+                .SetSize(UISize.Small)
+                .OnClick(nameof(SettingsController.AskEditSecret), UIAction.ArgCurrentItemKey("secretId")),
+            UIIconButtons.Copy()
+                .SetSize(UISize.Small)
+                .InteractOn(EventNames.Click, CopyToClipboardEffect.ValueOf(slugText))
+                .InteractOn(EventNames.Click, new ShowNotificationEffect("chatai.copied", UIColorStyle.Success)),
+            UIIconButtons.Delete()
+                .SetSize(UISize.Small)
+                .BindVisibility<SecretItem>(static x => x.DeleteVisibility, UIBindingScope.Relative)
+                .OnClick(nameof(SettingsController.DeleteSecretAsync), UIAction.ArgCurrentItemKey("secretId"))
+        );
+    }
 
     /// <summary>
     /// The field archives and SillyTavern's files go in by a pick or a drop, what became of each listed under it, the archive export by

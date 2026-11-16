@@ -13,6 +13,8 @@ internal static class PictureFields
     private const double PreviewHeight = 180;
     private const double PreviewColumnWidth = 480;
     private const double PreviewAvatarSize = 40;
+    private const double GalleryTileWidth = 228;
+    private const double GalleryDesktopTileWidth = 244;
 
     /// <summary>The field over the controller's <see cref="PictureSlot"/> at <paramref name="slot"/>, its upload kept by <paramref name="save"/>; a dimmed preview with a sample message once loaded, and the remove beneath.</summary>
     public static StackPanelComponent Background<TSource>(string title, string hint, Expression<Func<TSource, PictureSlot>> slot, string save, string remove, Expression<Func<TSource, object?>>? author = null, Expression<Func<TSource, object?>>? avatar = null, string? dimSliderId = null)
@@ -106,5 +108,92 @@ internal static class PictureFields
             _ = surface.InteractCopyValue(dimSliderId, ISurfaceComponent.BackgroundImageDimProperty);
 
         return surface;
+    }
+
+    /// <summary>A gallery editor: search field with an embedded upload button over a wrapping grid of large flush tiles with lightbox preview and context-menu actions.</summary>
+    public static StackPanelComponent Gallery<TSource>(string searchId, string description, string emptyTitle, Expression<Func<TSource, object?>> selectionId, string uploadCommand, Expression<Func<TSource, object?>> items, string replaceCommand, string actionCommand)
+    {
+        FileInputComponent uploadPicker = new FileInputComponent()
+            .SetAccept(".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg")
+            .SetMultiple(true)
+            .SetMaxFileSize(MaxBackgroundBytes)
+            .BindSelectionId(selectionId)
+            .OnChange(uploadCommand)
+            .SetVisibility(UIVisibility.Collapsed);
+
+        return UILayout.Stack(16,
+            UIText.Note(description),
+            new TextInputComponent(searchId)
+                .SetSearch()
+                .SetDebounceMilliseconds(200)
+                .AddTrailingAction(UIIconButtons.New()
+                    .SetTooltip("chatai.gallery.upload")
+                    .InteractOn(EventNames.Click, new OpenPickerEffect(uploadPicker))
+                ),
+            uploadPicker,
+            new ItemsViewComponent()
+                .SetVerticalScroll(UIScrollMode.Disabled)
+                .SetLayoutType(UIItemsLayoutType.Wrap)
+                .BindItems(items)
+                .FilterBy(searchId, IInputComponent.ValueProperty, nameof(GalleryItem.Tooltip))
+                .SetSpacing(12)
+                .ConfigureDefaultEmptyTemplate(empty => empty.SetTitle(emptyTitle).SetTitleWrap(true))
+                .SetTemplate(CreateGalleryTile(replaceCommand, actionCommand))
+        );
+    }
+
+    private static StackPanelComponent CreateGalleryTile(string replaceCommand, string actionCommand)
+    {
+        TextComponent captionText = UIText.Caption()
+            .Muted()
+            .SetTextAlignment(UITextAlignment.Center)
+            .SetWrapMode(UITextWrapMode.NoWrap)
+            .SetMargin(UIThickness.Uniform(6))
+            .BindTitle<GalleryItem>(static x => x.CopyText, UIBindingScope.Relative)
+            .BindTooltip<GalleryItem>(static x => x.Tooltip, UIBindingScope.Relative)
+            .SetTooltipPlain(true)
+            .AsContent(TextComponent.TitleProperty, ITooltipComponent.TooltipProperty);
+
+        FileInputComponent replacePicker = new FileInputComponent()
+            .SetAccept(".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg")
+            .SetMaxFileSize(MaxBackgroundBytes)
+            .BindSelectionId<GalleryItem>(static x => x.ReplaceSelectionId, UIBindingScope.Relative)
+            .OnChange(replaceCommand, UIAction.ArgCurrentItemKey("imageId"))
+            .SetVisibility(UIVisibility.Collapsed);
+
+        MenuComponent contextMenu = new MenuComponent()
+            .SetItems([
+                new MenuItem { Id = ShellController.GalleryReplaceAction, Title = "chatai.gallery.replace", Icon = UIStandardAction.Upload.Icon },
+                new MenuItem { Id = ShellController.GalleryTagAction, Title = "chatai.gallery.tag", Icon = AppIcons.Outline(AppIcons.Tags) },
+                new MenuItem { Id = ShellController.GalleryCopyAction, Title = "chatai.gallery.copy-id", Icon = UIStandardAction.Copy.Icon },
+                new MenuItem { Id = "gallery-delete-separator", Kind = UIMenuItemKind.Separator },
+                UIMenuItems.Delete(ShellController.GalleryDeleteAction)
+            ])
+            .OnItemClick(ShellController.GalleryReplaceAction, new OpenPickerEffect(replacePicker))
+            .OnItemClick(ShellController.GalleryCopyAction, CopyToClipboardEffect.ValueOf(captionText))
+            .OnItemClick(ShellController.GalleryCopyAction, new ShowNotificationEffect("chatai.copied", UIColorStyle.Success))
+            .OnItemClick(actionCommand, UIAction.ArgCurrentItemKey("action"), UIAction.ArgParent<GalleryItem>("imageId", static x => x.Id));
+
+        SurfaceComponent tile = new SurfaceComponent()
+            .SetWidth(UILayoutLength.Absolute(GalleryTileWidth), xl: UILayoutLength.Absolute(GalleryDesktopTileWidth))
+            .SetPadding(UIThickness.Uniform(0))
+            .SetBorderRadius(UICornerRadius.Uniform(8))
+            .SetOverflow(UIOverflow.Hidden)
+            .OnClickShowImage(amongRows: true)
+            .SetContent(UILayout.Stack(0,
+                new ImageComponent()
+                    .BindSource<GalleryItem>(static x => x.Preview, UIBindingScope.Relative)
+                    .BindAltText<GalleryItem>(static x => x.CopyText, UIBindingScope.Relative)
+                    .AsContent(ImageComponent.AltTextProperty)
+                    .SetBorderRadius(UICornerRadius.Uniform(0))
+                    .SetFit(UIImageFit.Cover)
+                    .SetWidth(UILayoutLength.Fill())
+                    .SetHeight(UILayoutLength.Absolute(GalleryTileWidth), xl: UILayoutLength.Absolute(GalleryDesktopTileWidth)),
+                captionText
+            )
+        );
+
+        return UILayout.Stack(0, tile, replacePicker)
+            .SetContextMenu(contextMenu);
     }
 }

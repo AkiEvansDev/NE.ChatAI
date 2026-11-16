@@ -10,8 +10,8 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Secrets;
 
-/// <summary>What the settings may know of a secret: whether it is set, and whether the environment sets it — never its value.</summary>
-public sealed record SecretInfo(string Name, bool IsSet, bool FromEnvironment);
+/// <summary>What the settings may know of a secret: whether it is set, whether the environment sets it, and whether <c>secrets.json</c> holds an encrypted value — never its value.</summary>
+public sealed record SecretInfo(string Name, bool IsSet, bool FromEnvironment, bool Stored = false);
 
 /// <summary>A secret kept in the file but no longer readable: encrypted with keys this machine or user does not have.</summary>
 public sealed class SecretUnreadableException : Exception
@@ -40,12 +40,14 @@ public sealed class SecretStore : IDisposable
     private readonly string _path;
     private readonly IDataProtector _protector;
     private readonly Func<string, string?> _environment;
+    private readonly Func<IEnumerable<string>>? _environmentNames;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <param name="path">The secrets file.</param>
     /// <param name="protection">The Data Protection the values are encrypted with.</param>
     /// <param name="environment">A secret's value from outside the file by its name, or <c>null</c>.</param>
-    public SecretStore(string path, IDataProtectionProvider protection, Func<string, string?> environment)
+    /// <param name="environmentNames">Optional enumeration of secret names currently provided by the environment.</param>
+    public SecretStore(string path, IDataProtectionProvider protection, Func<string, string?> environment, Func<IEnumerable<string>>? environmentNames = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         ArgumentNullException.ThrowIfNull(protection);
@@ -54,6 +56,7 @@ public sealed class SecretStore : IDisposable
         _path = path;
         _protector = protection.CreateProtector(Purpose);
         _environment = environment;
+        _environmentNames = environmentNames;
     }
 
     /// <summary>The secret's value — the environment's first — or <c>null</c> when it is not set.</summary>
@@ -143,8 +146,48 @@ public sealed class SecretStore : IDisposable
     {
         var fromEnvironment = _environment(Checked(name)) is { Length: > 0 };
         SecretsFile file = await ReadAsync(cancellationToken).ConfigureAwait(false);
+        var stored = file.Secrets.ContainsKey(name);
 
-        return new SecretInfo(name, fromEnvironment || file.Secrets.ContainsKey(name), fromEnvironment);
+        return new SecretInfo(name, fromEnvironment || stored, fromEnvironment, stored);
+    }
+
+    /// <summary>Every stored or environment-supplied secret in ordinal name order, without exposing any secret value.</summary>
+    public async Task<IReadOnlyList<SecretInfo>> ListAsync(CancellationToken cancellationToken)
+    {
+        SecretsFile file = await ReadAsync(cancellationToken).ConfigureAwait(false);
+        HashSet<string> names = [with(StringComparer.Ordinal)];
+
+        foreach (var key in file.Secrets.Keys)
+        {
+            if (Slug.IsValidId(key))
+                _ = names.Add(key);
+        }
+
+        if (_environmentNames is not null)
+        {
+            foreach (var key in _environmentNames())
+            {
+                if (Slug.IsValidId(key) && _environment(key) is { Length: > 0 })
+                    _ = names.Add(key);
+            }
+        }
+
+        if (names.Count == 0)
+            return [];
+
+        List<string> ordered = [.. names];
+        ordered.Sort(StringComparer.Ordinal);
+        List<SecretInfo> items = [with(ordered.Count)];
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var name = ordered[i];
+            var fromEnvironment = _environment(name) is { Length: > 0 };
+            var stored = file.Secrets.ContainsKey(name);
+            items.Add(new SecretInfo(name, fromEnvironment || stored, fromEnvironment, stored));
+        }
+
+        return items;
     }
 
     public void Dispose()

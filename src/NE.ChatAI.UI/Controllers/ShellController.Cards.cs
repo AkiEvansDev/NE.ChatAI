@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -107,6 +108,12 @@ internal abstract partial class ShellController
     public const string CharacterDialogKey = "chatai-character-dialog";
     public const string PersonaDialogKey = "chatai-persona-dialog";
     public const string WorldDialogKey = "chatai-world-dialog";
+    public const string GalleryTagDialogKey = "chatai-gallery-tag";
+
+    public const string GalleryReplaceAction = "replace";
+    public const string GalleryTagAction = "tag";
+    public const string GalleryCopyAction = "copy";
+    public const string GalleryDeleteAction = "delete";
 
     /// <summary>The largest picture taken; the crop writes a square of <see cref="AvatarSize"/>, far under it.</summary>
     public const long MaxAvatarBytes = 8 * 1024 * 1024;
@@ -121,6 +128,8 @@ internal abstract partial class ShellController
     private TagScope _editingCardScope;
     private string? _editingCardId;
     private string? _editingCardWorld;
+    private bool _taggingGlobalGallery;
+    private string? _taggingImageId;
 
     [RecursiveMember]
     public partial UIPhrase? CreateCardTitle { get; set; }
@@ -174,6 +183,15 @@ internal abstract partial class ShellController
     /// <summary>The picture behind the character's chats; none, and they take the application's.</summary>
     [RecursiveMember]
     public partial PictureSlot CharacterBackground { get; set; } = new();
+
+    [RecursiveMember]
+    public partial string? CharacterGallerySelectionId { get; set; }
+
+    [RecursiveMember]
+    public partial string GalleryTagInput { get; set; } = string.Empty;
+
+    [RecursiveMember(false)]
+    public RecursiveCollection<GalleryItem> CharacterGallery { get; } = [];
 
     /// <summary>Whether new chats are started as this persona; one persona at a time is.</summary>
     [RecursiveMember]
@@ -346,6 +364,19 @@ internal abstract partial class ShellController
         CharacterPostHistoryInstructions = card.PostHistoryInstructions?.TrimEnd('\r', '\n') ?? string.Empty;
         CharacterAuthorsNote = card.AuthorsNote?.TrimEnd('\r', '\n') ?? string.Empty;
         CharacterBackground.Show(Pictures.CharacterBackgroundOf(cardId));
+        ShowCharacterGallery(cardId, card.ImageTags);
+    }
+
+    private void ShowCharacterGallery(string cardId, IReadOnlyDictionary<string, string>? imageTags)
+    {
+        CharacterGallery.Clear();
+        IReadOnlyList<GalleryImage> images = GalleryPictures.ListCharacter(Data, cardId, imageTags);
+
+        for (var i = 0; i < images.Count; i++)
+        {
+            GalleryImage image = images[i];
+            CharacterGallery.Add(GalleryItem.From(image, Pictures.CharacterGalleryImageOf(cardId, image.Id)));
+        }
     }
 
     /// <summary>None and every world in the field's list, the card's own chosen; a world gone reads as none.</summary>
@@ -444,14 +475,28 @@ internal abstract partial class ShellController
                 if (await Data.Personas.ReadAsync(cardId, cancellationToken).ConfigureAwait(false) is not Persona persona)
                     return;
 
-                await Data.Personas.WriteAsync(cardId, persona with { Name = name.Length == 0 ? persona.Name : name, Description = description, World = _editingCardWorld }, cancellationToken).ConfigureAwait(false);
+                var newPersonaId = await DocumentRenames.SavePersonaAsync(Data, cardId, persona with { Name = name.Length == 0 ? persona.Name : name, Description = description, World = _editingCardWorld }, cancellationToken).ConfigureAwait(false);
+
+                if (!string.Equals(newPersonaId, cardId, StringComparison.Ordinal))
+                {
+                    _editingCardId = newPersonaId;
+                    CardAvatar.Show(Pictures.PersonaAvatarOf(newPersonaId));
+                }
+
                 break;
 
             case TagScope.World:
                 if (await Data.Worlds.ReadAsync(cardId, cancellationToken).ConfigureAwait(false) is not World world)
                     return;
 
-                await Data.Worlds.WriteAsync(cardId, ApplyWorldFields(world with { Name = name.Length == 0 ? world.Name : name, Description = description }), cancellationToken).ConfigureAwait(false);
+                var newWorldId = await DocumentRenames.SaveWorldAsync(Data, cardId, ApplyWorldFields(world with { Name = name.Length == 0 ? world.Name : name, Description = description }), cancellationToken).ConfigureAwait(false);
+
+                if (!string.Equals(newWorldId, cardId, StringComparison.Ordinal))
+                {
+                    _editingCardId = newWorldId;
+                    CardAvatar.Show(Pictures.WorldAvatarOf(newWorldId));
+                }
+
                 RefreshWorldArticles();
                 break;
 
@@ -460,7 +505,21 @@ internal abstract partial class ShellController
                 if (await Data.Characters.ReadAsync(cardId, cancellationToken).ConfigureAwait(false) is not Character character)
                     return;
 
-                await Data.Characters.WriteAsync(cardId, ApplyCharacterFields(character with { Name = name.Length == 0 ? character.Name : name, Description = description, World = _editingCardWorld }), cancellationToken).ConfigureAwait(false);
+                Character updatedCharacter = ApplyCharacterFields(character with { Name = name.Length == 0 ? character.Name : name, Description = description, World = _editingCardWorld });
+                var newCharacterId = await DocumentRenames.SaveCharacterAsync(Data, cardId, updatedCharacter, cancellationToken).ConfigureAwait(false);
+
+                if (!string.Equals(newCharacterId, cardId, StringComparison.Ordinal))
+                {
+                    _editingCardId = newCharacterId;
+
+                    if (string.Equals(_panelCharacterId, cardId, StringComparison.Ordinal))
+                        _panelCharacterId = newCharacterId;
+
+                    CardAvatar.Show(Pictures.CharacterAvatarOf(newCharacterId));
+                    CharacterBackground.Show(Pictures.CharacterBackgroundOf(newCharacterId));
+                    ShowCharacterGallery(newCharacterId, updatedCharacter.ImageTags);
+                }
+
                 break;
         }
 
@@ -568,6 +627,127 @@ internal abstract partial class ShellController
         CharacterBackground.Show(Pictures.CharacterBackgroundOf(id));
         await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Adds every uploaded picture to the open character's gallery under collision-free slugs.</summary>
+    [UICommand]
+    public async Task UploadCharacterGalleryAsync(CancellationToken cancellationToken)
+    {
+        var selectionId = CharacterGallerySelectionId;
+        CharacterGallerySelectionId = null;
+
+        if (_editingCardId is not string id || _editingCardScope != TagScope.Character)
+            return;
+
+        List<(string FileName, byte[] Content, string? ContentType)> uploaded = await ReadUploadedPicturesAsync(selectionId, cancellationToken).ConfigureAwait(false);
+
+        if (uploaded.Count == 0)
+            return;
+
+        for (var i = 0; i < uploaded.Count; i++)
+            _ = await GalleryPictures.WriteCharacterAsync(Data, id, uploaded[i].FileName, uploaded[i].Content, uploaded[i].ContentType, cancellationToken).ConfigureAwait(false);
+
+        await RefreshCharacterGalleryAsync(id, cancellationToken).ConfigureAwait(false);
+        await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task RefreshCharacterGalleryAsync(string cardId, CancellationToken cancellationToken)
+    {
+        Character? character = await Data.Characters.ReadAsync(cardId, cancellationToken).ConfigureAwait(false);
+        ShowCharacterGallery(cardId, character?.ImageTags);
+    }
+
+    /// <summary>Replaces the picture file of <paramref name="imageId"/> in the open character's gallery while preserving its id and assigned tag.</summary>
+    [UICommand]
+    public async Task ReplaceCharacterGalleryAsync(string imageId, CancellationToken cancellationToken)
+    {
+        if (_editingCardId is not string id || _editingCardScope != TagScope.Character || !CharacterGallery.TryGet(imageId, out GalleryItem? item))
+            return;
+
+        List<(string FileName, byte[] Content, string? ContentType)> uploaded = await ReadUploadedPicturesAsync(item.TakeReplaceUpload(), cancellationToken).ConfigureAwait(false);
+
+        if (uploaded.Count == 0)
+            return;
+
+        if (await GalleryPictures.ReplaceCharacterAsync(Data, id, imageId, uploaded[0].Content, uploaded[0].ContentType, cancellationToken).ConfigureAwait(false) is not null)
+        {
+            item.Preview = Pictures.CharacterGalleryImageOf(id, imageId);
+            await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Dispatches context menu actions on a tile in the open character's gallery.</summary>
+    [UICommand]
+    public async Task<UICommandResult> CharacterGalleryActionAsync(string action, string imageId, CancellationToken cancellationToken)
+    {
+        if (_editingCardId is not string id || _editingCardScope != TagScope.Character)
+            return UICommandResult.Ok();
+
+        if (action == GalleryTagAction && CharacterGallery.TryGet(imageId, out GalleryItem? item))
+            return OpenGalleryTagDialog(isGlobal: false, imageId, item.Tag);
+
+        if (action == GalleryDeleteAction)
+        {
+            await GalleryPictures.DeleteCharacterAsync(Data, id, imageId, cancellationToken).ConfigureAwait(false);
+            _ = CharacterGallery.Remove(imageId);
+            await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return UICommandResult.Ok();
+    }
+
+    protected UICommandResult OpenGalleryTagDialog(bool isGlobal, string imageId, string? currentTag)
+    {
+        _taggingGlobalGallery = isGlobal;
+        _taggingImageId = imageId;
+        GalleryTagInput = currentTag ?? string.Empty;
+
+        return UICommandResult.Ok([new OpenDialogEffect(GalleryTagDialogKey)]);
+    }
+
+    /// <summary>Saves or clears the alias tag edited in the gallery tag dialog, validating uniqueness across the character and global galleries.</summary>
+    [UICommand]
+    public async Task<UICommandResult> SaveGalleryTagAsync(CancellationToken cancellationToken)
+    {
+        if (_taggingImageId is not string imageId)
+            return UICommandResult.Ok([new CloseDialogEffect(GalleryTagDialogKey)]);
+
+        if (_taggingGlobalGallery)
+        {
+            GalleryTagResult globalResult = await GalleryPictures.SetGlobalTagAsync(Data, imageId, GalleryTagInput, cancellationToken).ConfigureAwait(false);
+
+            if (globalResult.Conflict)
+                return Notify("chatai.gallery.tag.exists", UIColorStyle.Warning);
+
+            if (globalResult.Invalid)
+                return Notify("chatai.gallery.tag.invalid", UIColorStyle.Warning);
+
+            _taggingImageId = null;
+            await OnGlobalGalleryChangedAsync(cancellationToken).ConfigureAwait(false);
+            await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
+
+            return UICommandResult.Ok([new CloseDialogEffect(GalleryTagDialogKey)]);
+        }
+
+        if (_editingCardId is not string cardId || _editingCardScope != TagScope.Character)
+            return UICommandResult.Ok([new CloseDialogEffect(GalleryTagDialogKey)]);
+
+        GalleryTagResult charResult = await GalleryPictures.SetCharacterTagAsync(Data, cardId, imageId, GalleryTagInput, cancellationToken).ConfigureAwait(false);
+
+        if (charResult.Conflict)
+            return Notify("chatai.gallery.tag.exists", UIColorStyle.Warning);
+
+        if (charResult.Invalid)
+            return Notify("chatai.gallery.tag.invalid", UIColorStyle.Warning);
+
+        _taggingImageId = null;
+        await RefreshCharacterGalleryAsync(cardId, cancellationToken).ConfigureAwait(false);
+        await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
+
+        return UICommandResult.Ok([new CloseDialogEffect(GalleryTagDialogKey)]);
+    }
+
+    protected virtual Task OnGlobalGalleryChangedAsync(CancellationToken cancellationToken)
+        => Task.CompletedTask;
 
     /// <summary>A new greeting to write, opened on its own; it is kept once it has a note or words.</summary>
     [UICommand]

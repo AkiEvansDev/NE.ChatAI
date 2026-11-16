@@ -3,18 +3,32 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using NE.ChatAI.Backends.KoboldCpp;
 using NE.ChatAI.Characters;
 using NE.ChatAI.Chats;
 using NE.ChatAI.Connections;
 using NE.ChatAI.Hosting;
+using NE.ChatAI.Samplers;
 using NE.ChatAI.Settings;
 using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Scenarios;
 
-/// <summary>What running one scenario on a chat produced: the updated chat when it succeeded, any staged composer draft, or the error phrase when it failed.</summary>
-internal sealed record ScenarioExecutionOutcome(bool Succeeded, Chat Chat, UIPhrase? Error = null, bool Cancelled = false, string? Draft = null, string? DraftGenerationId = null);
+/// <summary>What running one scenario on a chat produced: the updated chat and staged delta when it succeeded, or the error phrase when it failed.</summary>
+internal sealed record ScenarioExecutionOutcome(bool Succeeded, Chat Chat, ScenarioDelta Delta, UIPhrase? Error = null, bool Cancelled = false, string? Draft = null, string? DraftGenerationId = null);
+
+/// <summary>Hooks observed while a batch of scenarios executes on a chat.</summary>
+internal sealed record ScenarioBatchCallbacks
+{
+    public ActiveGenerations? ActiveGenerations { get; init; }
+
+    public Func<StoredDocument<Scenario>, Chat, CancellationToken, ValueTask<bool>>? ShouldRunAsync { get; init; }
+
+    public Func<StoredDocument<Scenario>, string, string, string, string, ValueTask>? OnStreamChunkAsync { get; init; }
+
+    public Func<StoredDocument<Scenario>, string, ValueTask>? OnDraftChunkAsync { get; init; }
+
+    public Func<StoredDocument<Scenario>, ScenarioExecutionOutcome, Chat, ValueTask>? OnScenarioFinishedAsync { get; init; }
+}
 
 /// <summary>Converts between <see cref="Scenario.Sheet"/> JSON and <see cref="UINodeDocument"/>, and executes scenarios headlessly on a chat.</summary>
 internal static class ScenarioExecutor
@@ -62,34 +76,152 @@ internal static class ScenarioExecutor
     }
 
     /// <summary>Runs <paramref name="scenario"/> on <paramref name="chat"/> and commits staged records, drafts and generations only when every node succeeds.</summary>
-    public static async Task<ScenarioExecutionOutcome> RunOnChatAsync(IServiceProvider services, DataFolder data, KoboldCppClients clients, Chat chat, StoredDocument<Scenario> scenario, Action<KoboldCppClient?, string?>? onActiveGeneration, Func<string, string, string, ValueTask>? onStreamChunkAsync, CancellationToken cancellationToken, string initialDraft = "", Func<string, ValueTask>? onDraftChunkAsync = null)
+    public static async Task<ScenarioExecutionOutcome> RunOnChatAsync(IServiceProvider services, DataFolder data, KoboldCppClients clients, Chat chat, StoredDocument<Scenario> scenario, ActiveGenerations? activeGenerations, Func<string, string, string, string, ValueTask>? onStreamChunkAsync, CancellationToken cancellationToken, string initialDraft = "", Func<string, ValueTask>? onDraftChunkAsync = null, string? chatId = null)
     {
         ArgumentNullException.ThrowIfNull(chat);
         ArgumentNullException.ThrowIfNull(scenario);
 
         UINodeDocument document = ReadSheet(scenario.Document);
-        ScenarioRunScope scope = await CreateScopeAsync(services, data, clients, chat, scenario.Id, scenario.Document.Name, document, commitToChat: true, onActiveGeneration, onStreamChunkAsync, cancellationToken, initialDraft, onDraftChunkAsync).ConfigureAwait(false);
-        UINodeRunner runner = new(ScenarioCatalog.Instance, scope);
+        ScenarioRunScope scope = await CreateScopeAsync(services, data, clients, chat, scenario.Id, scenario.Document.Name, document, commitToChat: true, activeGenerations, onStreamChunkAsync, cancellationToken, initialDraft, onDraftChunkAsync, chatId).ConfigureAwait(false);
+
+        return await ExecuteScopeAsync(chat, document, scope, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<ScenarioExecutionOutcome> ExecuteScopeAsync(Chat inputChat, UINodeDocument document, ScenarioRunScope scope, CancellationToken cancellationToken)
+    {
+        UINodeRunner runner = new(ScenarioCatalog.Resolve(scope), scope);
 
         try
         {
             UINodeRunResult result = await runner.RunAsync(document, cancellationToken).ConfigureAwait(false);
 
             if (!result.Success)
-                return new ScenarioExecutionOutcome(false, chat, result.Error);
+                return new ScenarioExecutionOutcome(false, inputChat, ScenarioDelta.Empty, result.Error);
 
-            Chat updated = ChatRecords.PutMany(chat, scope.StagedRecords, scope.Generations);
+            ScenarioDelta delta = scope.CreateDelta();
+            Chat updated = delta.ApplyTo(inputChat);
 
-            return new ScenarioExecutionOutcome(true, updated, Draft: scope.StagedDraft, DraftGenerationId: scope.StagedDraftGenerationId);
+            return new ScenarioExecutionOutcome(true, updated, delta, Draft: delta.Draft, DraftGenerationId: delta.DraftGenerationId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return new ScenarioExecutionOutcome(false, chat, Cancelled: true);
+            return new ScenarioExecutionOutcome(false, inputChat, ScenarioDelta.Empty, Cancelled: true);
         }
     }
 
+    /// <summary>
+    /// Runs an ordered batch of scenarios concurrently across independent connections while respecting data dependencies and
+    /// serializing calls that target the same physical server.
+    /// </summary>
+    public static async Task<Chat> RunBatchAsync(IServiceProvider services, DataFolder data, KoboldCppClients clients, Chat initialChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, ScenarioBatchCallbacks callbacks, CancellationToken cancellationToken, string initialDraft = "", string? chatId = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(clients);
+        ArgumentNullException.ThrowIfNull(initialChat);
+        ArgumentNullException.ThrowIfNull(scenarios);
+        ArgumentNullException.ThrowIfNull(callbacks);
+
+        var count = scenarios.Count;
+
+        if (count == 0)
+            return initialChat;
+
+        ScenarioEnvironment environment = await LoadEnvironmentAsync(data, initialChat, cancellationToken).ConfigureAwait(false);
+        UINodeDocument[] documents = new UINodeDocument[count];
+
+        for (var i = 0; i < count; i++)
+            documents[i] = ReadSheet(scenarios[i].Document);
+
+        var dependencies = ScenarioDependencies.Analyze(scenarios, documents);
+        Lock stateLock = new();
+        using SemaphoreSlim commitGate = new(1, 1);
+        ScenarioDelta?[] completedDeltas = new ScenarioDelta?[count];
+        Chat latestChat = initialChat;
+        Task[] tasks = new Task[count];
+
+        for (var i = 0; i < count; i++)
+            tasks[i] = RunBatchItemAsync(i);
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        return latestChat;
+
+        async Task RunBatchItemAsync(int index)
+        {
+            var upstream = dependencies[index];
+
+            for (var d = 0; d < upstream.Length; d++)
+                await tasks[upstream[d]].ConfigureAwait(false);
+
+            if (cancellationToken.IsCancellationRequested)
+                return;
+
+            Chat inputChat;
+            string inputDraft;
+
+            lock (stateLock)
+                (inputChat, inputDraft) = RebuildState(initialChat, initialDraft, completedDeltas, index);
+
+            StoredDocument<Scenario> scenario = scenarios[index];
+
+            if (callbacks.ShouldRunAsync is not null && !await callbacks.ShouldRunAsync(scenario, inputChat, cancellationToken).ConfigureAwait(false))
+                return;
+
+            Func<string, string, string, string, ValueTask>? streamCallback = callbacks.OnStreamChunkAsync is null ? null : (nodeId, anchorId, text, thought) => callbacks.OnStreamChunkAsync(scenario, nodeId, anchorId, text, thought);
+            Func<string, ValueTask>? draftCallback = callbacks.OnDraftChunkAsync is null ? null : partial => callbacks.OnDraftChunkAsync(scenario, partial);
+            ScenarioRunScope scope = CreateScopeFromEnvironment(services, data, clients, environment, inputChat, scenario.Id, scenario.Document.Name, documents[index], commitToChat: true, callbacks.ActiveGenerations, streamCallback, inputDraft, draftCallback, chatId);
+
+            ScenarioExecutionOutcome outcome = await ExecuteScopeAsync(inputChat, documents[index], scope, cancellationToken).ConfigureAwait(false);
+
+            await commitGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+
+            try
+            {
+                Chat currentLive;
+
+                lock (stateLock)
+                {
+                    if (outcome.Succeeded)
+                    {
+                        completedDeltas[index] = outcome.Delta;
+                        (latestChat, _) = RebuildState(initialChat, initialDraft, completedDeltas, count);
+                    }
+
+                    currentLive = latestChat;
+                }
+
+                if (callbacks.OnScenarioFinishedAsync is not null)
+                    await callbacks.OnScenarioFinishedAsync(scenario, outcome, currentLive).ConfigureAwait(false);
+            }
+            finally
+            {
+                _ = commitGate.Release();
+            }
+        }
+    }
+
+    private static (Chat Chat, string Draft) RebuildState(Chat initialChat, string initialDraft, ScenarioDelta?[] deltas, int limit)
+    {
+        Chat chat = initialChat;
+        var draft = initialDraft;
+
+        for (var i = 0; i < limit; i++)
+        {
+            if (deltas[i] is not ScenarioDelta delta)
+                continue;
+
+            chat = delta.ApplyTo(chat);
+
+            if (delta.Draft is string updatedDraft)
+                draft = updatedDraft;
+        }
+
+        return (chat, draft);
+    }
+
     /// <summary>Builds a <see cref="ScenarioRunScope"/> for <paramref name="chat"/>, reading its character, persona, world and active connection.</summary>
-    public static async Task<ScenarioRunScope> CreateScopeAsync(IServiceProvider services, DataFolder data, KoboldCppClients clients, Chat chat, string scenarioId, string scenarioName, UINodeDocument document, bool commitToChat, Action<KoboldCppClient?, string?>? onActiveGeneration, Func<string, string, string, ValueTask>? onStreamChunkAsync, CancellationToken cancellationToken, string initialDraft = "", Func<string, ValueTask>? onDraftChunkAsync = null)
+    public static async Task<ScenarioRunScope> CreateScopeAsync(IServiceProvider services, DataFolder data, KoboldCppClients clients, Chat chat, string scenarioId, string scenarioName, UINodeDocument document, bool commitToChat, ActiveGenerations? activeGenerations, Func<string, string, string, string, ValueTask>? onStreamChunkAsync, CancellationToken cancellationToken, string initialDraft = "", Func<string, ValueTask>? onDraftChunkAsync = null, string? chatId = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(data);
@@ -97,6 +229,13 @@ internal static class ScenarioExecutor
         ArgumentNullException.ThrowIfNull(chat);
         ArgumentNullException.ThrowIfNull(document);
 
+        ScenarioEnvironment environment = await LoadEnvironmentAsync(data, chat, cancellationToken).ConfigureAwait(false);
+
+        return CreateScopeFromEnvironment(services, data, clients, environment, chat, scenarioId, scenarioName, document, commitToChat, activeGenerations, onStreamChunkAsync, initialDraft, onDraftChunkAsync, chatId);
+    }
+
+    private static async Task<ScenarioEnvironment> LoadEnvironmentAsync(DataFolder data, Chat chat, CancellationToken cancellationToken)
+    {
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         ActiveProfile? activeProfile = await Profiles.LoadActiveAsync(data, cancellationToken).ConfigureAwait(false);
         Character? character = chat.Character is string characterId && Slug.IsValidId(characterId) ? await data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
@@ -106,26 +245,48 @@ internal static class ScenarioExecutor
         var characterName = string.IsNullOrWhiteSpace(character?.Name) ? Controllers.ShellController.AppName : character.Name;
         var userName = string.IsNullOrWhiteSpace(persona?.Name) ? "User" : persona.Name;
 
-        return new ScenarioRunScope(services)
+        IReadOnlyList<StoredDocument<ConnectionProfile>> connections = (await data.Connections.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+        List<(string Id, ActiveProfile Profile)> resolvedProfiles = [with(connections.Count)];
+
+        for (var i = 0; i < connections.Count; i++)
+        {
+            StoredDocument<ConnectionProfile> stored = connections[i];
+            ActiveProfile resolved = activeProfile is not null && string.Equals(activeProfile.ConnectionId, stored.Id, StringComparison.Ordinal)
+                ? activeProfile
+                : await Profiles.ResolveAsync(data, stored.Id, stored.Document, cancellationToken).ConfigureAwait(false);
+            resolvedProfiles.Add((stored.Id, resolved));
+        }
+
+        IReadOnlyList<StoredDocument<SamplerPreset>> samplers = (await data.Samplers.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+
+        return new ScenarioEnvironment(settings, activeProfile, resolvedProfiles, samplers, character, persona, world, characterName, userName);
+    }
+
+    private static ScenarioRunScope CreateScopeFromEnvironment(IServiceProvider services, DataFolder data, KoboldCppClients clients, ScenarioEnvironment environment, Chat chat, string scenarioId, string scenarioName, UINodeDocument document, bool commitToChat, ActiveGenerations? activeGenerations, Func<string, string, string, string, ValueTask>? onStreamChunkAsync, string initialDraft, Func<string, ValueTask>? onDraftChunkAsync, string? chatId)
+        => new(services)
         {
             Data = data,
             Clients = clients,
-            ActiveProfile = activeProfile,
-            Settings = settings,
+            ActiveProfile = environment.ActiveProfile,
+            PreloadedProfiles = environment.Profiles,
+            PreloadedSamplers = environment.Samplers,
+            Settings = environment.Settings,
+            ChatId = chatId,
             Chat = chat,
-            Character = character,
-            Persona = persona,
-            World = world,
-            CharacterName = characterName,
-            UserName = userName,
+            Character = environment.Character,
+            Persona = environment.Persona,
+            World = environment.World,
+            CharacterName = environment.CharacterName,
+            UserName = environment.UserName,
             ScenarioId = scenarioId,
             ScenarioName = scenarioName,
             Document = document,
             CommitToChat = commitToChat,
             InitialDraft = initialDraft,
-            OnActiveGeneration = onActiveGeneration,
+            ActiveGenerations = activeGenerations,
             OnStreamChunkAsync = onStreamChunkAsync,
             OnDraftChunkAsync = onDraftChunkAsync
         };
-    }
+
+    private sealed record ScenarioEnvironment(AppSettings Settings, ActiveProfile? ActiveProfile, IReadOnlyList<(string Id, ActiveProfile Profile)> Profiles, IReadOnlyList<StoredDocument<SamplerPreset>> Samplers, Character? Character, Persona? Persona, World? World, string CharacterName, string UserName);
 }

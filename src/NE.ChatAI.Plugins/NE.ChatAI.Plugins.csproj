@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Public plugin contract assembly: custom [GraphNode] classes and scenario host services without Core or Web internals. -->
+  <PropertyGroup>
+    <RootNamespace>NE.ChatAI.Plugins</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>NE.ChatAI.Plugins</PackageId>
+    <Authors>AkiEvansDev</Authors>
+    <Description>Scenario plugin SDK for NE.ChatAI: custom [GraphNode] contracts, encrypted secret access, and chat media persistence.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/AkiEvansDev/NE.ChatAI</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/AkiEvansDev/NE.ChatAI.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NE.Standard.UI.Graph" />
+  </ItemGroup>
+
+</Project>

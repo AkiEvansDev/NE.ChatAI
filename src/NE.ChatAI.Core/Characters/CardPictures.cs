@@ -102,6 +102,23 @@ public static class CardPictures
                 File.Copy(sourcePath, Path.Combine(targetFolder, Path.GetFileName(sourcePath)), overwrite: true);
             }
         }
+
+        var sourceGallery = Path.Combine(store.FolderOf(sourceId), GalleryPictures.ImagesFolderName);
+
+        if (Directory.Exists(sourceGallery))
+        {
+            var targetGallery = Path.Combine(targetFolder, GalleryPictures.ImagesFolderName);
+            _ = Directory.CreateDirectory(targetGallery);
+
+            foreach (var file in Directory.EnumerateFiles(sourceGallery))
+            {
+                var fileName = Path.GetFileName(file);
+                var id = Path.GetFileNameWithoutExtension(fileName);
+
+                if (Slug.IsValidId(id) && GalleryPictures.IsImageExtension(Path.GetExtension(fileName)))
+                    File.Copy(file, Path.Combine(targetGallery, fileName), overwrite: true);
+            }
+        }
     }
 
     /// <summary>Takes the card's picture of that name away; without an avatar it is drawn with the person's glyph.</summary>

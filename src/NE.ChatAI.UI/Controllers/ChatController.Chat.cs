@@ -24,9 +24,11 @@ internal sealed partial class ChatController
 {
     public const string NoteDialogKey = "chatai-chat-note";
     public const string PromptDialogKey = "chatai-chat-prompt";
+    public const string StageImageId = "chatai-stage-image";
 
     /// <summary>The extras' entries for the chat itself, and the prefixes their lists' entries carry.</summary>
     public const string PromptAction = "prompt";
+    public const string StageAction = "stage";
     public const string NoteAction = "note";
     public const string PersonaAction = "persona";
     public const string PhrasesAction = "phrases";
@@ -124,6 +126,20 @@ internal sealed partial class ChatController
 
         if (action == PromptAction)
             return await OpenPromptAsync(cancellationToken).ConfigureAwait(false);
+
+        if (action == StageAction)
+        {
+            await Context.Runtime.InvokeAsync(() =>
+            {
+                if (!_hasActiveStage)
+                    return;
+
+                _stageHiddenByUser = !_stageHiddenByUser;
+                RefreshVisuals();
+            }, cancellationToken).ConfigureAwait(false);
+
+            return UICommandResult.Ok();
+        }
 
         if (await ScenarioActionAsync(action, cancellationToken).ConfigureAwait(false) is UICommandResult scenarioDone)
             return scenarioDone;
@@ -283,7 +299,7 @@ internal sealed partial class ChatController
         _chat = _chat with { Background = fileName };
         await Chats.WriteAsync(chatId, _chat, cancellationToken).ConfigureAwait(false);
         ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
-        Background = Pictures.BackgroundOf(_chat.Character, chatId);
+        RefreshVisuals();
     }
 
     /// <summary>Takes the chat's own background away; the chat stands on the character's or the application's.</summary>
@@ -297,8 +313,17 @@ internal sealed partial class ChatController
         _chat = _chat with { Background = null };
         await Chats.WriteAsync(chatId, _chat, cancellationToken).ConfigureAwait(false);
         ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
-        Background = Pictures.BackgroundOf(_chat.Character, chatId);
+        RefreshVisuals();
     }
+
+    /// <summary>Hides the stage pane for the current session; the stage entry in <see cref="Extras"/> brings it back.</summary>
+    [UICommand]
+    public async Task HideStageAsync(CancellationToken cancellationToken)
+        => await Context.Runtime.InvokeAsync(() =>
+        {
+            _stageHiddenByUser = true;
+            RefreshVisuals();
+        }, cancellationToken).ConfigureAwait(false);
 
     /// <summary>The chat written as another persona from now on: the reader's messages read again under its name and picture.</summary>
     private async Task<UICommandResult> ChoosePersonaAsync(string personaId, CancellationToken cancellationToken)

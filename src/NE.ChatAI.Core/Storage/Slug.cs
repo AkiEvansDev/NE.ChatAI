@@ -5,10 +5,11 @@ using System.Text;
 
 namespace NE.ChatAI.Storage;
 
-/// <summary>A document's id: a slug of its name and eight hex digits, readable as a file name and stable under a rename.</summary>
+/// <summary>A document's id: a slug of its name (Cyrillic transliterated to Latin) and eight hex digits.</summary>
 public static class Slug
 {
     private const int MaxSlugLength = 40;
+    private const int SuffixLength = 8;
 
     private const string CyrillicLetters = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
 
@@ -25,6 +26,49 @@ public static class Slug
         var suffix = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
 
         return slug.Length == 0 ? suffix : $"{slug}-{suffix}";
+    }
+
+    /// <summary>Recomputes the slug prefix of <paramref name="currentId"/> from <paramref name="name"/> while preserving its 8-digit hex suffix.</summary>
+    public static string RenamedId(string currentId, string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(currentId);
+        ArgumentNullException.ThrowIfNull(name);
+
+        if (!TryExtractHexSuffix(currentId, out var suffix))
+            return NewId(name);
+
+        var slug = Of(name);
+
+        return slug.Length == 0 ? suffix : $"{slug}-{suffix}";
+    }
+
+    private static bool TryExtractHexSuffix(string id, out string suffix)
+    {
+        if (id.Length == SuffixLength && IsLowerHex(id.AsSpan()))
+        {
+            suffix = id;
+            return true;
+        }
+
+        if (id.Length > SuffixLength + 1 && id[^(SuffixLength + 1)] == '-' && IsLowerHex(id.AsSpan(id.Length - SuffixLength)))
+        {
+            suffix = id[^SuffixLength..];
+            return true;
+        }
+
+        suffix = string.Empty;
+        return false;
+    }
+
+    private static bool IsLowerHex(ReadOnlySpan<char> span)
+    {
+        for (var i = 0; i < span.Length; i++)
+        {
+            if (span[i] is not ((>= '0' and <= '9') or (>= 'a' and <= 'f')))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>Lower-case Latin letters, digits and single hyphens; Cyrillic is transliterated, anything else is a word break.</summary>

@@ -27,6 +27,20 @@ internal static class CharacterView
                 .AddTab("examples", "chatai.character.examples",
                     CardEditor.FillArea<ShellController>("chatai.character.example-messages", static x => x.CharacterExampleMessages, lineNumbers: true, hint: "chatai.character.example-messages.hint")
                 )
+                .AddTab("gallery", "chatai.character.gallery",
+                    CardEditor.Scroll(
+                        PictureFields.Gallery<ShellController>(
+                            "chatai-character-gallery-search",
+                            "chatai.gallery.character.description",
+                            "chatai.gallery.none",
+                            static x => x.CharacterGallerySelectionId,
+                            nameof(ShellController.UploadCharacterGalleryAsync),
+                            static x => x.CharacterGallery,
+                            nameof(ShellController.ReplaceCharacterGalleryAsync),
+                            nameof(ShellController.CharacterGalleryActionAsync)
+                        )
+                    )
+                )
                 .AddTab("more", "chatai.character.more",
                     CardEditor.Scroll(
                         UILayout.Stack(16,

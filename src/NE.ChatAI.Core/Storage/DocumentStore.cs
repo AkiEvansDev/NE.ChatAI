@@ -200,6 +200,59 @@ public sealed class DocumentStore<T> where T : NamedDocument
         }
     }
 
+    /// <summary>Writes <paramref name="document"/> and renames its file or folder when its slug changes, answering the resulting id.</summary>
+    public async Task<string> WriteRenamedAsync(string id, T document, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        var targetId = Slug.RenamedId(Checked(id), document.Name);
+
+        if (string.Equals(targetId, id, StringComparison.Ordinal))
+        {
+            await WriteAsync(id, document, cancellationToken).ConfigureAwait(false);
+
+            return id;
+        }
+
+        while (Exists(targetId))
+            targetId = Slug.NewId(document.Name);
+
+        SemaphoreSlim oldGate = _writes.GetOrAdd(id, static _ => new SemaphoreSlim(1, 1));
+        await oldGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            if (_fileName is null)
+            {
+                await WriteAsync(targetId, document, cancellationToken).ConfigureAwait(false);
+                var oldPath = PathOf(id);
+
+                if (File.Exists(oldPath))
+                    File.Delete(oldPath);
+            }
+            else
+            {
+                var oldFolder = FolderOf(id);
+                var newFolder = FolderOf(targetId);
+
+                if (Directory.Exists(oldFolder))
+                {
+                    _ = Directory.CreateDirectory(_directory);
+                    Directory.Move(oldFolder, newFolder);
+                }
+
+                await WriteAsync(targetId, document, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _ = oldGate.Release();
+            _ = _writes.TryRemove(id, out _);
+        }
+
+        return targetId;
+    }
+
     /// <summary>Removes the document — with its folder and everything in it, for a kind kept as folders.</summary>
     public bool Delete(string id)
     {

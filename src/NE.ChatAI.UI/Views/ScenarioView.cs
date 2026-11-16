@@ -15,6 +15,7 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
     private static readonly OptionItem[] TriggerKinds =
     [
         new() { Id = nameof(ScenarioTriggerKind.Manual), Title = "chatai.scenarios.trigger.manual" },
+        new() { Id = nameof(ScenarioTriggerKind.BeforeSend), Title = "chatai.scenarios.trigger.before-send" },
         new() { Id = nameof(ScenarioTriggerKind.AfterReply), Title = "chatai.scenarios.trigger.after-reply" },
         new() { Id = nameof(ScenarioTriggerKind.ContextShare), Title = "chatai.scenarios.trigger.context-share" }
     ];
@@ -62,6 +63,10 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                                 .SetTitle("chatai.scenarios.enabled")
                                 .BindValue<ScenarioController>(static x => x.ScenarioEnabled)
                                 .OnChange(nameof(ScenarioController.SaveMetaAsync)),
+                            new SwitchComponent()
+                                .SetTitle("chatai.scenarios.pinned")
+                                .BindValue<ScenarioController>(static x => x.ScenarioPinned)
+                                .OnChange(nameof(ScenarioController.SaveMetaAsync)),
                             trigger,
                             new NumberInputComponent()
                                 .SetTitle("chatai.scenarios.share")
@@ -80,7 +85,7 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                 .SetPlacement(1, 1, 24, 1, md: UIGridPlacement.At(1, 1, 1, 1))
             )
             .AddChild(new NodesComponent(ScenarioController.CanvasId)
-                .SetCatalog(ScenarioCatalog.Instance)
+                .BindCatalog<ScenarioController>(static x => x.Catalog)
                 .BindPinChoices<ScenarioController>(static x => x.PinChoices)
                 .BindSheetName<ScenarioController>(static x => x.SheetTitle)
                 .SetAutoSave(true)
@@ -109,8 +114,7 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
             UIDialogs.Form(ScenarioController.RenameDialogKey, "chatai.settings.rename.title", null,
                 new TextInputComponent()
                     .SetTitle("chatai.settings.name")
-                    .BindValue<ScenarioController>(static x => x.RenameName)
-                    .OnEnter(nameof(ScenarioController.RenameAsync)),
+                    .BindValue<ScenarioController>(static x => x.RenameName),
                 UIButtons.Primary("chatai.settings.rename").OnClick(nameof(ScenarioController.RenameAsync))
             ),
             UIDialogs.BoundConfirm<ScenarioController>(ScenarioController.DeleteDialogKey, "chatai.scenarios.delete.title", static x => x.DeleteQuestion, "chatai.settings.delete", nameof(ScenarioController.DeleteAsync))

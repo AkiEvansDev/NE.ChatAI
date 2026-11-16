@@ -1,3 +1,6 @@
+using System;
+using NE.ChatAI.Characters;
+
 namespace NE.ChatAI.Controllers;
 
 /// <summary>A picture field: the picture as the data folder holds it and the upload the field just made.</summary>
@@ -20,6 +23,50 @@ internal sealed partial class PictureSlot : RecursiveObservable
     {
         var upload = Upload;
         Upload = null;
+
+        return upload is { Length: > 0 } ? upload : null;
+    }
+}
+
+/// <summary>One image tile in a global or character gallery: its slug id, its copyable key (tag or canonical key), its tooltip, its served preview address, and its pending replace upload.</summary>
+internal sealed partial class GalleryItem : RecursiveObservable, IBindableItem
+{
+    [RecursiveMember(false)]
+    public required string Id { get; init; }
+
+    [RecursiveMember]
+    public partial string CopyText { get; set; } = string.Empty;
+
+    [RecursiveMember]
+    public partial string Tooltip { get; set; } = string.Empty;
+
+    [RecursiveMember]
+    public partial string? Tag { get; set; }
+
+    [RecursiveMember]
+    public partial string? Preview { get; set; }
+
+    [RecursiveMember]
+    public partial string? ReplaceSelectionId { get; set; }
+
+    public static GalleryItem From(GalleryImage image, string? preview)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+
+        return new GalleryItem
+        {
+            Id = image.Id,
+            CopyText = image.CopyKey,
+            Tooltip = !string.IsNullOrEmpty(image.Tag) ? $"{image.Tag} · {image.Key}" : image.Key,
+            Tag = image.Tag,
+            Preview = preview
+        };
+    }
+
+    public string? TakeReplaceUpload()
+    {
+        var upload = ReplaceSelectionId;
+        ReplaceSelectionId = null;
 
         return upload is { Length: > 0 } ? upload : null;
     }
