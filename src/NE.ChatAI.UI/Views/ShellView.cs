@@ -14,11 +14,8 @@ namespace NE.ChatAI.Views;
 /// </remarks>
 internal abstract class ShellView : UIViewBase
 {
-    /// <summary>A panel's width, the same slid out and pinned.</summary>
-    private static readonly UIResponsive<UILayoutLength> PanelWidth = UIResponsive<UILayoutLength>.Create(UILayoutLength.Absolute(320), md: UILayoutLength.Absolute(380));
-
-    /// <summary>A panel's padding, in which its body's scrollbar stands, so the body's rows end at the head's edge.</summary>
-    private const double PanelPadding = 12;
+    public const string GenerationPanelId = "chatai-generation-panel";
+    public const string ChatsPanelId = "chatai-chats-panel";
 
     /// <remarks>Notifications stack at the top: at the bottom, on a phone, they cover the composer and its Send.</remarks>
     public override UIViewOptions Options { get; } = new()
@@ -44,11 +41,9 @@ internal abstract class ShellView : UIViewBase
     protected static ButtonComponent CreateGenerationButton()
         => UIButtons.Icon(AppIcons.Outline(AppIcons.Generation), "chatai.panel.generation").SetOpensDrawer(UISide.Left);
 
-    /// <summary>The chats panel's button, which reads the chats as it opens them; gone while the panel is pinned.</summary>
+    /// <summary>The chats panel's button; gone while the panel is pinned.</summary>
     protected static ButtonComponent CreateChatsButton()
-        => UIButtons.Icon(AppIcons.Outline(AppIcons.Chats), "chatai.panel.chats")
-            .SetOpensDrawer(UISide.Right)
-            .OnClick(nameof(ShellController.LoadChatsPanelAsync));
+        => UIButtons.Icon(AppIcons.Outline(AppIcons.Chats), "chatai.panel.chats").SetOpensDrawer(UISide.Right);
 
     /// <summary>Whether the page wears a head; the chat has its composer instead.</summary>
     protected virtual bool HasPageHead => true;
@@ -106,14 +101,12 @@ internal abstract class ShellView : UIViewBase
     protected sealed override IVisualComponent? CreateLeftSide()
         => !HasGenerationPanel
             ? null
-            : CreatePanel("chatai-generation-panel",
-                UILayout.Ends(
-                    UIText.Subtitle("chatai.panel.generation"),
-                    UIIconButtons.Pin().SetPinsDrawer(UISide.Left).SetSize(UISize.Small),
-                    UIIconButtons.Close().SetOpensDrawer(UISide.Left).SetSize(UISize.Small)
-                ),
+            : UIPage.Drawer(
+                GenerationPanelId,
+                UISide.Left,
+                "chatai.panel.generation",
                 GenerationPanel.Create(),
-                new WrapPanelComponent()
+                footer: new WrapPanelComponent()
                     .SetSpacing(16)
                     .SetLineSpacing(8)
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.settings").SetIcon(AppIcons.Outline(AppIcons.Settings)).SetUrl(AppRoutes.Settings))
@@ -121,32 +114,17 @@ internal abstract class ShellView : UIViewBase
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.plugins").SetIcon(AppIcons.Outline(AppIcons.Plugins)).SetUrl(AppRoutes.Plugins))
             );
 
-    /// <summary>A panel's fixed head, its scrollable body taking the room left, and the links at its foot.</summary>
-    /// <remarks>A pin is kept under the first id in its side, so the panel carries its own rather than lend it a field's.</remarks>
-    private static ContainerComponent CreatePanel(string id, IVisualComponent head, IVisualComponent body, IVisualComponent? foot)
-    {
-        UIThickness horizontal = UIThickness.All(PanelPadding, 0, PanelPadding, 0);
-
-        ContainerComponent panel = new ContainerComponent(id)
-            .SetRow(1, UIGridUnit.Auto())
-            .AddRow(UIGridUnit.Star())
-            .AddRow(UIGridUnit.Auto())
-            .SetWidth(PanelWidth)
-            .SetHeight(UILayoutLength.Fill())
-            .SetPadding(UIThickness.All(0, PanelPadding, 0, PanelPadding))
-            .SetSpacing(12)
-            .AddChild(new ContainerComponent().SetPadding(horizontal).AddChild(head).SetPlacement(1, 1, 24, 1))
-            .AddChild(new ScrollContainerComponent()
-                .SetHeight(UILayoutLength.Fill())
-                .SetPadding(UIThickness.All(PanelPadding, 2, PanelPadding, 2))
-                .AddChild(body)
-                .SetPlacement(1, 2, 24, 1)
-            );
-
-        return foot is null ? panel : panel.AddChild(new ContainerComponent().SetPadding(horizontal).AddChild(foot).SetPlacement(1, 3, 24, 1));
-    }
-
-    /// <summary>The chats to pick from.</summary>
+    /// <summary>The chats to pick from, reloaded each time an unpinned drawer slides out.</summary>
     protected sealed override IVisualComponent? CreateRightSide()
-        => CreatePanel("chatai-chats-panel", ChatsPanel.CreateHead(), ChatsPanel.CreateBody(), null);
+        => UIPage.Drawer(
+                ChatsPanelId,
+                UISide.Right,
+                ChatsPanel.CreateHeading(),
+                ChatsPanel.CreateSearch(),
+                ChatsPanel.CreateBody(),
+                footer: null,
+                pinnable: true,
+                ChatsPanel.CreateActions()
+            )
+            .OnDrawerOpen(nameof(ShellController.LoadChatsPanelAsync));
 }

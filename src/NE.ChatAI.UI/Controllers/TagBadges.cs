@@ -68,9 +68,38 @@ internal static class TagBadges
         ArgumentNullException.ThrowIfNull(tags);
         ArgumentNullException.ThrowIfNull(colors);
 
-        badges.Clear();
+        List<string> ordered = [];
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
 
         foreach (var tag in tags)
-            badges.Add(new TagBadge { Id = tag, Text = tag, Color = colors.TryGetValue(tag, out UIThemeColor color) ? color : null });
+        {
+            if (kept.Add(tag))
+                ordered.Add(tag);
+        }
+
+        for (var i = badges.Count - 1; i >= 0; i--)
+        {
+            if (!kept.Contains(badges[i].Id))
+                _ = badges.Remove(badges[i].Id);
+        }
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var tag = ordered[i];
+            UIThemeColor? badgeColor = colors.TryGetValue(tag, out UIThemeColor color) ? color : null;
+
+            if (badges.TryGet(tag, out TagBadge? existing))
+            {
+                existing.Text = tag;
+                existing.Color = badgeColor;
+
+                if (!string.Equals(badges[i].Id, tag, StringComparison.Ordinal))
+                    _ = badges.Move(tag, i);
+            }
+            else
+            {
+                badges.Insert(i, new TagBadge { Id = tag, Text = tag, Color = badgeColor });
+            }
+        }
     }
 }

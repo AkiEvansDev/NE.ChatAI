@@ -147,6 +147,10 @@ public sealed record ChatRecord
     /// <summary>The id of the generation record that produced this text, when one did.</summary>
     public string? Generation { get; init; }
 
+    /// <summary>Whether an insertion record (<see cref="After"/>) is projected only while its anchor message stands at the very end of the history being assembled.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool OneTurn { get; init; }
+
     /// <summary>Whether a covered message was edited or deleted since; a stale record is shown as stale and left out of the prompt until remade or edited.</summary>
     public bool Stale { get; init; }
 }

@@ -24,6 +24,7 @@ internal static class ScenarioCatalog
     public const string InputColor = "var(--ui-color-primary)";
     public const string PromptColor = "var(--ui-color-accent)";
     public const string WriteColor = "var(--ui-color-series-2)";
+    public const string CueColor = "var(--ui-color-series-3)";
 
     public static IReadOnlyList<Type> BuiltInTypes { get; } =
     [
@@ -36,6 +37,11 @@ internal static class ScenarioCatalog
         typeof(RecordNode),
         typeof(ReadDraftNode),
         typeof(GalleryNode),
+        typeof(ContextNode),
+        typeof(TriggerMatchNode),
+        typeof(CueNode),
+        typeof(CueMenuNode),
+        typeof(CuePickNode),
         typeof(CollectorNode),
         typeof(ModelCallNode),
         typeof(ReplaceRecordNode),
@@ -80,11 +86,15 @@ internal sealed class PersonaNode : IGraphNode
     [GraphOutput(Title = "Text")]
     public string Text { get; set; } = string.Empty;
 
+    [GraphOutput(Title = "Tags")]
+    public string[] Tags { get; set; } = [];
+
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
         Name = scope.UserName;
         Text = scope.Persona?.Description ?? string.Empty;
+        Tags = scope.Persona is { Tags.Count: > 0 } persona ? [.. persona.Tags] : [];
         Persona = scope.Persona is null ? null : new PersonaCard(scope.Persona, scope.UserName);
     }
 }
@@ -107,6 +117,9 @@ internal sealed class CharacterNode : IGraphNode
     [GraphOutput(Title = "Author's note")]
     public string AuthorsNote { get; set; } = string.Empty;
 
+    [GraphOutput(Title = "Tags")]
+    public string[] Tags { get; set; } = [];
+
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
@@ -115,6 +128,7 @@ internal sealed class CharacterNode : IGraphNode
         Name = scope.CharacterName;
         Card = card?.CardText ?? string.Empty;
         AuthorsNote = scope.Character?.AuthorsNote ?? string.Empty;
+        Tags = scope.Character is { Tags.Count: > 0 } character ? [.. character.Tags] : [];
     }
 }
 
@@ -133,6 +147,9 @@ internal sealed class WorldNode : IGraphNode
     [GraphOutput(Title = "Articles")]
     public string[] Articles { get; set; } = [];
 
+    [GraphOutput(Title = "Tags")]
+    public string[] Tags { get; set; } = [];
+
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
@@ -142,6 +159,7 @@ internal sealed class WorldNode : IGraphNode
             World = null;
             Overview = string.Empty;
             Articles = [];
+            Tags = [];
             return;
         }
 
@@ -156,6 +174,7 @@ internal sealed class WorldNode : IGraphNode
         World = new WorldLore(world, articles);
         Overview = world.Description;
         Articles = enabledTexts;
+        Tags = world.Tags.Count > 0 ? [.. world.Tags] : [];
     }
 }
 
@@ -207,6 +226,9 @@ internal sealed class RecordNode : IGraphNode
     [GraphInput(Title = "Tag", MaxLength = 80)]
     public string Tag { get; set; } = string.Empty;
 
+    [GraphInput(Title = "Fallback", MaxLength = 120, Description = "Handed out as Text when no record of this tag exists yet.")]
+    public string Fallback { get; set; } = string.Empty;
+
     [GraphOutput(Title = "Text")]
     public string Text { get; set; } = string.Empty;
 
@@ -223,7 +245,7 @@ internal sealed class RecordNode : IGraphNode
         ChatRecord? record = ChatRecords.FindByTag(scope.Chat.Messages, scope.Chat.Records, Tag, beforeAnchorId);
         Found = record is not null;
         Stale = record?.Stale ?? false;
-        Text = record?.Text ?? string.Empty;
+        Text = record?.Text ?? Fallback;
     }
 }
 
@@ -350,6 +372,366 @@ internal sealed class GalleryNode : IGraphNode
     }
 }
 
+/// <summary>Measures the chat's assembled prompt fill against the active context length and tests threshold crossing.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Context", Description = "Measures prompt token fill against the context length and detects threshold crossings.", Icon = AppIcons.Context, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
+internal sealed class ContextNode : IGraphNodeAsync
+{
+    public const string NodeKey = "chat.context";
+
+    [GraphInput(Title = "Threshold", Min = 5, Max = 95, Step = 5, Unit = "%", Description = "Context fill percentage tested by Reached and Crossed.")]
+    public int Threshold { get; set; } = 50;
+
+    [GraphOutput(Title = "Crossed", Description = "True when this turn moved context fill from below Threshold to at or above it.")]
+    public bool Crossed { get; set; }
+
+    [GraphOutput(Title = "Reached", Description = "True whenever current context fill is at or above Threshold.")]
+    public bool Reached { get; set; }
+
+    [GraphOutput(Title = "Percent", Description = "Current prompt context fill from 0 to 100%.")]
+    public double Percent { get; set; }
+
+    [GraphOutput(Title = "Tokens", Description = "Current assembled chat prompt tokens.")]
+    public int Tokens { get; set; }
+
+    [GraphOutput(Title = "Context", Description = "Resolved maximum context length in tokens.")]
+    public int ContextLength { get; set; }
+
+    public async ValueTask ExecuteAsync(UINodeRunContext context, CancellationToken cancellationToken = default)
+    {
+        ScenarioRunScope scope = ScenarioRunScope.From(context);
+        (var currentTokens, var previousTokens, var contextLength) = await scope.MeasureContextAsync(cancellationToken).ConfigureAwait(false);
+        var threshold = Math.Clamp(Threshold, 5, 95);
+        var currentPercent = contextLength > 0 ? currentTokens * 100.0 / contextLength : 0.0;
+        var previousPercent = contextLength > 0 ? previousTokens * 100.0 / contextLength : 0.0;
+
+        Tokens = currentTokens;
+        ContextLength = contextLength;
+        Percent = Math.Round(currentPercent, 1);
+        Reached = contextLength > 0 && currentPercent >= threshold;
+        Crossed = contextLength > 0 && previousPercent < threshold && currentPercent >= threshold;
+    }
+}
+
+/// <summary>Matches comma-separated World Info triggers (<c>word</c>, <c>stem*</c>, <c>-exclusion</c>) against wired text or recent chat turns.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Trigger match", Description = "Tests World Info trigger words, stems (*) and exclusions (-) on text or recent turns.", Icon = AppIcons.TriggerMatch, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
+internal sealed class TriggerMatchNode : IGraphNode
+{
+    public const string NodeKey = "chat.trigger-match";
+
+    [GraphInput(Title = "Triggers", MaxLines = 2, Placeholder = "rain*, tavern, -combat", Description = "Comma-separated World Info triggers: whole word, prefix*, or -exclusion.")]
+    public string Triggers { get; set; } = string.Empty;
+
+    [GraphInput(Title = "Text", PinOnly = true, Description = "Optional text to test; when unwired, scans the latest chat messages.")]
+    public string Text { get; set; } = string.Empty;
+
+    [GraphInput(Title = "Scan depth", Min = 1, Max = 32, Step = 1, Description = "Recent messages scanned when Text is unwired.")]
+    public int ScanDepth { get; set; } = 2;
+
+    [GraphOutput(Title = "Matched")]
+    public bool Matched { get; set; }
+
+    public void Execute(UINodeRunContext context)
+    {
+        ScenarioRunScope scope = ScenarioRunScope.From(context);
+
+        if (string.IsNullOrWhiteSpace(Triggers))
+        {
+            Matched = false;
+            return;
+        }
+
+        if (scope.HasIncomingEdge(context.NodeId, nameof(Text)))
+        {
+            Matched = WorldInfo.Matches([Triggers], [Text]);
+            return;
+        }
+
+        IReadOnlyList<PromptMessage> projected = ChatRecords.ProjectHistory(scope.Chat.Messages, scope.Chat.Records);
+        var depth = Math.Max(1, ScanDepth);
+        var start = Math.Max(0, projected.Count - depth);
+        List<string> texts = [with(projected.Count - start + 1)];
+
+        for (var i = start; i < projected.Count; i++)
+            texts.Add(projected[i].Text);
+
+        if (!string.IsNullOrWhiteSpace(scope.InitialDraft))
+            texts.Add(scope.InitialDraft);
+
+        Matched = WorldInfo.Matches([Triggers], texts);
+    }
+}
+
+/// <summary>Defines one setting-agnostic narrative cue with its short classifier tag and situation description.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Cue", Description = "One narrative director cue: its tag, when it fits, and the prompt direction.", Icon = AppIcons.Cue, Color = ScenarioCatalog.CueColor)]
+internal sealed class CueNode : IGraphNode
+{
+    public const string NodeKey = "chat.cue";
+
+    [GraphInput(Title = "Tag", MaxLength = 64, Placeholder = "ambient-shift", Description = "Short identifier the classifier replies with to choose this cue.")]
+    public string Tag { get; set; } = string.Empty;
+
+    [GraphInput(Title = "When", MaxLines = 2, Placeholder = "the surroundings have faded into the background", Description = "Situation check shown in the classifier menu.")]
+    public string When { get; set; } = string.Empty;
+
+    [GraphInput(Title = "Cue", MaxLines = 4, Placeholder = "Let a concrete detail of the environment shift...", Description = "Direction injected into the prompt when this cue is picked.")]
+    public string Cue { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Cue")]
+    public ScenarioCue? Result { get; set; }
+
+    public void Execute(UINodeRunContext context)
+    {
+        var tag = Tag.Trim();
+        var cue = Cue.Trim();
+
+        Result = tag.Length == 0 || cue.Length == 0 ? null : new ScenarioCue(tag, When.Trim(), cue);
+    }
+}
+
+/// <summary>Gathers connected <see cref="CueNode"/>s, optionally samples a subset while avoiding the previous cue, and formats a classifier menu.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Cue menu", Description = "Gathers Cue nodes, optionally samples a subset, and formats options for a classifier.", Icon = AppIcons.CueMenu, Color = ScenarioCatalog.CueColor, AlwaysRuns = true)]
+internal sealed class CueMenuNode : IGraphNode
+{
+    public const string NodeKey = "chat.cue-menu";
+
+    [GraphInput(Title = "Cues", Multiple = true, PinOnly = true, Description = "Connect any number of Cue nodes here.")]
+    public ScenarioCue[] Cues { get; set; } = [];
+
+    [GraphInput(Title = "Sample", Min = 0, Max = 32, Step = 1, Description = "Randomly offers up to this many cues per run; 0 offers every connected cue.")]
+    public int Sample { get; set; }
+
+    [GraphInput(Title = "Allow none", Description = "Appends '- none' so the model can pass when no cue fits.")]
+    public bool AllowNone { get; set; } = true;
+
+    [GraphInput(Title = "Avoid repeat", Description = "Omits the cue chosen on this scenario's previous run when other cues exist.")]
+    public bool AvoidRepeat { get; set; } = true;
+
+    [GraphOutput(Title = "Pool")]
+    public ScenarioCuePool Pool { get; set; } = ScenarioCuePool.Empty;
+
+    [GraphOutput(Title = "Options", Description = "Formatted '- tag: when' lines for the classifier prompt.")]
+    public string Options { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Count")]
+    public int Count { get; set; }
+
+    public void Execute(UINodeRunContext context)
+    {
+        ScenarioRunScope scope = ScenarioRunScope.From(context);
+        List<ScenarioCue> candidates = [];
+        HashSet<string> seenTags = [with(StringComparer.OrdinalIgnoreCase)];
+
+        for (var i = 0; i < Cues.Length; i++)
+        {
+            if (Cues[i] is not ScenarioCue cue || string.IsNullOrWhiteSpace(cue.Tag) || string.IsNullOrWhiteSpace(cue.Cue))
+                continue;
+
+            if (seenTags.Add(cue.Tag))
+                candidates.Add(cue);
+        }
+
+        if (AvoidRepeat && candidates.Count > 1 && ChatRecords.LatestScenarioRecord(scope.Chat.Messages, scope.Chat.Records, scope.ScenarioId)?.Text is string lastText)
+        {
+            for (var i = candidates.Count - 1; i >= 0; i--)
+            {
+                if (candidates.Count > 1 && string.Equals(candidates[i].Cue, lastText, StringComparison.Ordinal))
+                    candidates.RemoveAt(i);
+            }
+        }
+
+        List<ScenarioCue> chosen = SelectSubset(scope, candidates, Math.Max(0, Sample));
+        StringBuilder menu = new();
+
+        for (var i = 0; i < chosen.Count; i++)
+        {
+            ScenarioCue item = chosen[i];
+
+            if (menu.Length > 0)
+                _ = menu.Append('\n');
+
+            _ = string.IsNullOrWhiteSpace(item.When)
+                ? menu.Append("- ").Append(item.Tag)
+                : menu.Append("- ").Append(item.Tag).Append(": ").Append(item.When);
+        }
+
+        if (AllowNone)
+        {
+            if (menu.Length > 0)
+                _ = menu.Append('\n');
+
+            _ = menu.Append("- none: none of the above fit right now; let the scene unfold naturally");
+        }
+
+        Pool = new ScenarioCuePool(chosen);
+        Options = menu.ToString();
+        Count = chosen.Count;
+    }
+
+    private static List<ScenarioCue> SelectSubset(ScenarioRunScope scope, List<ScenarioCue> candidates, int sample)
+    {
+        if (sample <= 0 || sample >= candidates.Count)
+            return candidates;
+
+        var indices = new int[candidates.Count];
+
+        for (var i = 0; i < indices.Length; i++)
+            indices[i] = i;
+
+        for (var i = 0; i < sample; i++)
+        {
+            var pick = i + scope.DrawRandomInt(indices.Length - i);
+            (indices[i], indices[pick]) = (indices[pick], indices[i]);
+        }
+
+        Array.Sort(indices, 0, sample);
+        List<ScenarioCue> picked = [with(sample)];
+
+        for (var i = 0; i < sample; i++)
+            picked.Add(candidates[indices[i]]);
+
+        return picked;
+    }
+}
+
+/// <summary>Resolves the classifier model's reply against a <see cref="ScenarioCuePool"/> and hands out the chosen cue text.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Cue pick", Description = "Extracts the chosen tag from a model reply and resolves its Cue text.", Icon = AppIcons.CuePick, Color = ScenarioCatalog.CueColor)]
+internal sealed class CuePickNode : IGraphNode
+{
+    public const string NodeKey = "chat.cue-pick";
+
+    private static readonly char[] TrimChars = [' ', '\t', '\r', '\n', '"', '\'', '`', '*', '_', '[', ']', '(', ')', '{', '}', '.', ',', ';', ':', '-', '!', '?'];
+
+    [GraphInput(Title = "Pool", PinOnly = true, Required = true)]
+    public ScenarioCuePool? Pool { get; set; }
+
+    [GraphInput(Title = "Choice", PinOnly = true, Description = "Classifier output naming a cue tag or 'none'.")]
+    public string Choice { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Cue")]
+    public string Cue { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Tag")]
+    public string Tag { get; set; } = string.Empty;
+
+    [GraphOutput(Title = "Matched")]
+    public bool Matched { get; set; }
+
+    public void Execute(UINodeRunContext context)
+    {
+        if (Pool is null || Pool.Cues.Count == 0 || string.IsNullOrWhiteSpace(Choice))
+        {
+            Clear(context, "none");
+            return;
+        }
+
+        ScenarioCue? matched = MatchChoice(Pool.Cues, Choice);
+
+        if (matched is null)
+        {
+            Clear(context, Choice.Trim());
+            return;
+        }
+
+        Cue = matched.Cue;
+        Tag = matched.Tag;
+        Matched = true;
+        context.Log($"Picked cue '{matched.Tag}'.");
+    }
+
+    private void Clear(UINodeRunContext context, string raw)
+    {
+        Cue = string.Empty;
+        Tag = string.Empty;
+        Matched = false;
+        context.Log(raw.Length == 0 || string.Equals(raw, "none", StringComparison.OrdinalIgnoreCase) ? "No cue picked ('none')." : $"No cue matched '{raw}'.");
+    }
+
+    private static ScenarioCue? MatchChoice(IReadOnlyList<ScenarioCue> cues, string rawChoice)
+    {
+        var firstLine = FirstNonEmptyLine(rawChoice);
+        var cleaned = StripLabelPrefix(firstLine).Trim(TrimChars);
+
+        if (cleaned.Length == 0 || string.Equals(cleaned, "none", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        for (var i = 0; i < cues.Count; i++)
+        {
+            if (string.Equals(cues[i].Tag, cleaned, StringComparison.OrdinalIgnoreCase))
+                return cues[i];
+        }
+
+        if (ContainsBoundedToken(firstLine, "none"))
+            return null;
+
+        ScenarioCue? best = null;
+
+        for (var i = 0; i < cues.Count; i++)
+        {
+            ScenarioCue candidate = cues[i];
+
+            if (ContainsBoundedToken(rawChoice, candidate.Tag) && (best is null || candidate.Tag.Length > best.Tag.Length))
+                best = candidate;
+        }
+
+        return best;
+    }
+
+    private static string FirstNonEmptyLine(string text)
+    {
+        foreach (ReadOnlySpan<char> line in text.AsSpan().EnumerateLines())
+        {
+            ReadOnlySpan<char> trimmed = line.Trim();
+
+            if (!trimmed.IsEmpty)
+                return trimmed.ToString();
+        }
+
+        return string.Empty;
+    }
+
+    private static string StripLabelPrefix(string line)
+    {
+        foreach (var prefix in (string[])["tag:", "cue:", "choice:", "pick:"])
+        {
+            if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return line[prefix.Length..].TrimStart();
+        }
+
+        return line;
+    }
+
+    private static bool ContainsBoundedToken(ReadOnlySpan<char> text, ReadOnlySpan<char> token)
+    {
+        if (token.IsEmpty || text.Length < token.Length)
+            return false;
+
+        var from = 0;
+
+        while (from <= text.Length - token.Length)
+        {
+            var offset = text[from..].IndexOf(token, StringComparison.OrdinalIgnoreCase);
+
+            if (offset < 0)
+                return false;
+
+            var pos = from + offset;
+            from = pos + 1;
+
+            var leftOk = pos == 0 || !IsTagChar(text[pos - 1]);
+            var rightIndex = pos + token.Length;
+            var rightOk = rightIndex >= text.Length || !IsTagChar(text[rightIndex]);
+
+            if (leftOk && rightOk)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsTagChar(char ch)
+        => char.IsLetterOrDigit(ch) || ch is '-' or '_';
+}
+
 /// <summary>Assembles prompt blocks from whatever chat inputs and trailing instruction are wired into it.</summary>
 [GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Collector", Description = "Assembles prompt blocks from optional chat parts and a trailing instruction.", Icon = UIGlyphs.Merge, Color = ScenarioCatalog.PromptColor)]
 internal sealed class CollectorNode : IGraphNode
@@ -421,6 +803,9 @@ internal sealed class ModelCallNode : IGraphNodeAsync
 
     [GraphInput(Title = "Prompt", PinOnly = true, Required = true)]
     public CollectedPrompt? Prompt { get; set; }
+
+    [GraphInput(Title = "When", PinOnly = true, Description = "Runs this call only when true; unwired, always runs.")]
+    public bool When { get; set; } = true;
 
     [GraphInput(Title = "Connection", ChoicesKey = ConnectionChoicesKey, Placeholder = "Active", Description = "Connection profile to run on, or the active connection.")]
     public string Connection { get; set; } = string.Empty;
@@ -494,6 +879,13 @@ internal sealed class ModelCallNode : IGraphNodeAsync
     public async ValueTask ExecuteAsync(UINodeRunContext context, CancellationToken cancellationToken = default)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
+
+        if (!scope.ShouldRunAction(context, When))
+        {
+            Text = string.Empty;
+            Thought = string.Empty;
+            return;
+        }
 
         if (Prompt is null)
             throw new UINodeFailureException("No prompt is wired into Model call.");
@@ -774,6 +1166,9 @@ internal sealed class ReplaceRecordNode : IGraphNode
     [GraphInput(Title = "Text", PinOnly = true)]
     public string Text { get; set; } = string.Empty;
 
+    [GraphInput(Title = "When", PinOnly = true, Description = "Writes this record only when true; unwired, always runs.")]
+    public bool When { get; set; } = true;
+
     [GraphInput(Title = "Role")]
     public MessageRole Role { get; set; } = MessageRole.System;
 
@@ -786,6 +1181,9 @@ internal sealed class ReplaceRecordNode : IGraphNode
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
+
+        if (!scope.ShouldRunAction(context, When))
+            return;
 
         if (Slice?.FirstMessageId is not string firstId || Slice.LastMessageId is not string lastId)
             throw new UINodeFailureException("The message slice has no messages to replace.");
@@ -829,6 +1227,9 @@ internal sealed class InsertRecordNode : IGraphNode
     [GraphInput(Title = "Slice", PinOnly = true)]
     public MessageSlice? Slice { get; set; }
 
+    [GraphInput(Title = "When", PinOnly = true, Description = "Writes this record only when true; unwired, always runs.")]
+    public bool When { get; set; } = true;
+
     [GraphInput(Title = "Role")]
     public MessageRole Role { get; set; } = MessageRole.System;
 
@@ -838,21 +1239,39 @@ internal sealed class InsertRecordNode : IGraphNode
     [GraphInput(Title = "Template", MaxLines = 3, Placeholder = "{0}", Description = "Wraps the record when sent in the prompt; {0} is the record text.")]
     public string Template { get; set; } = string.Empty;
 
+    [GraphInput(Title = "One turn", Description = "Sends this record only while its anchor message is the very last message of the history.")]
+    public bool OneTurn { get; set; }
+
+    [GraphInput(Title = "Ignore empty", Description = "Skips silently instead of failing when Text is blank.")]
+    public bool IgnoreEmpty { get; set; }
+
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
-        var afterId = Slice?.LastMessageId
-            ?? (scope.Chat.Messages.Count > 0 ? scope.Chat.Messages[^1].Id : null)
-            ?? throw new UINodeFailureException("The chat has no messages to insert a record after.");
+
+        if (!scope.ShouldRunAction(context, When))
+            return;
 
         var cleaned = Text.Trim();
 
         if (cleaned.Length == 0)
+        {
+            if (IgnoreEmpty)
+            {
+                context.Log("Skipped: record text is empty.");
+                return;
+            }
+
             throw new UINodeFailureException("The record text is empty.");
+        }
+
+        var afterId = Slice?.LastMessageId
+            ?? (scope.Chat.Messages.Count > 0 ? scope.Chat.Messages[^1].Id : null)
+            ?? throw new UINodeFailureException("The chat has no messages to insert a record after.");
 
         if (!scope.CommitToChat)
         {
-            context.Log($"Preview: would insert after '{afterId}' ({cleaned.Length} chars).");
+            context.Log($"Preview: would insert after '{afterId}' ({cleaned.Length} chars{(OneTurn ? ", one turn" : string.Empty)}).");
             return;
         }
 
@@ -867,7 +1286,8 @@ internal sealed class InsertRecordNode : IGraphNode
             Text = cleaned,
             Template = string.IsNullOrWhiteSpace(Template) ? null : Template.Trim(),
             Thought = thought,
-            Generation = generationId
+            Generation = generationId,
+            OneTurn = OneTurn
         });
     }
 }
@@ -881,12 +1301,19 @@ internal sealed class WriteDraftNode : IGraphNode
     [GraphInput(Title = "Text", PinOnly = true)]
     public string Text { get; set; } = string.Empty;
 
+    [GraphInput(Title = "When", PinOnly = true, Description = "Writes the draft only when true; unwired, always runs.")]
+    public bool When { get; set; } = true;
+
     [GraphInput(Title = "Mode")]
     public DraftWriteMode Mode { get; set; } = DraftWriteMode.Replace;
 
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
+
+        if (!scope.ShouldRunAction(context, When))
+            return;
+
         (var generationId, _) = scope.ResolveSourceGeneration(context.NodeId);
         var combined = Mode == DraftWriteMode.Continue && generationId is null && scope.InitialDraft.Length > 0
             ? scope.InitialDraft + Text
@@ -913,6 +1340,9 @@ internal sealed class SetVisualNode : IGraphNode
 {
     public const string NodeKey = "chat.visual";
 
+    [GraphInput(Title = "When", PinOnly = true, Description = "Updates the visual only when true; unwired, always runs.")]
+    public bool When { get; set; } = true;
+
     [GraphInput(Title = "Target")]
     public ChatVisualTarget Target { get; set; } = ChatVisualTarget.Stage;
 
@@ -931,6 +1361,10 @@ internal sealed class SetVisualNode : IGraphNode
     public void Execute(UINodeRunContext context)
     {
         ScenarioRunScope scope = ScenarioRunScope.From(context);
+
+        if (!scope.ShouldRunAction(context, When))
+            return;
+
         var afterId = Slice?.LastMessageId ?? (scope.Chat.Messages.Count > 0 ? scope.Chat.Messages[^1].Id : null);
 
         if (Clear)

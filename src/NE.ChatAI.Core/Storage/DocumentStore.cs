@@ -45,11 +45,14 @@ public sealed class DocumentFormatException : Exception
 /// </summary>
 public sealed class DocumentStore<T> where T : NamedDocument
 {
+    private sealed record CachedDocument(long LastWriteTicks, long Length, T Document);
+
     private const string Extension = ".json";
 
     private readonly string _directory;
     private readonly string? _fileName;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _writes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CachedDocument> _cache = new(StringComparer.Ordinal);
 
     /// <param name="directory">The kind's folder.</param>
     /// <param name="fileName">The document's file inside its own folder, or <c>null</c> for a file per document.</param>
@@ -116,9 +119,19 @@ public sealed class DocumentStore<T> where T : NamedDocument
     public async Task<T?> ReadAsync(string id, CancellationToken cancellationToken)
     {
         var path = PathOf(id);
+        FileInfo info = new(path);
 
-        if (!File.Exists(path))
+        if (!info.Exists)
+        {
+            _ = _cache.TryRemove(id, out _);
             return null;
+        }
+
+        var lastWriteTicks = info.LastWriteTimeUtc.Ticks;
+        var length = info.Length;
+
+        if (_cache.TryGetValue(id, out CachedDocument? cached) && cached.LastWriteTicks == lastWriteTicks && cached.Length == length)
+            return cached.Document;
 
         FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
 
@@ -132,15 +145,23 @@ public sealed class DocumentStore<T> where T : NamedDocument
             }
             catch (JsonException exception)
             {
+                _ = _cache.TryRemove(id, out _);
                 throw new DocumentFormatException(path, exception.Message, exception);
             }
 
             if (document is null)
+            {
+                _ = _cache.TryRemove(id, out _);
                 throw new DocumentFormatException(path, "the file holds no document.");
+            }
 
             if (document.Format > Document.CurrentFormat)
+            {
+                _ = _cache.TryRemove(id, out _);
                 throw new DocumentFormatException(path, $"format {document.Format} is newer than this version writes ({Document.CurrentFormat}).");
+            }
 
+            _cache[id] = new CachedDocument(File.GetLastWriteTimeUtc(path).Ticks, stream.Length, document);
             return document;
         }
     }
@@ -193,6 +214,7 @@ public sealed class DocumentStore<T> where T : NamedDocument
         try
         {
             await AtomicFile.WriteAsync(path, content, cancellationToken).ConfigureAwait(false);
+            _ = _cache.TryRemove(id, out _);
         }
         finally
         {
@@ -246,6 +268,7 @@ public sealed class DocumentStore<T> where T : NamedDocument
         }
         finally
         {
+            _ = _cache.TryRemove(id, out _);
             _ = oldGate.Release();
             _ = _writes.TryRemove(id, out _);
         }
@@ -264,8 +287,12 @@ public sealed class DocumentStore<T> where T : NamedDocument
         else
             Directory.Delete(FolderOf(id), recursive: true);
 
+        _ = _cache.TryRemove(id, out _);
         _ = _writes.TryRemove(id, out _);
 
         return true;
     }
+
+    internal void ClearCache()
+        => _cache.Clear();
 }

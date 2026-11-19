@@ -1,14 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using NE.ChatAI.Backends.KoboldCpp;
 using NE.ChatAI.Characters;
 using NE.ChatAI.Chats;
 using NE.ChatAI.Connections;
 using NE.ChatAI.Hosting;
 using NE.ChatAI.Plugins;
+using NE.ChatAI.Prompts;
 using NE.ChatAI.Samplers;
 using NE.ChatAI.Secrets;
 using NE.ChatAI.Settings;
@@ -55,10 +59,14 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     private readonly Lock _sync = new();
     private readonly Dictionary<string, MessageSlice> _slicesByNode = [with(StringComparer.Ordinal)];
     private readonly Dictionary<string, (string GenerationId, string? Thought)> _generationsByNode = [with(StringComparer.Ordinal)];
+    private readonly HashSet<string> _skippedNodes = [with(StringComparer.Ordinal)];
     private readonly List<GenerationRecord> _generations = [];
     private readonly List<ChatRecord> _stagedRecords = [];
     private readonly List<ChatVisual> _stagedVisuals = [];
     private UINodeNetwork? _network;
+    private (int CurrentTokens, int PreviousTokens, int ContextLength)? _measuredContext;
+    private bool? _chancePassed;
+    private int _executedActions;
     private string? _stagedDraft;
     private string? _stagedDraftGenerationId;
     private bool _stagedDraftContinued;
@@ -81,6 +89,9 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
 
     public required Chat Chat { get; init; }
 
+    /// <summary>Optional snapshot of the chat before the current turn started, used by <see cref="ContextNode"/> to detect rising-edge threshold crossings.</summary>
+    public Chat? PreTurnChat { get; init; }
+
     public Character? Character { get; init; }
 
     public Persona? Persona { get; init; }
@@ -95,10 +106,18 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
 
     public required string ScenarioName { get; init; }
 
+    public ScenarioTrigger Trigger { get; init; } = new();
+
     public required UINodeDocument Document { get; init; }
 
     /// <summary>Whether writers stage records onto the chat; <c>false</c> during a canvas preview run on <c>/scenarios</c>.</summary>
     public bool CommitToChat { get; init; } = true;
+
+    /// <summary>Whether trigger gates and single-branch pre-model <c>When</c> guards pass unconditionally because the reader started the scenario by hand.</summary>
+    public bool BypassGates { get; init; }
+
+    /// <summary>Optional deterministic <c>[0, maxExclusive)</c> generator for testing <see cref="ScenarioGate"/> and <see cref="CueMenuNode"/>.</summary>
+    public Func<int, int>? RandomNext { get; init; }
 
     /// <summary>The composer draft as it stood before the scenario started, so a draft-writing model call can continue it.</summary>
     public string InitialDraft { get; init; } = string.Empty;
@@ -108,6 +127,15 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     public Func<string, string, string, string, ValueTask>? OnStreamChunkAsync { get; init; }
 
     public Func<string, ValueTask>? OnDraftChunkAsync { get; init; }
+
+    public bool WasSkippedByCondition
+    {
+        get
+        {
+            lock (_sync)
+                return _executedActions == 0 && _skippedNodes.Count > 0;
+        }
+    }
 
     string? IScenarioContext.CharacterId => Chat.Character;
 
@@ -179,6 +207,233 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     public static ScenarioRunScope From(UINodeRunContext context)
         => context.Services?.GetService(typeof(ScenarioRunScope)) as ScenarioRunScope
             ?? throw new UINodeFailureException("Chat nodes run only inside a chat scenario.");
+
+    /// <summary>Checks the scenario's sidebar <see cref="ScenarioGate"/> before any node runs; rolls <see cref="ScenarioGate.Chance"/> eagerly when the sheet has no <c>When</c> edges.</summary>
+    public bool CheckTriggerGateBeforeRun()
+    {
+        if (BypassGates || !CommitToChat || Trigger.Kind == ScenarioTriggerKind.Manual || !Trigger.Gate.Enabled)
+            return true;
+
+        var pendingOutgoingTurn = InitialDraft.Length > 0 && (Chat.Messages.Count == 0 || Chat.Messages[^1].Role != MessageRole.User) ? 1 : 0;
+        var userTurns = ChatRecords.CountUserTurns(Chat.Messages) + pendingOutgoingTurn;
+        var minTurns = Math.Max(0, Trigger.Gate.MinTurns);
+
+        if (minTurns > 0 && userTurns < minTurns)
+            return false;
+
+        var cooldown = Math.Max(0, Trigger.Gate.Cooldown);
+
+        if (cooldown > 0 && ChatRecords.TurnsSinceScenarioOutput(Chat, ScenarioId) is int elapsed && elapsed <= cooldown)
+            return false;
+
+        return HasAnyWiredWhenPin() || RollTriggerChance(out _);
+    }
+
+    private bool HasAnyWiredWhenPin()
+    {
+        for (var i = 0; i < Document.Edges.Length; i++)
+        {
+            UINodeEdge edge = Document.Edges[i];
+
+            if (string.Equals(edge.ToPin, nameof(ModelCallNode.When), StringComparison.Ordinal)
+                && FindEnabledNode(edge.FromNode) is not null
+                && FindEnabledNode(edge.ToNode) is UINode target
+                && IsActionNode(target.Type))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private UINode? FindEnabledNode(string nodeId)
+    {
+        for (var i = 0; i < Document.Nodes.Length; i++)
+        {
+            UINode node = Document.Nodes[i];
+
+            if (node.Enabled && string.Equals(node.Id, nodeId, StringComparison.Ordinal))
+                return node;
+        }
+
+        return null;
+    }
+
+    private static bool IsActionNode(string nodeType)
+        => string.Equals(nodeType, ModelCallNode.NodeKey, StringComparison.Ordinal)
+            || string.Equals(nodeType, ReplaceRecordNode.NodeKey, StringComparison.Ordinal)
+            || string.Equals(nodeType, InsertRecordNode.NodeKey, StringComparison.Ordinal)
+            || string.Equals(nodeType, WriteDraftNode.NodeKey, StringComparison.Ordinal)
+            || string.Equals(nodeType, SetVisualNode.NodeKey, StringComparison.Ordinal);
+
+    private bool RollTriggerChance(out int rolledPercent)
+    {
+        lock (_sync)
+        {
+            if (_chancePassed is bool cached)
+            {
+                rolledPercent = 0;
+                return cached;
+            }
+
+            var chance = Math.Clamp(Trigger.Gate.Chance, 1, ScenarioGate.DefaultChance);
+
+            if (chance >= ScenarioGate.DefaultChance)
+            {
+                _chancePassed = true;
+                rolledPercent = 0;
+                return true;
+            }
+
+            rolledPercent = DrawRandomInt(ScenarioGate.DefaultChance) + 1;
+            var passed = rolledPercent <= chance;
+            _chancePassed = passed;
+            return passed;
+        }
+    }
+
+    public int DrawRandomInt(int maxExclusive)
+        => maxExclusive <= 1
+            ? 0
+            : RandomNext is not null
+                ? Math.Clamp(RandomNext(maxExclusive), 0, maxExclusive - 1)
+                : RandomNumberGenerator.GetInt32(maxExclusive);
+
+    /// <summary>Evaluates whether an action node (<see cref="ModelCallNode"/> or writer) should execute, propagating upstream skips and lazy gate rolls.</summary>
+    public bool ShouldRunAction(UINodeRunContext context, bool whenValue)
+    {
+        if (HasSkippedUpstream(context.NodeId))
+        {
+            MarkSkipped(context.NodeId);
+            context.Log("Skipped: upstream node did not run.");
+            return false;
+        }
+
+        if (!whenValue)
+        {
+            if (CanBypassPreModelWhen(context.NodeId))
+            {
+                context.Log(!CommitToChat
+                    ? "Preview: When is false; continuing preview."
+                    : "Manual run: When bypassed.");
+            }
+            else
+            {
+                MarkSkipped(context.NodeId);
+                context.Log("Skipped: When is false.");
+                return false;
+            }
+        }
+
+        if (!BypassGates && CommitToChat && Trigger.Kind != ScenarioTriggerKind.Manual && Trigger.Gate.Enabled && !RollTriggerChance(out var roll))
+        {
+            MarkSkipped(context.NodeId);
+            context.Log(roll > 0
+                ? string.Create(CultureInfo.InvariantCulture, $"Skipped: gate roll {roll}% > {Math.Clamp(Trigger.Gate.Chance, 1, ScenarioGate.DefaultChance)}%.")
+                : "Skipped: gate did not pass.");
+            return false;
+        }
+
+        lock (_sync)
+            _executedActions++;
+
+        return true;
+    }
+
+    private bool HasSkippedUpstream(string nodeId)
+    {
+        lock (_sync)
+        {
+            if (_skippedNodes.Count == 0)
+                return false;
+
+            HashSet<string> visited = [with(StringComparer.Ordinal), nodeId];
+            Queue<string> pending = new();
+            pending.Enqueue(nodeId);
+
+            while (pending.Count > 0)
+            {
+                var currentId = pending.Dequeue();
+
+                for (var i = 0; i < Document.Edges.Length; i++)
+                {
+                    UINodeEdge edge = Document.Edges[i];
+
+                    if (!string.Equals(edge.ToNode, currentId, StringComparison.Ordinal))
+                        continue;
+
+                    if (_skippedNodes.Contains(edge.FromNode))
+                        return true;
+
+                    if (FindEnabledNode(edge.FromNode) is UINode source && visited.Add(source.Id))
+                        pending.Enqueue(source.Id);
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private void MarkSkipped(string nodeId)
+    {
+        lock (_sync)
+            _ = _skippedNodes.Add(nodeId);
+    }
+
+    private bool CanBypassPreModelWhen(string nodeId)
+        => (BypassGates || !CommitToChat)
+            && !HasUpstreamActionNode(nodeId)
+            && CountPreModelWhenTargets() <= 1;
+
+    private bool HasUpstreamActionNode(string nodeId)
+    {
+        HashSet<string> visited = [with(StringComparer.Ordinal), nodeId];
+        Queue<string> pending = new();
+        pending.Enqueue(nodeId);
+
+        while (pending.Count > 0)
+        {
+            var currentId = pending.Dequeue();
+
+            for (var i = 0; i < Document.Edges.Length; i++)
+            {
+                UINodeEdge edge = Document.Edges[i];
+
+                if (!string.Equals(edge.ToNode, currentId, StringComparison.Ordinal) || FindEnabledNode(edge.FromNode) is not UINode source)
+                    continue;
+
+                if (IsActionNode(source.Type))
+                    return true;
+
+                if (visited.Add(source.Id))
+                    pending.Enqueue(source.Id);
+            }
+        }
+
+        return false;
+    }
+
+    private int CountPreModelWhenTargets()
+    {
+        HashSet<string> targets = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < Document.Edges.Length; i++)
+        {
+            UINodeEdge edge = Document.Edges[i];
+
+            if (string.Equals(edge.ToPin, nameof(ModelCallNode.When), StringComparison.Ordinal)
+                && FindEnabledNode(edge.FromNode) is not null
+                && FindEnabledNode(edge.ToNode) is UINode target
+                && IsActionNode(target.Type)
+                && !HasUpstreamActionNode(target.Id))
+            {
+                _ = targets.Add(target.Id);
+            }
+        }
+
+        return targets.Count;
+    }
 
     public void RememberSlice(string nodeId, MessageSlice slice)
     {
@@ -360,19 +615,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         return feedsDraft ? null : Chat.Messages[^1].Id;
     }
 
-    private UINode? FindEnabledNode(string nodeId)
-    {
-        for (var i = 0; i < Document.Nodes.Length; i++)
-        {
-            UINode node = Document.Nodes[i];
-
-            if (node.Enabled && string.Equals(node.Id, nodeId, StringComparison.Ordinal))
-                return node;
-        }
-
-        return null;
-    }
-
     private string? FindSliceAnchorForWriter(string writerNodeId)
     {
         lock (_sync)
@@ -487,5 +729,134 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         }
 
         return writer.Node is InsertRecordNode ? Chat.Messages[^1].Id : null;
+    }
+
+    public bool HasIncomingEdge(string toNodeId, string toPin)
+    {
+        for (var i = 0; i < Document.Edges.Length; i++)
+        {
+            UINodeEdge edge = Document.Edges[i];
+
+            if (string.Equals(edge.ToNode, toNodeId, StringComparison.Ordinal)
+                && string.Equals(edge.ToPin, toPin, StringComparison.Ordinal)
+                && FindEnabledNode(edge.FromNode) is not null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Measures and caches the assembled main-prompt token counts for <see cref="Chat"/> and the pre-turn baseline against the active connection's context length.</summary>
+    public async Task<(int CurrentTokens, int PreviousTokens, int ContextLength)> MeasureContextAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_measuredContext is (int current, int previous, int length))
+                return (current, previous, length);
+        }
+
+        if (ActiveProfile is not ActiveProfile profile)
+            return (0, 0, 0);
+
+        KoboldCppClient? kobold = null;
+        string? model = null;
+        int contextLength;
+
+        if (profile.Connection.Address is Uri address)
+        {
+            kobold = Clients.For(address);
+            ResolvedContext resolved = await ContextLengths.ResolveAsync(profile.Connection, kobold, cancellationToken).ConfigureAwait(false);
+            contextLength = resolved.Length;
+
+            if (!resolved.ServerAway)
+                model = await TryGetModelNameAsync(kobold, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            contextLength = Math.Max(0, profile.Connection.ContextLength.Value);
+        }
+
+        if (contextLength <= 0)
+            return (0, 0, 0);
+
+        Chat? previousChat = PreTurnChat ?? DerivePreviousTurnChat(Chat);
+        var currentTokens = await CountChatPromptTokensAsync(profile, Chat, contextLength, kobold, model, cancellationToken).ConfigureAwait(false);
+        var previousTokens = previousChat is null
+            ? 0
+            : await CountChatPromptTokensAsync(profile, previousChat, contextLength, kobold, model, cancellationToken).ConfigureAwait(false);
+        (int CurrentTokens, int PreviousTokens, int ContextLength) measured = (currentTokens, previousTokens, contextLength);
+
+        lock (_sync)
+        {
+            _measuredContext ??= measured;
+            return _measuredContext.Value;
+        }
+    }
+
+    private static async Task<string?> TryGetModelNameAsync(KoboldCppClient kobold, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var model = (await kobold.GetModelAsync(cancellationToken).ConfigureAwait(false)).Trim();
+
+            return model.Length == 0 ? null : model;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<int> CountChatPromptTokensAsync(ActiveProfile profile, Chat chat, int contextLength, KoboldCppClient? kobold, string? model, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<PromptMessage> projectedHistory = ChatRecords.ProjectHistory(chat.Messages, chat.Records);
+        PromptSpec spec = new()
+        {
+            SystemPrompt = profile.SystemPrompt.Content,
+            Prompt = profile.Prompt,
+            Character = Character,
+            CharacterName = CharacterName,
+            UserName = UserName,
+            Persona = Persona,
+            Lore = WorldInfo.ArticlesOf(World, projectedHistory),
+            AuthorsNotes = [Settings.AuthorsNote, Character?.AuthorsNote, chat.AuthorsNote],
+            NotePlacement = Settings.AuthorsNotePlacement,
+            History = projectedHistory
+        };
+
+        if (kobold is not null && profile.Connection.Address is Uri address)
+        {
+            try
+            {
+                ITokenCounter counter = Clients.CounterFor(address, kobold, model);
+                BuiltPrompt exact = await PromptBuilder.BuildAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, counter, cancellationToken).ConfigureAwait(false);
+
+                return exact.Tokens;
+            }
+            catch (HttpRequestException)
+            {
+            }
+        }
+
+        BuiltPrompt approximate = await PromptBuilder.BuildAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, ApproximateTokenCounter.Instance, cancellationToken).ConfigureAwait(false);
+
+        return approximate.Tokens;
+    }
+
+    private static Chat? DerivePreviousTurnChat(Chat chat)
+    {
+        var count = chat.Messages.Count;
+
+        if (count == 0)
+            return null;
+
+        var trimFrom = count - 1;
+
+        if (chat.Messages[trimFrom].Role == MessageRole.Character && trimFrom > 0 && chat.Messages[trimFrom - 1].Role == MessageRole.User)
+            trimFrom--;
+
+        return ChatEditing.DeleteFrom(chat, chat.Messages[trimFrom].Id);
     }
 }

@@ -9,8 +9,8 @@ using NE.ChatAI.Chats;
 
 namespace NE.ChatAI.Prompts;
 
-/// <summary>A message of the history as the prompt reads it: who wrote it, its words, and the thought before them.</summary>
-public sealed record PromptMessage(MessageRole Role, string Text, string? Thought = null);
+/// <summary>A message of the history as the prompt reads it: who wrote it, its words, the thought before them, and whether macros in its text expand.</summary>
+public sealed record PromptMessage(MessageRole Role, string Text, string? Thought = null, bool ExpandMacros = false);
 
 /// <summary>One logical turn of an assembled prompt: its role, the block it counts under, its words, and who speaks it.</summary>
 public sealed record PromptTurn(PromptRole Role, string Block, string Text, string? Speaker = null);
@@ -173,7 +173,7 @@ public static class PromptBuilder
             PromptMessage message = spec.History[i];
             PromptRole role = RoleOf(message);
             var speaker = SpeakerOf(message.Role, characterName, userName);
-            var body = HistoryText(spec, effectiveFormat, message, includeNames ? speaker : null);
+            var body = HistoryText(spec, effectiveFormat, message, names, includeNames ? speaker : null);
             var tokens = await counter.CountAsync(effectiveFormat is null ? body : effectiveFormat.Turn(role, body), cancellationToken).ConfigureAwait(false);
 
             if (historyTokens + tokens > room)
@@ -302,9 +302,10 @@ public static class PromptBuilder
     }
 
     /// <summary>A message's words, prefixed with its speaker where names are included, and its thought before them where kept in history.</summary>
-    private static string HistoryText(PromptSpec spec, ModelFormat? format, PromptMessage message, string? speaker)
+    private static string HistoryText(PromptSpec spec, ModelFormat? format, PromptMessage message, IReadOnlyDictionary<string, string> names, string? speaker)
     {
-        var text = message.Text.TrimEnd('\r', '\n');
+        var rawText = message.ExpandMacros ? Macros.Render(message.Text, names) : message.Text;
+        var text = rawText.TrimEnd('\r', '\n');
 
         if (message.Role != MessageRole.System && !string.IsNullOrEmpty(speaker))
             text = $"{speaker}: {text}";

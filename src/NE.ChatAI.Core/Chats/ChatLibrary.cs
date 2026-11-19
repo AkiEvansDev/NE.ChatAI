@@ -17,10 +17,15 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
 {
     /// <summary>Every chat, the one last written to first, with its character's name and tags.</summary>
     public async Task<IReadOnlyList<ChatSummary>> ListAsync(CancellationToken cancellationToken)
+        => await ListAsync((await data.Characters.ListAsync(cancellationToken).ConfigureAwait(false)).Items, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Every chat, the one last written to first, paired with an already-read character list.</summary>
+    public async Task<IReadOnlyList<ChatSummary>> ListAsync(IReadOnlyList<StoredDocument<Character>> characters, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(characters);
+
         DocumentListing<Chat> chats = await data.Chats.ListAsync(cancellationToken).ConfigureAwait(false);
-        DocumentListing<Character> characters = await data.Characters.ListAsync(cancellationToken).ConfigureAwait(false);
-        Dictionary<string, Character> byId = characters.Items.ToDictionary(static stored => stored.Id, static stored => stored.Document, StringComparer.Ordinal);
+        Dictionary<string, Character> byId = characters.ToDictionary(static stored => stored.Id, static stored => stored.Document, StringComparer.Ordinal);
 
         return
         [

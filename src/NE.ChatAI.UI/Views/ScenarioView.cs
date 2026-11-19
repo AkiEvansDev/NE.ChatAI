@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using NE.ChatAI.Controllers;
 using NE.ChatAI.Scenarios;
 
@@ -16,8 +18,8 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
     [
         new() { Id = nameof(ScenarioTriggerKind.Manual), Title = "chatai.scenarios.trigger.manual" },
         new() { Id = nameof(ScenarioTriggerKind.BeforeSend), Title = "chatai.scenarios.trigger.before-send" },
-        new() { Id = nameof(ScenarioTriggerKind.AfterReply), Title = "chatai.scenarios.trigger.after-reply" },
-        new() { Id = nameof(ScenarioTriggerKind.ContextShare), Title = "chatai.scenarios.trigger.context-share" }
+        new() { Id = nameof(ScenarioTriggerKind.BeforeReply), Title = "chatai.scenarios.trigger.before-reply" },
+        new() { Id = nameof(ScenarioTriggerKind.AfterReply), Title = "chatai.scenarios.trigger.after-reply" }
     ];
 
     public static string ViewKey => "chatai.scenarios";
@@ -33,10 +35,15 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
 
     protected override IVisualComponent CreatePage()
     {
-        SelectComponent trigger = new SelectComponent()
+        SelectComponent triggerSelect = new SelectComponent()
             .SetTitle("chatai.scenarios.trigger")
             .SetOptions(TriggerKinds)
             .BindValue<ScenarioController>(static x => x.TriggerKind)
+            .OnChange(nameof(ScenarioController.SaveMetaAsync));
+
+        SwitchComponent gateSwitch = new SwitchComponent()
+            .SetTitle("chatai.scenarios.gate")
+            .BindValue<ScenarioController>(static x => x.GateEnabled)
             .OnChange(nameof(ScenarioController.SaveMetaAsync));
 
         return new ContainerComponent(ScenarioController.PageId)
@@ -67,16 +74,17 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                                 .SetTitle("chatai.scenarios.pinned")
                                 .BindValue<ScenarioController>(static x => x.ScenarioPinned)
                                 .OnChange(nameof(ScenarioController.SaveMetaAsync)),
-                            trigger,
-                            new NumberInputComponent()
-                                .SetTitle("chatai.scenarios.share")
-                                .SetShowStepper(true)
-                                .SetMin(5)
-                                .SetMax(95)
-                                .SetStep(5)
-                                .BindValue<ScenarioController>(static x => x.TriggerSharePercent)
-                                .OnChange(nameof(ScenarioController.SaveMetaAsync))
-                                .ShownWhen(trigger, nameof(ScenarioTriggerKind.ContextShare))
+                            triggerSelect,
+                            UILayout.Stack(12,
+                                    gateSwitch,
+                                    UILayout.Stack(12,
+                                            Number("chatai.scenarios.gate.chance", static x => x.GateChance, 1, ScenarioGate.DefaultChance, 5),
+                                            Number("chatai.scenarios.gate.cooldown", static x => x.GateCooldown, 0, ScenarioGate.MaxTurns, 1),
+                                            Number("chatai.scenarios.gate.min-turns", static x => x.GateMinTurns, 0, ScenarioGate.MaxTurns, 1)
+                                        )
+                                        .ShownWhen(gateSwitch)
+                                )
+                                .HiddenWhen(triggerSelect, nameof(ScenarioTriggerKind.Manual))
                         )
                         .BindVisibility<ScenarioController>(static x => x.TriggerVisibility)
                 )
@@ -107,6 +115,16 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                 .SetPlacement(1, 2, 24, 1, md: UIGridPlacement.At(2, 1, 23, 1))
             );
     }
+
+    private static NumberInputComponent Number(string title, Expression<Func<ScenarioController, object?>> value, decimal min, decimal max, decimal step)
+        => new NumberInputComponent()
+            .SetTitle(title)
+            .SetShowStepper(true)
+            .SetMin(min)
+            .SetMax(max)
+            .SetStep(step)
+            .BindValue(value)
+            .OnChange(nameof(ScenarioController.SaveMetaAsync));
 
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
         =>

@@ -26,7 +26,11 @@ internal static class ScenarioDependencies
         ScenarioAccess[] accesses = new ScenarioAccess[count];
 
         for (var i = 0; i < count; i++)
-            accesses[i] = Inspect(scenarios[i].Document, documents[i]);
+        {
+            Scenario normalized = scenarios[i].Document.UpgradeLegacyTrigger();
+            UINodeDocument sheet = ReferenceEquals(normalized, scenarios[i].Document) ? documents[i] : ScenarioExecutor.ReadSheet(normalized);
+            accesses[i] = Inspect(normalized, sheet);
+        }
 
         for (var later = 0; later < count; later++)
         {
@@ -51,7 +55,7 @@ internal static class ScenarioDependencies
     {
         ScenarioAccess access = new()
         {
-            ReadsProjectedHistory = scenario.Trigger.Kind == ScenarioTriggerKind.ContextShare
+            ReadsProjectedHistory = scenario.Trigger.LegacyContextShare is not null
         };
 
         for (var i = 0; i < document.Nodes.Length; i++)
@@ -65,6 +69,18 @@ internal static class ScenarioDependencies
             {
                 if (!IsRawMessagesNode(document, node))
                     access.ReadsProjectedHistory = true;
+            }
+            else if (string.Equals(node.Type, ContextNode.NodeKey, StringComparison.Ordinal))
+            {
+                access.ReadsProjectedHistory = true;
+            }
+            else if (string.Equals(node.Type, TriggerMatchNode.NodeKey, StringComparison.Ordinal))
+            {
+                if (FindIncomingSource(document, node.Id, nameof(TriggerMatchNode.Text)) is null)
+                {
+                    access.ReadsProjectedHistory = true;
+                    access.ReadsDraft = true;
+                }
             }
             else if (string.Equals(node.Type, RecordNode.NodeKey, StringComparison.Ordinal))
             {

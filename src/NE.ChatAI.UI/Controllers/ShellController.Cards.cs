@@ -265,7 +265,8 @@ internal abstract partial class ShellController
     protected virtual Task OnCardChangedAsync(CancellationToken cancellationToken)
         => Task.CompletedTask;
 
-    private async Task<string?> OpenCardEditorAsync(TagScope scope, string cardId, CancellationToken cancellationToken)
+    /// <summary>Loads <paramref name="cardId"/> into the shell's card-editor state and returns its dialog key, or <c>null</c> when absent.</summary>
+    protected async Task<string?> OpenCardEditorAsync(TagScope scope, string cardId, CancellationToken cancellationToken)
     {
         if (!Slug.IsValidId(cardId))
             return null;

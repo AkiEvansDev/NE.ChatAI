@@ -125,12 +125,9 @@ internal abstract partial class ShellController
     [RecursiveMember]
     public partial UIPhrase WorldsEmpty { get; set; } = new("chatai.chats.no-worlds");
 
-    /// <summary>The lists with their switch, search and tags; a character picked puts them away for its chats.</summary>
+    /// <summary>Switches the panel between the card lists and the chosen character's chats in one column.</summary>
     [RecursiveMember]
-    public partial UIVisibility CharactersVisibility { get; set; } = UIVisibility.Visible;
-
-    [RecursiveMember]
-    public partial UIVisibility CharacterChatsVisibility { get; set; } = UIVisibility.Collapsed;
+    public partial UIPanesState ChatsPanes { get; set; } = new(stacked: true);
 
     /// <summary>The character whose chats the panel shows, drawn as its row in the list is.</summary>
     [RecursiveMember]
@@ -156,8 +153,8 @@ internal abstract partial class ShellController
     {
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
-        _chats = await Chats.ListAsync(cancellationToken).ConfigureAwait(false);
         _characters = (await Data.Characters.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+        _chats = await Chats.ListAsync(_characters, cancellationToken).ConfigureAwait(false);
         KnownPersonas = (await Data.Personas.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
         KnownWorlds = (await Data.Worlds.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
         _characterTagColors = TagBadges.ColorsOf(settings, TagScope.Character);
@@ -185,12 +182,37 @@ internal abstract partial class ShellController
         string[] knownTags = [.. source.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.CurrentCultureIgnoreCase)];
 
         if (TagFilter.Count > 0)
-            TagFilter = [.. TagFilter.Where(tag => knownTags.Contains(tag, StringComparer.OrdinalIgnoreCase))];
+        {
+            string[] keptFilter = [.. TagFilter.Where(tag => knownTags.Contains(tag, StringComparer.OrdinalIgnoreCase))];
 
-        TagFilterOptions.Clear();
+            if (keptFilter.Length != TagFilter.Count)
+                TagFilter = keptFilter;
+        }
 
-        foreach (var tag in knownTags)
-            TagFilterOptions.Add(TagBadges.OptionOf(tag, colors));
+        HashSet<string> keptOptions = [with(StringComparer.Ordinal), .. knownTags];
+
+        for (var i = TagFilterOptions.Count - 1; i >= 0; i--)
+        {
+            if (!keptOptions.Contains(TagFilterOptions[i].Id))
+                _ = TagFilterOptions.Remove(TagFilterOptions[i].Id);
+        }
+
+        for (var i = 0; i < knownTags.Length; i++)
+        {
+            var tag = knownTags[i];
+
+            if (TagFilterOptions.TryGet(tag, out OptionItem? existing))
+            {
+                existing.BadgeColor = colors.TryGetValue(tag, out UIThemeColor color) ? color : null;
+
+                if (!string.Equals(TagFilterOptions[i].Id, tag, StringComparison.Ordinal))
+                    _ = TagFilterOptions.Move(tag, i);
+            }
+            else
+            {
+                TagFilterOptions.Insert(i, TagBadges.OptionOf(tag, colors));
+            }
+        }
     }
 
     /// <summary>The three card lists.</summary>
@@ -204,21 +226,57 @@ internal abstract partial class ShellController
     /// <summary>The characters, the active chat's one first, then the rest by name.</summary>
     private void ShowCharacters()
     {
-        CharacterRows.Clear();
+        List<StoredDocument<Character>> shown =
+        [
+            .. _characters
+                .OrderByDescending(stored => stored.Id == OpenCharacterId)
+                .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase)
+        ];
 
-        IEnumerable<StoredDocument<Character>> shown = _characters
-            .OrderByDescending(stored => stored.Id == OpenCharacterId)
-            .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
+        SyncCardRows(CharacterRows, shown, Pictures.CharacterAvatarOf, _characterTagColors, OpenCharacterId);
+        CharactersEmpty = new UIPhrase(_characters.Count == 0 ? "chatai.chats.no-characters" : "chatai.chats.no-match");
+    }
 
-        foreach (StoredDocument<Character> stored in shown)
+    private static void SyncCardRows<TCard>(RecursiveCollection<CardRow> rows, List<StoredDocument<TCard>> shown, Func<string, string?> avatarOf, IReadOnlyDictionary<string, UIThemeColor> tagColors, string? activeId, string? defaultId = null)
+        where TCard : Card
+    {
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < shown.Count; i++)
+            _ = kept.Add(shown[i].Id);
+
+        for (var i = rows.Count - 1; i >= 0; i--)
         {
-            CardRow row = RowOf(stored.Id, stored.Document, Pictures.CharacterAvatarOf(stored.Id), _characterTagColors);
-
-            row.ActiveVisibility = stored.Id == OpenCharacterId ? UIVisibility.Visible : UIVisibility.Collapsed;
-            CharacterRows.Add(row);
+            if (!kept.Contains(rows[i].Id))
+                _ = rows.Remove(rows[i].Id);
         }
 
-        CharactersEmpty = new UIPhrase(_characters.Count == 0 ? "chatai.chats.no-characters" : "chatai.chats.no-match");
+        for (var i = 0; i < shown.Count; i++)
+        {
+            StoredDocument<TCard> stored = shown[i];
+            var avatar = avatarOf(stored.Id);
+            UIVisibility defaultVisibility = defaultId is not null && stored.Id == defaultId ? UIVisibility.Visible : UIVisibility.Collapsed;
+            UIVisibility activeVisibility = activeId is not null && stored.Id == activeId ? UIVisibility.Visible : UIVisibility.Collapsed;
+
+            if (rows.TryGet(stored.Id, out CardRow? existing))
+            {
+                existing.Name = stored.Document.Name;
+                existing.Avatar = avatar;
+                existing.DefaultVisibility = defaultVisibility;
+                existing.ActiveVisibility = activeVisibility;
+                TagBadges.Fill(existing.Tags, stored.Document.Tags, tagColors);
+
+                if (!string.Equals(rows[i].Id, stored.Id, StringComparison.Ordinal))
+                    _ = rows.Move(stored.Id, i);
+            }
+            else
+            {
+                CardRow added = RowOf(stored.Id, stored.Document, avatar, tagColors);
+                added.DefaultVisibility = defaultVisibility;
+                added.ActiveVisibility = activeVisibility;
+                rows.Insert(i, added);
+            }
+        }
     }
 
     /// <summary>A card's row: its picture, its name, its tags in their colours.</summary>
@@ -234,76 +292,101 @@ internal abstract partial class ShellController
     /// <summary>The personas, the active one first, then the rest by name.</summary>
     private void ShowPersonas()
     {
-        PersonaRows.Clear();
-
         var activePersonaId = ActivePersonaId ?? DefaultPersonaId;
-        IEnumerable<StoredDocument<Persona>> shown = KnownPersonas
-            .OrderByDescending(stored => stored.Id == activePersonaId)
-            .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
+        List<StoredDocument<Persona>> shown =
+        [
+            .. KnownPersonas
+                .OrderByDescending(stored => stored.Id == activePersonaId)
+                .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase)
+        ];
 
-        foreach (StoredDocument<Persona> stored in shown)
-        {
-            CardRow row = RowOf(stored.Id, stored.Document, Pictures.PersonaAvatarOf(stored.Id), _personaTagColors);
-
-            row.DefaultVisibility = stored.Id == DefaultPersonaId ? UIVisibility.Visible : UIVisibility.Collapsed;
-            row.ActiveVisibility = stored.Id == activePersonaId ? UIVisibility.Visible : UIVisibility.Collapsed;
-            PersonaRows.Add(row);
-        }
-
+        SyncCardRows(PersonaRows, shown, Pictures.PersonaAvatarOf, _personaTagColors, activePersonaId, DefaultPersonaId);
         PersonasEmpty = new UIPhrase(KnownPersonas.Count == 0 ? "chatai.chats.no-personas" : "chatai.chats.no-match");
     }
 
     /// <summary>The worlds, the active one first, then the rest by name.</summary>
     private void ShowWorlds()
     {
-        WorldRows.Clear();
+        List<StoredDocument<World>> shown =
+        [
+            .. KnownWorlds
+                .OrderByDescending(stored => stored.Id == ActiveWorldId)
+                .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase)
+        ];
 
-        IEnumerable<StoredDocument<World>> shown = KnownWorlds
-            .OrderByDescending(stored => stored.Id == ActiveWorldId)
-            .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase);
-
-        foreach (StoredDocument<World> stored in shown)
-        {
-            CardRow row = RowOf(stored.Id, stored.Document, Pictures.WorldAvatarOf(stored.Id), _worldTagColors);
-
-            row.ActiveVisibility = stored.Id == ActiveWorldId ? UIVisibility.Visible : UIVisibility.Collapsed;
-            WorldRows.Add(row);
-        }
-
+        SyncCardRows(WorldRows, shown, Pictures.WorldAvatarOf, _worldTagColors, ActiveWorldId);
         WorldsEmpty = new UIPhrase(KnownWorlds.Count == 0 ? "chatai.chats.no-worlds" : "chatai.chats.no-match");
     }
 
     /// <summary>The panel's character with its chats; a character gone, or none, and the panel shows the list instead.</summary>
     private void ShowPanelCharacter()
     {
-        ChatEntries.Clear();
-
         if (_panelCharacterId is not string characterId || _characters.FirstOrDefault(stored => stored.Id == characterId) is not StoredDocument<Character> character)
         {
+            if (ChatEntries.Count > 0)
+                ChatEntries.Clear();
+
             _panelCharacterId = null;
-            CharactersVisibility = UIVisibility.Visible;
-            CharacterChatsVisibility = UIVisibility.Collapsed;
+            ChatsPanes.ShowList();
             return;
         }
 
-        PanelCharacter = new CardRow { Id = characterId, Name = character.Document.Name, Avatar = Pictures.CharacterAvatarOf(characterId) };
+        var avatar = Pictures.CharacterAvatarOf(characterId);
 
-        foreach (ChatSummary chat in _chats.Where(chat => chat.CharacterId == characterId))
-            ChatEntries.Add(Entry(chat));
+        if (string.Equals(PanelCharacter.Id, characterId, StringComparison.Ordinal))
+        {
+            PanelCharacter.Name = character.Document.Name;
+            PanelCharacter.Avatar = avatar;
+        }
+        else
+        {
+            PanelCharacter = new CardRow { Id = characterId, Name = character.Document.Name, Avatar = avatar };
+        }
 
-        CharactersVisibility = UIVisibility.Collapsed;
-        CharacterChatsVisibility = UIVisibility.Visible;
+        List<ChatSummary> characterChats = [.. _chats.Where(chat => chat.CharacterId == characterId)];
+        SyncChatEntries(characterChats);
+
+        ChatsPanes.ShowDetail();
     }
 
-    /// <summary>A chat's row: when it was last written to, and its last words.</summary>
-    private MenuItem Entry(ChatSummary chat)
-        => new()
+    private void SyncChatEntries(List<ChatSummary> chats)
+    {
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < chats.Count; i++)
+            _ = kept.Add(chats[i].Id);
+
+        for (var i = ChatEntries.Count - 1; i >= 0; i--)
         {
-            Id = chat.Id,
-            Title = chat.LastAt == DateTimeOffset.MinValue ? UIPhrase.Text(chat.Name) : UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(chat.LastAt, UITimestampFormat.Relative))),
-            Description = UIPhrase.Text(Preview(chat.LastText)),
-            Selected = chat.Id == OpenChatId
-        };
+            if (!kept.Contains(ChatEntries[i].Id))
+                _ = ChatEntries.Remove(ChatEntries[i].Id);
+        }
+
+        for (var i = 0; i < chats.Count; i++)
+        {
+            ChatSummary chat = chats[i];
+            UIPhrase title = EntryTitle(chat);
+            UIPhrase description = UIPhrase.Text(Preview(chat.LastText));
+            var selected = chat.Id == OpenChatId;
+
+            if (ChatEntries.TryGet(chat.Id, out MenuItem? existing))
+            {
+                existing.Title = title;
+                existing.Description = description;
+                existing.Selected = selected;
+
+                if (!string.Equals(ChatEntries[i].Id, chat.Id, StringComparison.Ordinal))
+                    _ = ChatEntries.Move(chat.Id, i);
+            }
+            else
+            {
+                ChatEntries.Insert(i, new MenuItem { Id = chat.Id, Title = title, Description = description, Selected = selected });
+            }
+        }
+    }
+
+    private static UIPhrase EntryTitle(ChatSummary chat)
+        => chat.LastAt == DateTimeOffset.MinValue ? UIPhrase.Text(chat.Name) : UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(chat.LastAt, UITimestampFormat.Relative)));
 
     /// <summary>The chat's last words on one line, with the markup a message is written in taken off.</summary>
     private static string Preview(string lastText)
@@ -529,7 +612,7 @@ internal abstract partial class ShellController
         if (await StartPanelChatAsync(cancellationToken).ConfigureAwait(false) is not string chatId)
             return Notify("chatai.chats.character-gone", UIColorStyle.Warning);
 
-        _chats = await Chats.ListAsync(cancellationToken).ConfigureAwait(false);
+        _chats = await Chats.ListAsync(_characters, cancellationToken).ConfigureAwait(false);
         ShowCards();
         ShowPanelCharacter();
 
@@ -615,7 +698,7 @@ internal abstract partial class ShellController
         if (await StartPanelChatAsync(cancellationToken).ConfigureAwait(false) is not string chatId)
             return Notify("chatai.chats.character-gone", UIColorStyle.Warning);
 
-        _chats = await Chats.ListAsync(cancellationToken).ConfigureAwait(false);
+        _chats = await Chats.ListAsync(_characters, cancellationToken).ConfigureAwait(false);
         ShowCards();
         ShowPanelCharacter();
 

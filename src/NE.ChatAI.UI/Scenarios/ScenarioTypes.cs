@@ -97,6 +97,7 @@ internal sealed record MessageSlice(IReadOnlyList<PromptMessage> Messages, strin
             return Empty;
 
         StringBuilder builder = new();
+        Dictionary<string, string>? names = null;
 
         for (var i = 0; i < slice.Messages.Count; i++)
         {
@@ -111,8 +112,11 @@ internal sealed record MessageSlice(IReadOnlyList<PromptMessage> Messages, strin
                 MessageRole.Character => characterName,
                 _ => "System"
             };
+            var text = message.ExpandMacros
+                ? Macros.Render(message.Text, names ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["char"] = characterName, ["user"] = userName })
+                : message.Text;
 
-            _ = builder.Append(speaker).Append(": ").Append(message.Text);
+            _ = builder.Append(speaker).Append(": ").Append(text);
         }
 
         return new MessageSlice(slice.Messages, slice.FirstMessageId, slice.LastMessageId, builder.ToString());
@@ -127,4 +131,20 @@ internal sealed record CollectedPrompt(PromptSpec Spec)
 {
     public override string ToString()
         => $"{Spec.History.Count} messages";
+}
+
+/// <summary>One candidate director cue handed out by <see cref="CueNode"/> and gathered by <see cref="CueMenuNode"/>.</summary>
+internal sealed record ScenarioCue(string Tag, string When, string Cue)
+{
+    public override string ToString()
+        => string.IsNullOrWhiteSpace(When) ? Tag : $"{Tag}: {When}";
+}
+
+/// <summary>The cues offered in a <see cref="CueMenuNode"/> run, passed to <see cref="CuePickNode"/> to resolve the model's choice.</summary>
+internal sealed record ScenarioCuePool(IReadOnlyList<ScenarioCue> Cues)
+{
+    public static ScenarioCuePool Empty { get; } = new([]);
+
+    public override string ToString()
+        => $"{Cues.Count} cues";
 }

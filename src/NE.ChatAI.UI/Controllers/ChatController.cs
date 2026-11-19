@@ -42,6 +42,10 @@ internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableIt
     [RecursiveMember]
     public partial string? Avatar { get; set; }
 
+    /// <summary>Whether pressing the author's avatar opens their character or persona editor dialog.</summary>
+    [RecursiveMember]
+    public partial bool CanOpenAuthor { get; set; }
+
     [RecursiveMember]
     public partial string Text { get; set; } = string.Empty;
 
@@ -399,6 +403,7 @@ internal sealed partial class ChatController : ShellController
         {
             item.Author = item.Role == MessageRole.User ? UserName : CharacterName;
             item.Avatar = item.Role == MessageRole.Character ? characterAvatar : personaAvatar;
+            item.CanOpenAuthor = !_generating && HasAuthorCard(item.Role);
         }
     }
 
@@ -418,6 +423,9 @@ internal sealed partial class ChatController : ShellController
 
         return null;
     }
+
+    private bool HasAuthorCard(MessageRole role)
+        => role == MessageRole.Character ? _character is not null : _persona is not null;
 
     protected override async Task<UICommandResult> OnPanelCardDeletedAsync(string list, string cardId, CancellationToken cancellationToken)
     {
@@ -536,7 +544,14 @@ internal sealed partial class ChatController : ShellController
     /// </summary>
     private ChatMessageItem RowOf(string id, MessageRole role, bool greeting)
     {
-        ChatMessageItem item = new() { Id = id, Role = role, Author = role == MessageRole.User ? UserName : CharacterName, Avatar = role == MessageRole.Character ? Pictures.CharacterAvatarOf(_chat?.Character) : Pictures.PersonaAvatarOf(_personaId) };
+        ChatMessageItem item = new()
+        {
+            Id = id,
+            Role = role,
+            Author = role == MessageRole.User ? UserName : CharacterName,
+            Avatar = role == MessageRole.Character ? Pictures.CharacterAvatarOf(_chat?.Character) : Pictures.PersonaAvatarOf(_personaId),
+            CanOpenAuthor = !_generating && HasAuthorCard(role)
+        };
 
         if (role == MessageRole.Character && !greeting)
             item.Actions.Add(Entry(RefreshAction, AppIcons.Regenerate, "chatai.chat.regenerate"));
@@ -573,6 +588,7 @@ internal sealed partial class ChatController : ShellController
 
         item.Text = message.Current.Text;
         item.ShowLoading(false);
+        item.CanOpenAuthor = !_generating && HasAuthorCard(message.Role);
         item.ToolsVisibility = !_generating && _editingId != message.Id ? UIVisibility.Visible : UIVisibility.Collapsed;
         item.ShowThought(message.Current.Thought, _hideThoughts, thinking: false);
         item.TokenCount = tokens > 0 ? tokens.ToString(CultureInfo.InvariantCulture) : string.Empty;
@@ -655,7 +671,7 @@ internal sealed partial class ChatController : ShellController
         if (profile is null)
             return refusal!;
 
-        List<StoredDocument<Scenario>> beforeSend = await BeforeSendCandidatesAsync(cancellationToken).ConfigureAwait(false);
+        List<StoredDocument<Scenario>> beforeSend = await CandidatesForAsync(ScenarioTriggerKind.BeforeSend, cancellationToken).ConfigureAwait(false);
         BeforeSendJob? beforeJob = null;
         ReplyJob? job = null;
         var busy = false;
@@ -744,6 +760,7 @@ internal sealed partial class ChatController : ShellController
         {
             if (ReferenceEquals(item, Messages.Live))
             {
+                item.CanOpenAuthor = false;
                 item.ToolsVisibility = UIVisibility.Collapsed;
                 item.HasPrevious = false;
                 item.HasNext = false;
@@ -763,6 +780,7 @@ internal sealed partial class ChatController : ShellController
                 continue;
             }
 
+            item.CanOpenAuthor = !_generating && HasAuthorCard(item.Role);
             item.ToolsVisibility = !_generating && _editingId != item.Id ? UIVisibility.Visible : UIVisibility.Collapsed;
 
             if (_chat?.Messages.FirstOrDefault(message => message.Id == item.Id) is ChatMessage current)
@@ -925,6 +943,26 @@ internal sealed partial class ChatController : ShellController
         try
         {
             await Context.Runtime.InvokeAsync(() => _generation = generation, lifetime).ConfigureAwait(false);
+
+            if (job.Kind == ReplyKind.Message)
+            {
+                List<StoredDocument<Scenario>> beforeReply = await CandidatesForAsync(ScenarioTriggerKind.BeforeReply, generation.Token).ConfigureAwait(false);
+
+                if (beforeReply.Count > 0)
+                {
+                    (Chat afterBeforeReply, var beforeSucceeded) = await RunScenarioBatchOnOpenChatAsync(job.ChatId, job.Chat, beforeReply, bypassGates: false, job.PreTurnChat, generation.Token).ConfigureAwait(false);
+                    generation.Token.ThrowIfCancellationRequested();
+
+                    if (!beforeSucceeded)
+                    {
+                        backendFailed = true;
+                        return;
+                    }
+
+                    job = job with { Chat = afterBeforeReply, History = afterBeforeReply.Messages };
+                }
+            }
+
             serverSlot = await clients.AcquireSlotAsync(address, generation.Token).ConfigureAwait(false);
 
             ResolvedContext context = await ContextLengths.ResolveAsync(profile.Connection, kobold, generation.Token).ConfigureAwait(false);
@@ -997,7 +1035,7 @@ internal sealed partial class ChatController : ShellController
             }
 
             if (!lifetime.IsCancellationRequested)
-                await EndAsync(job, reader, seed, streaming ? prompt : null, model, contextLength, started, promptSeconds, clock.Elapsed, replyCount, generation, kobold, canTrigger: streaming && !stopped && !backendFailed).ConfigureAwait(false);
+                await EndAsync(job, reader, seed, streaming ? prompt : null, model, contextLength, started, promptSeconds, clock.Elapsed, replyCount, generation, canTrigger: streaming && !stopped && !backendFailed).ConfigureAwait(false);
         }
     }
 
@@ -1091,7 +1129,7 @@ internal sealed partial class ChatController : ShellController
     /// never began leaves nothing: a new message goes from the feed, where it would go into the next prompt as an empty turn, and a
     /// variant or a continuation leaves the message as it was.
     /// </summary>
-    private async Task EndAsync(ReplyJob job, ReplyReader reader, SeedChoice seed, BuiltPrompt? prompt, string? model, int contextLength, DateTimeOffset started, double? promptSeconds, TimeSpan elapsed, (int Tokens, TokenCounts Counts) reply, CancellationTokenSource generation, KoboldCppClient kobold, bool canTrigger)
+    private async Task EndAsync(ReplyJob job, ReplyReader reader, SeedChoice seed, BuiltPrompt? prompt, string? model, int contextLength, DateTimeOffset started, double? promptSeconds, TimeSpan elapsed, (int Tokens, TokenCounts Counts) reply, CancellationTokenSource generation, bool canTrigger)
     {
         bool? thinking = job.Profile.Format.Thought.IsDefined ? job.Kind != ReplyKind.Continuation && job.Profile.Format.Thought.Enabled : null;
         GenerationRecord? record = prompt is null ? null : new GenerationRecord
@@ -1111,7 +1149,7 @@ internal sealed partial class ChatController : ShellController
             Seconds = elapsed.TotalSeconds
         };
 
-        List<StoredDocument<Scenario>> candidates = canTrigger ? await TriggeredCandidatesAsync().ConfigureAwait(false) : [];
+        List<StoredDocument<Scenario>> candidates = canTrigger ? await CandidatesForAsync(ScenarioTriggerKind.AfterReply, CancellationToken.None).ConfigureAwait(false) : [];
         Chat? kept = null;
         var runPostReply = false;
 
@@ -1168,7 +1206,7 @@ internal sealed partial class ChatController : ShellController
         {
             try
             {
-                await RunTriggeredScenariosAsync(job, kept!, candidates, kobold, contextLength, model, generation.Token).ConfigureAwait(false);
+                await RunTriggeredScenariosAsync(job, kept!, candidates, generation.Token).ConfigureAwait(false);
             }
             finally
             {

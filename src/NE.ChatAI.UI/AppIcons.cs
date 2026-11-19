@@ -31,6 +31,11 @@ internal static class AppIcons
     public const string Stage = MaterialIcons.Image;
     public const string Plugins = MaterialIcons.Extension;
     public const string Key = MaterialIcons.Key;
+    public const string Context = MaterialIcons.DataUsage;
+    public const string TriggerMatch = MaterialIcons.ManageSearch;
+    public const string Cue = MaterialIcons.Lightbulb;
+    public const string CueMenu = MaterialIcons.Checklist;
+    public const string CuePick = MaterialIcons.FactCheck;
 
     public static string Outline(string icon)
         => MaterialIcons.Outlined(icon);

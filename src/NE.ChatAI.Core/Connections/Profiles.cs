@@ -76,6 +76,8 @@ public static class Profiles
             else if (await data.Scenarios.ReadAsync(DefaultDocuments.ImpersonateScenarioId, cancellationToken).ConfigureAwait(false) is Scenario impersonate)
                 await UpgradeImpersonateAsync(data, impersonate, cancellationToken).ConfigureAwait(false);
 
+            await UpgradeLegacyScenariosAsync(data, cancellationToken).ConfigureAwait(false);
+
             return;
         }
 
@@ -130,6 +132,23 @@ public static class Profiles
 
         if (!ReferenceEquals(updated, impersonate))
             await data.Scenarios.WriteAsync(DefaultDocuments.ImpersonateScenarioId, updated, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Upgrades any on-disk scenarios still carrying a legacy <c>contextShare</c> trigger or retired <c>chat.gate</c> node.</summary>
+    public static async Task UpgradeLegacyScenariosAsync(DataFolder data, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        if (!Directory.Exists(Path.Combine(data.Root, "graphs")))
+            return;
+
+        foreach (StoredDocument<Scenario> stored in (await data.Scenarios.ListAsync(cancellationToken).ConfigureAwait(false)).Items)
+        {
+            Scenario upgraded = stored.Document.UpgradeLegacyTrigger();
+
+            if (!ReferenceEquals(upgraded, stored.Document))
+                await data.Scenarios.WriteAsync(stored.Id, upgraded, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

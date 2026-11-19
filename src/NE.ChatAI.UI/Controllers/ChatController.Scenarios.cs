@@ -4,11 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
-using NE.ChatAI.Backends.KoboldCpp;
 using NE.ChatAI.Chats;
 using NE.ChatAI.Connections;
 using NE.ChatAI.Hosting;
-using NE.ChatAI.Prompts;
 using NE.ChatAI.Scenarios;
 using NE.ChatAI.Storage;
 
@@ -54,8 +52,8 @@ internal sealed partial class ChatRecordItem : RecursiveObservable, IBindableIte
 
 /// <summary>
 /// Scenarios in the chat: the composer's <c>Scenarios</c> submenu (global on/off toggles, manual runs on the open chat, and the way
-/// to <c>/scenarios</c>), post-reply triggers (<see cref="ScenarioTriggerKind.AfterReply"/> and
-/// <see cref="ScenarioTriggerKind.ContextShare"/>), live streaming into folded blocks, and inline editing or removal of records.
+/// to <c>/scenarios</c>), automatic triggers (<see cref="ScenarioTriggerKind.BeforeSend"/>, <see cref="ScenarioTriggerKind.BeforeReply"/> and
+/// <see cref="ScenarioTriggerKind.AfterReply"/>), live streaming into folded blocks, and inline editing or removal of records.
 /// </summary>
 internal sealed partial class ChatController
 {
@@ -376,7 +374,7 @@ internal sealed partial class ChatController
             }, lifetime).ConfigureAwait(false);
 
             if (startChat is not null)
-                _ = await RunScenarioBatchOnOpenChatAsync(chatId, startChat, [scenario], shouldRunAsync: null, generation.Token).ConfigureAwait(false);
+                _ = await RunScenarioBatchOnOpenChatAsync(chatId, startChat, [scenario], bypassGates: true, preTurnChat: null, generation.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -385,7 +383,7 @@ internal sealed partial class ChatController
         }
     }
 
-    private async Task<List<StoredDocument<Scenario>>> BeforeSendCandidatesAsync(CancellationToken cancellationToken)
+    private async Task<List<StoredDocument<Scenario>>> CandidatesForAsync(ScenarioTriggerKind kind, CancellationToken cancellationToken)
     {
         List<StoredDocument<Scenario>> ordered = ScenarioExecutor.Order((await Data.Scenarios.ListAsync(cancellationToken).ConfigureAwait(false)).Items);
         List<StoredDocument<Scenario>> candidates = [];
@@ -394,7 +392,7 @@ internal sealed partial class ChatController
         {
             StoredDocument<Scenario> stored = ordered[i];
 
-            if (!stored.Document.System && stored.Document.Enabled && stored.Document.Trigger.Kind == ScenarioTriggerKind.BeforeSend)
+            if (!stored.Document.System && stored.Document.Enabled && stored.Document.Trigger.Kind == kind)
                 candidates.Add(stored);
         }
 
@@ -403,12 +401,12 @@ internal sealed partial class ChatController
 
     private async Task<bool> RunBeforeSendBatchAsync(string chatId, Chat startChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, CancellationToken cancellationToken)
     {
-        (_, var allSucceeded) = await RunScenarioBatchOnOpenChatAsync(chatId, startChat, scenarios, shouldRunAsync: null, cancellationToken).ConfigureAwait(false);
+        (_, var allSucceeded) = await RunScenarioBatchOnOpenChatAsync(chatId, startChat, scenarios, bypassGates: false, startChat, cancellationToken).ConfigureAwait(false);
 
         return allSucceeded;
     }
 
-    private async Task<(Chat Chat, bool AllSucceeded)> RunScenarioBatchOnOpenChatAsync(string chatId, Chat startChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, Func<StoredDocument<Scenario>, Chat, CancellationToken, ValueTask<bool>>? shouldRunAsync, CancellationToken cancellationToken)
+    private async Task<(Chat Chat, bool AllSucceeded)> RunScenarioBatchOnOpenChatAsync(string chatId, Chat startChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, bool bypassGates, Chat? preTurnChat, CancellationToken cancellationToken)
     {
         KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
         var initialDraft = string.Empty;
@@ -421,7 +419,8 @@ internal sealed partial class ChatController
         ScenarioBatchCallbacks callbacks = new()
         {
             ActiveGenerations = _activeGenerations,
-            ShouldRunAsync = shouldRunAsync,
+            BypassGates = bypassGates,
+            PreTurnChat = preTurnChat,
             OnStreamChunkAsync = (scenario, nodeId, anchorId, text, thought) => OnScenarioStreamChunkAsync(scenario.Id, scenario.Document.Name, nodeId, anchorId, text, thought),
             OnDraftChunkAsync = (_, partial) => OnScenarioDraftChunkAsync(draftState, partial),
             OnScenarioFinishedAsync = async (scenario, outcome, liveChat) =>
@@ -598,73 +597,8 @@ internal sealed partial class ChatController
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
-    private async Task<List<StoredDocument<Scenario>>> TriggeredCandidatesAsync()
-    {
-        List<StoredDocument<Scenario>> ordered = ScenarioExecutor.Order((await Data.Scenarios.ListAsync(CancellationToken.None).ConfigureAwait(false)).Items);
-        List<StoredDocument<Scenario>> candidates = [];
-
-        for (var i = 0; i < ordered.Count; i++)
-        {
-            StoredDocument<Scenario> stored = ordered[i];
-
-            if (!stored.Document.System && stored.Document.Enabled && stored.Document.Trigger.Kind is ScenarioTriggerKind.AfterReply or ScenarioTriggerKind.ContextShare)
-                candidates.Add(stored);
-        }
-
-        return candidates;
-    }
-
-    private async Task RunTriggeredScenariosAsync(ReplyJob job, Chat afterReplyChat, List<StoredDocument<Scenario>> candidates, KoboldCppClient kobold, int contextLength, string? model, CancellationToken cancellationToken)
-    {
-        using SemaphoreSlim shareGate = new(1, 1);
-        double? previousShare = null;
-
-        ValueTask<bool> ShouldRunAsync(StoredDocument<Scenario> candidate, Chat inputChat, CancellationToken token)
-        {
-            ScenarioTrigger trigger = candidate.Document.Trigger;
-
-            if (trigger.Kind == ScenarioTriggerKind.AfterReply)
-                return ValueTask.FromResult(true);
-
-            if (trigger.Kind == ScenarioTriggerKind.ContextShare)
-                return EvaluateContextShareAsync(trigger, inputChat, token);
-
-            return ValueTask.FromResult(false);
-        }
-
-        async ValueTask<bool> EvaluateContextShareAsync(ScenarioTrigger trigger, Chat inputChat, CancellationToken token)
-        {
-            if (previousShare is null)
-            {
-                await shareGate.WaitAsync(token).ConfigureAwait(false);
-
-                try
-                {
-                    previousShare ??= await MeasureContextShareAsync(job.Profile, job.PreTurnChat, kobold, contextLength, model, token).ConfigureAwait(false);
-                }
-                finally
-                {
-                    _ = shareGate.Release();
-                }
-            }
-
-            var currentShare = await MeasureContextShareAsync(job.Profile, inputChat, kobold, contextLength, model, token).ConfigureAwait(false);
-
-            return trigger.FiresAfterReply(previousShare.Value, currentShare);
-        }
-
-        _ = await RunScenarioBatchOnOpenChatAsync(job.ChatId, afterReplyChat, candidates, ShouldRunAsync, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<double> MeasureContextShareAsync(ActiveProfile profile, Chat chat, KoboldCppClient kobold, int contextLength, string? model, CancellationToken cancellationToken)
-    {
-        if (contextLength <= 0 || profile.Connection.Address is null)
-            return 0;
-
-        BuiltPrompt built = await BuildPromptAsync(profile, chat, chat.Messages, null, contextLength, kobold, model, cancellationToken).ConfigureAwait(false);
-
-        return (double)built.Tokens / contextLength;
-    }
+    private async Task RunTriggeredScenariosAsync(ReplyJob job, Chat afterReplyChat, List<StoredDocument<Scenario>> candidates, CancellationToken cancellationToken)
+        => _ = await RunScenarioBatchOnOpenChatAsync(job.ChatId, afterReplyChat, candidates, bypassGates: false, job.PreTurnChat, cancellationToken).ConfigureAwait(false);
 
     private void RefreshRealizedRecords()
     {

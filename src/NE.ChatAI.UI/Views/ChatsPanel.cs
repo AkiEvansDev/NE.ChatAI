@@ -19,29 +19,15 @@ internal static class ChatsPanel
     public const string TagFilterId = "chatai-tag-filter";
     private const string ListSwitchId = "chatai-list-switch";
 
-    /// <summary>The panel's fixed top bar and search row, kept outside the scroller so neither scrolls away.</summary>
-    public static StackPanelComponent CreateHead()
-        => UILayout.Stack(12,
-            UILayout.Ends(
-                new StackPanelComponent()
-                    .SetOrientation(UIOrientation.Vertical)
-                    .SetSpacing(0)
-                    .SetMinHeight(UILayoutLength.Absolute(HeaderAvatarSize))
-                    .SetGlyphEdge(UIAlignment.Start)
-                    .AddChild(CreateListSwitch())
-                    .AddChild(CreateCharacterTitle()),
-                UIIconButtons.New().SetSize(UISize.Small).OnClick(nameof(ShellController.StartChatAsync)).BindVisibility<ShellController>(static x => x.CharacterChatsVisibility),
-                UIIconButtons.Edit().SetSize(UISize.Small).OnClick(nameof(ShellController.EditCharacterAsync)).BindVisibility<ShellController>(static x => x.CharacterChatsVisibility),
-                UIIconButtons.Pin().SetPinsDrawer(UISide.Right).SetSize(UISize.Small),
-                UIIconButtons.Close().SetOpensDrawer(UISide.Right).SetSize(UISize.Small)
-            ),
-            new TextInputComponent(SearchId)
-                .SetSearch()
-                .SetDebounceMilliseconds(200)
-                .AddTrailingAction(CreateTagFilter())
-                .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ShellController.AskCreateCard)))
-                .BindVisibility<ShellController>(static x => x.CharactersVisibility)
-        );
+    /// <summary>The panel's heading: the card list switch, or the picked character's back button, avatar and name.</summary>
+    public static StackPanelComponent CreateHeading()
+        => new StackPanelComponent()
+            .SetOrientation(UIOrientation.Vertical)
+            .SetSpacing(0)
+            .SetMinHeight(UILayoutLength.Absolute(HeaderAvatarSize))
+            .SetGlyphEdge(UIAlignment.Start)
+            .AddChild(CreateListSwitch())
+            .AddChild(CreateCharacterTitle());
 
     private static ButtonGroupComponent CreateListSwitch()
         => new ButtonGroupComponent(ListSwitchId)
@@ -54,7 +40,7 @@ internal static class ChatsPanel
             .BindSelectedKey<ShellController>(static x => x.PanelList, mode: UIBindingMode.OneWay)
             .OnItemClick(nameof(ShellController.SwitchList), UIAction.ArgCurrentItemKey("list"))
             .SetHorizontalAlignment(UIAlignment.Start)
-            .BindVisibility<ShellController>(static x => x.CharactersVisibility);
+            .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility);
 
     private static StackPanelComponent CreateCharacterTitle()
         => new StackPanelComponent()
@@ -72,16 +58,26 @@ internal static class ChatsPanel
                 .AsSubtitle()
                 .SetVerticalAlignment(UIAlignment.Center)
             )
-            .BindVisibility<ShellController>(static x => x.CharacterChatsVisibility);
+            .BindVisibility<ShellController>(static x => x.ChatsPanes.DetailVisibility);
 
     /// <summary>A card's picture in a circle, the person's glyph for one with none.</summary>
     private static ImageComponent Avatar<TSource>(Expression<Func<TSource, object?>> source, UIBindingScope scope, double size = AvatarSize)
         => new ImageComponent()
             .BindSource(source, scope)
             .SetAltText("chatai.chat.avatar")
+            .SetLazy(false)
             .SetShape(UIShape.Circle)
             .SetWidth(UILayoutLength.Absolute(size))
             .SetVerticalAlignment(UIAlignment.Center);
+
+    /// <summary>The search field and embedded tag filter and card creation button, shown over the card lists.</summary>
+    public static TextInputComponent CreateSearch()
+        => new TextInputComponent(SearchId)
+            .SetSearch()
+            .SetDebounceMilliseconds(200)
+            .AddTrailingAction(CreateTagFilter())
+            .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ShellController.AskCreateCard)))
+            .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility);
 
     /// <summary>The tag filter menu inside the search field, showing each tag as its badge and the active count on the button.</summary>
     private static MultiSelectComponent CreateTagFilter()
@@ -94,22 +90,18 @@ internal static class ChatsPanel
             .BindOptions<ShellController>(static x => x.TagFilterOptions)
             .BindValue<ShellController>(static x => x.TagFilter);
 
-    public static StackPanelComponent CreateBody()
-        => UILayout.Stack(12,
-            CreateLists(),
-            CreateCharacterChats()
-        );
+    public static ContainerComponent CreateBody()
+        => UILayout.Panes<ShellController>(CreateLists(), CreateCharacterChats(), static x => x.ChatsPanes, stacked: true);
 
     private static StackPanelComponent CreateLists()
         => UILayout.Stack(12,
-                CreateList("chatai-character-list", ShellController.CharactersList, static x => x.CharacterRows, static x => x.CharactersEmpty, showEdit: true)
-                    .OnItemClick(nameof(ShellController.OpenCharacterAsync), UIAction.ArgCurrentItemKey("characterId")),
-                CreateList("chatai-persona-list", ShellController.PersonasList, static x => x.PersonaRows, static x => x.PersonasEmpty, showEdit: false)
-                    .OnItemClick(nameof(ShellController.OpenPersonaAsync), UIAction.ArgCurrentItemKey("personaId")),
-                CreateList("chatai-world-list", ShellController.WorldsList, static x => x.WorldRows, static x => x.WorldsEmpty, showEdit: false)
-                    .OnItemClick(nameof(ShellController.OpenWorldAsync), UIAction.ArgCurrentItemKey("worldId"))
-            )
-            .BindVisibility<ShellController>(static x => x.CharactersVisibility);
+            CreateList("chatai-character-list", ShellController.CharactersList, static x => x.CharacterRows, static x => x.CharactersEmpty, showEdit: true)
+                .OnItemClick(nameof(ShellController.OpenCharacterAsync), UIAction.ArgCurrentItemKey("characterId")),
+            CreateList("chatai-persona-list", ShellController.PersonasList, static x => x.PersonaRows, static x => x.PersonasEmpty, showEdit: false)
+                .OnItemClick(nameof(ShellController.OpenPersonaAsync), UIAction.ArgCurrentItemKey("personaId")),
+            CreateList("chatai-world-list", ShellController.WorldsList, static x => x.WorldRows, static x => x.WorldsEmpty, showEdit: false)
+                .OnItemClick(nameof(ShellController.OpenWorldAsync), UIAction.ArgCurrentItemKey("worldId"))
+        );
 
     private static ItemsViewComponent CreateList(string id, string listKey, Expression<Func<ShellController, object?>> rows, Expression<Func<ShellController, object?>> empty, bool showEdit)
         => new ItemsViewComponent(id)
@@ -197,8 +189,7 @@ internal static class ChatsPanel
             .SetSpacing(4)
             .ConfigureDefaultEmptyTemplate(static empty => empty.SetTitle("chatai.chats.none").SetTitleWrap(true))
             .SetTemplate(CreateChatRow())
-            .OnItemClick(nameof(ShellController.OpenPanelChatAsync), UIAction.ArgCurrentItemKey("chatId"))
-            .BindVisibility<ShellController>(static x => x.CharacterChatsVisibility);
+            .OnItemClick(nameof(ShellController.OpenPanelChatAsync), UIAction.ArgCurrentItemKey("chatId"));
 
     private static ContainerComponent CreateChatRow()
         => new ContainerComponent()
@@ -217,6 +208,20 @@ internal static class ChatsPanel
                 .SetVerticalAlignment(UIAlignment.Center)
                 .SetPlacement(24, 1, 1, 1)
             );
+
+    /// <summary>The character chat actions standing before Pin and Close in the drawer header.</summary>
+    public static IVisualComponent[] CreateActions()
+        =>
+        [
+            UIIconButtons.New()
+                .SetSize(UISize.Small)
+                .OnClick(nameof(ShellController.StartChatAsync))
+                .BindVisibility<ShellController>(static x => x.ChatsPanes.DetailVisibility),
+            UIIconButtons.Edit()
+                .SetSize(UISize.Small)
+                .OnClick(nameof(ShellController.EditCharacterAsync))
+                .BindVisibility<ShellController>(static x => x.ChatsPanes.DetailVisibility)
+        ];
 
     /// <summary>The card creation and editor dialogs, tag dialogs, and deletion confirmation dialogs hosted on the shell.</summary>
     public static IReadOnlyList<UIDialog> CreateDialogs()

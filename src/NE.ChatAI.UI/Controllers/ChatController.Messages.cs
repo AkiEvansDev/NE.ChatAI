@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using NE.ChatAI.Characters;
 using NE.ChatAI.Chats;
 using NE.ChatAI.Connections;
 
@@ -33,6 +34,44 @@ internal sealed partial class ChatController
 
     /// <summary>The message a question is open about: deleted, deleted from there on, or made again.</summary>
     private string? _askedId;
+
+    /// <summary>Opens the character's or active persona's editor dialog when a message's avatar is pressed.</summary>
+    [UICommand]
+    public async Task<UICommandResult> OpenAuthorCardAsync(string messageId, CancellationToken cancellationToken)
+    {
+        TagScope? scope = null;
+        string? cardId = null;
+        var busy = false;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            busy = _generating;
+
+            if (busy || _chat is null)
+                return;
+
+            MessageRole? role = _chat.Messages.FirstOrDefault(message => message.Id == messageId)?.Role
+                ?? (Messages.Held(messageId) is ChatMessageItem held ? held.Role : null);
+
+            if (role == MessageRole.Character && _character is not null && _chat.Character is string characterId)
+            {
+                scope = TagScope.Character;
+                cardId = characterId;
+            }
+            else if (role == MessageRole.User && _persona is not null && _personaId is string personaId)
+            {
+                scope = TagScope.Persona;
+                cardId = personaId;
+            }
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (busy)
+            return Notify("chatai.chat.busy", UIColorStyle.Info);
+
+        return scope is TagScope targetScope && cardId is not null && await OpenCardEditorAsync(targetScope, cardId, cancellationToken).ConfigureAwait(false) is string dialogKey
+            ? UICommandResult.Ok([new OpenDialogEffect(dialogKey)])
+            : UICommandResult.Ok();
+    }
 
     /// <summary>Opens a message's editor in its place, on the shown variant's words.</summary>
     [UICommand]

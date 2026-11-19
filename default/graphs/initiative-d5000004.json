@@ -1,0 +1,467 @@
+{
+  "format": 1,
+  "name": "Initiative",
+  "enabled": false,
+  "order": 6,
+  "trigger": {
+    "kind": "beforeReply",
+    "gate": {
+      "enabled": true,
+      "chance": 40,
+      "cooldown": 2,
+      "minTurns": 2
+    }
+  },
+  "sheet": {
+    "nodes": [
+      {
+        "id": "cue-ambient",
+        "type": "chat.cue",
+        "x": 32,
+        "y": 64,
+        "values": {
+          "Tag": "ambient-shift",
+          "When": "the surroundings have faded into the background for several turns",
+          "Cue": "Let one concrete detail of the immediate environment shift (light, weather, temperature, a sound outside, or a nearby surface) and have {{char}} react to or use it in passing."
+        }
+      },
+      {
+        "id": "cue-interruption",
+        "type": "chat.cue",
+        "x": 352,
+        "y": 64,
+        "values": {
+          "Tag": "minor-interruption",
+          "When": "a casual or stalled exchange sits in a place where brief outside activity can intrude, never during an intimate or high-stakes private moment",
+          "Cue": "Bring in a small, plausible external interruption or minor complication fitting the current location (a sound, a message, a brief practical hitch) without inventing new characters unprompted or derailing the scene."
+        }
+      },
+      {
+        "id": "cue-prop",
+        "type": "chat.cue",
+        "x": 32,
+        "y": 416,
+        "values": {
+          "Tag": "tangible-detail",
+          "When": "{{char}} and {{user}} have been talking without interacting with objects around them",
+          "Cue": "Anchor {{char}}'s reply in a concrete object at hand: picking up, setting down, adjusting, pouring, or examining something already in the space while speaking."
+        }
+      },
+      {
+        "id": "cue-position",
+        "type": "chat.cue",
+        "x": 352,
+        "y": 416,
+        "values": {
+          "Tag": "position-shift",
+          "When": "{{char}} and {{user}} have stayed in the exact same spot, posture, and physical distance for several turns",
+          "Cue": "Change {{char}}'s physical position or distance in the space naturally: standing up, sitting elsewhere, moving to a window or counter, stepping closer, or leaning into or out of {{user}}'s space."
+        }
+      },
+      {
+        "id": "cue-move",
+        "type": "chat.cue",
+        "x": 32,
+        "y": 864,
+        "values": {
+          "Tag": "own-move",
+          "When": "{{char}} has mostly been answering or reacting to {{user}} instead of acting on {{char}}'s own goal",
+          "Cue": "Have {{char}} make a concrete move toward something {{char}} actually wants right now: starting an action, steering the conversation onto {{char}}'s own agenda, or taking the lead on what happens next."
+        }
+      },
+      {
+        "id": "cue-probe",
+        "type": "chat.cue",
+        "x": 352,
+        "y": 864,
+        "values": {
+          "Tag": "probing-turn",
+          "When": "{{user}} dropped an ambiguous, evasive, or revealing remark that {{char}} would not let pass",
+          "Cue": "Instead of taking {{user}}'s words at face value, have {{char}} zero in on what {{user}} implied or left unsaid and press, test, or call {{user}} on it in {{char}}'s own voice."
+        }
+      },
+      {
+        "id": "cue-pushback",
+        "type": "chat.cue",
+        "x": 32,
+        "y": 1216,
+        "values": {
+          "Tag": "pushback",
+          "When": "{{char}} has been agreeing too easily or softening {{char}}'s edges to match {{user}}",
+          "Cue": "Show {{char}}'s independent streak: push back with a real reservation, a different priority, dry skepticism, or a counter-term that fits {{char}}'s nature rather than easy agreement."
+        }
+      },
+      {
+        "id": "cue-callback",
+        "type": "chat.cue",
+        "x": 352,
+        "y": 1216,
+        "values": {
+          "Tag": "callback",
+          "When": "something said, promised, or done earlier in the chat directly bears on this moment",
+          "Cue": "Have {{char}} bring back a specific detail, promise, or action from earlier in the conversation and hold {{user}} or the current situation to it."
+        }
+      },
+      {
+        "id": "cue-subtext",
+        "type": "chat.cue",
+        "x": 32,
+        "y": 1664,
+        "values": {
+          "Tag": "unspoken-tell",
+          "When": "tension or guarded feeling sits underneath plain dialogue without showing physically",
+          "Cue": "Show what {{char}} is holding back strictly through visible behavior (a brief pause, an averted glance, occupied hands, or an action that contradicts {{char}}'s words), without explaining {{char}}'s thoughts or feelings."
+        }
+      },
+      {
+        "id": "cue-tempo",
+        "type": "chat.cue",
+        "x": 352,
+        "y": 1664,
+        "values": {
+          "Tag": "tempo-change",
+          "When": "several turns in a row have kept the exact same rhythm, length, and tone",
+          "Cue": "Break the rhythm in a way true to {{char}}: cut a long back-and-forth short with a blunt line, hold a quiet beat before answering, or pivot sharply to the practical point."
+        }
+      },
+      {
+        "id": "cue-stakes",
+        "type": "chat.cue",
+        "x": 32,
+        "y": 2016,
+        "values": {
+          "Tag": "concrete-choice",
+          "When": "the current topic is winding down and needs a concrete fork or decision to move forward",
+          "Cue": "End {{char}}'s reply by putting a concrete choice, condition, dare, or practical next step in front of {{user}} rather than leaving the exchange open-ended."
+        }
+      },
+      {
+        "id": "cue-notice",
+        "type": "chat.cue",
+        "x": 352,
+        "y": 2016,
+        "values": {
+          "Tag": "keen-notice",
+          "When": "{{user}}'s physical action, posture, or condition has a visible detail {{char}} would catch",
+          "Cue": "Have {{char}} catch a specific physical detail in {{user}}'s posture, hands, expression, or state and react to it directly alongside the spoken reply."
+        }
+      },
+      {
+        "id": "menu",
+        "type": "chat.cue-menu",
+        "x": 768,
+        "y": 832,
+        "values": {
+          "Sample": 6,
+          "AllowNone": true,
+          "AvoidRepeat": true
+        }
+      },
+      {
+        "id": "scene",
+        "type": "chat.record",
+        "x": 768,
+        "y": 1152,
+        "values": {
+          "Tag": "scene",
+          "Fallback": "(not tracked)"
+        }
+      },
+      {
+        "id": "ask",
+        "type": "graph.text",
+        "x": 768,
+        "y": 1408,
+        "values": {
+          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Act as a scene director evaluating the candidate cues above ('- tag: condition'). Choose 'none' whenever {{user}} just asked a direct question, escalated the moment, or the exchange already has strong momentum; otherwise choose the single tag whose condition clearly matches the latest turns and fits {{char}}. Output only the exact tag or none, with no explanation or punctuation."
+        }
+      },
+      {
+        "id": "prompt",
+        "type": "chat.prompt",
+        "x": 1120,
+        "y": 320
+      },
+      {
+        "id": "persona",
+        "type": "chat.persona",
+        "x": 1120,
+        "y": 448
+      },
+      {
+        "id": "character",
+        "type": "chat.character",
+        "x": 1120,
+        "y": 640
+      },
+      {
+        "id": "world",
+        "type": "chat.world",
+        "x": 1120,
+        "y": 864
+      },
+      {
+        "id": "messages",
+        "type": "chat.messages",
+        "x": 1120,
+        "y": 1088,
+        "values": {
+          "Last": 4,
+          "Raw": true
+        }
+      },
+      {
+        "id": "join",
+        "type": "graph.join",
+        "x": 1120,
+        "y": 1344,
+        "values": {
+          "Template": "Current scene:\n{0}\n\nCandidate cues:\n{1}\n\nInstruction:\n{2}"
+        }
+      },
+      {
+        "id": "collector",
+        "type": "chat.collector",
+        "x": 1472,
+        "y": 768
+      },
+      {
+        "id": "model",
+        "type": "chat.model-call",
+        "x": 1792,
+        "y": 768,
+        "values": {
+          "Samplers": "precise-d4000003",
+          "Thinking": "Off",
+          "OverrideReplyLength": true,
+          "ReplyLength": 64,
+          "OverrideTemperature": true,
+          "Temperature": 0.4
+        }
+      },
+      {
+        "id": "pick",
+        "type": "chat.cue-pick",
+        "x": 2112,
+        "y": 768
+      },
+      {
+        "id": "insert",
+        "type": "chat.insert",
+        "x": 2432,
+        "y": 768,
+        "values": {
+          "Role": "System",
+          "Tag": "initiative",
+          "Template": "[Narrative direction for this reply only (subordinate to {{char}}'s personality, current state and reply format; never mention this note): {0}]",
+          "OneTurn": true,
+          "IgnoreEmpty": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "ec1",
+        "fromNode": "cue-ambient",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec2",
+        "fromNode": "cue-interruption",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec3",
+        "fromNode": "cue-prop",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec4",
+        "fromNode": "cue-position",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec5",
+        "fromNode": "cue-move",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec6",
+        "fromNode": "cue-probe",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec7",
+        "fromNode": "cue-pushback",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec8",
+        "fromNode": "cue-callback",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec9",
+        "fromNode": "cue-subtext",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec10",
+        "fromNode": "cue-tempo",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec11",
+        "fromNode": "cue-stakes",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "ec12",
+        "fromNode": "cue-notice",
+        "fromPin": "Result",
+        "toNode": "menu",
+        "toPin": "Cues"
+      },
+      {
+        "id": "e0",
+        "fromNode": "prompt",
+        "fromPin": "Prompt",
+        "toNode": "collector",
+        "toPin": "Prompt"
+      },
+      {
+        "id": "e1",
+        "fromNode": "persona",
+        "fromPin": "Persona",
+        "toNode": "collector",
+        "toPin": "Persona"
+      },
+      {
+        "id": "e2",
+        "fromNode": "character",
+        "fromPin": "Character",
+        "toNode": "collector",
+        "toPin": "Character"
+      },
+      {
+        "id": "e3",
+        "fromNode": "world",
+        "fromPin": "World",
+        "toNode": "collector",
+        "toPin": "World"
+      },
+      {
+        "id": "e4",
+        "fromNode": "messages",
+        "fromPin": "Slice",
+        "toNode": "collector",
+        "toPin": "Messages"
+      },
+      {
+        "id": "e5",
+        "fromNode": "scene",
+        "fromPin": "Text",
+        "toNode": "join",
+        "toPin": "Values"
+      },
+      {
+        "id": "e8",
+        "fromNode": "menu",
+        "fromPin": "Options",
+        "toNode": "join",
+        "toPin": "Values"
+      },
+      {
+        "id": "e9",
+        "fromNode": "ask",
+        "fromPin": "Result",
+        "toNode": "join",
+        "toPin": "Values"
+      },
+      {
+        "id": "e10",
+        "fromNode": "join",
+        "fromPin": "Text",
+        "toNode": "collector",
+        "toPin": "Instruction"
+      },
+      {
+        "id": "e11",
+        "fromNode": "collector",
+        "fromPin": "Blocks",
+        "toNode": "model",
+        "toPin": "Prompt"
+      },
+      {
+        "id": "e12",
+        "fromNode": "menu",
+        "fromPin": "Pool",
+        "toNode": "pick",
+        "toPin": "Pool"
+      },
+      {
+        "id": "e13",
+        "fromNode": "model",
+        "fromPin": "Text",
+        "toNode": "pick",
+        "toPin": "Choice"
+      },
+      {
+        "id": "e14",
+        "fromNode": "pick",
+        "fromPin": "Cue",
+        "toNode": "insert",
+        "toPin": "Text"
+      }
+    ],
+    "groups": [
+      {
+        "id": "g-world",
+        "x": 0,
+        "y": 0,
+        "width": 672,
+        "height": 768,
+        "title": "World & environment"
+      },
+      {
+        "id": "g-agency",
+        "x": 0,
+        "y": 800,
+        "width": 672,
+        "height": 768,
+        "title": "Character agency"
+      },
+      {
+        "id": "g-pacing",
+        "x": 0,
+        "y": 1600,
+        "width": 672,
+        "height": 768,
+        "title": "Subtext & pacing"
+      }
+    ],
+    "parameters": []
+  }
+}

@@ -167,15 +167,29 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
                 .SetPlacement(2, 2, 23, 1)
             );
 
-    /// <summary>The picture at the top, with the message's token count under it.</summary>
+    /// <summary>The picture at the top — opening the author's card when pressed — with the message's token count under it.</summary>
     private static StackPanelComponent CreateAuthorColumn()
         => UILayout.Stack(4,
-                new ImageComponent()
-                    .BindSource<ChatMessageItem>(static x => x.Avatar, UIBindingScope.Relative)
-                    .SetAltText("chatai.chat.avatar")
-                    .SetShape(UIShape.Circle)
+                new SurfaceComponent()
+                    .BindAccessibleName<ChatMessageItem>(static x => x.Author, UIBindingScope.Relative)
+                    .AsContent(SurfaceComponent.AccessibleNameProperty)
+                    .SetBackground(UIThemeColor.Transparent)
+                    .SetBorderThickness(UIThickness.Uniform(0))
+                    .SetBorderRadius(UICornerRadius.Uniform(AvatarSize / 2))
+                    .SetPadding(UIThickness.Uniform(0))
+                    .SetOverflow(UIOverflow.Hidden)
                     .SetWidth(UILayoutLength.Absolute(AvatarSize))
-                    .SetMargin(UIThickness.All(0, 2, 0, 0)),
+                    .SetHeight(UILayoutLength.Absolute(AvatarSize))
+                    .SetHorizontalAlignment(UIAlignment.Center)
+                    .SetMargin(UIThickness.All(0, 2, 0, 0))
+                    .OnClickWithItemKey(nameof(ChatController.OpenAuthorCardAsync), "messageId")
+                    .BindClickable<ChatMessageItem>(static x => x.CanOpenAuthor, UIBindingScope.Relative)
+                    .SetContent(new ImageComponent()
+                        .BindSource<ChatMessageItem>(static x => x.Avatar, UIBindingScope.Relative)
+                        .SetAltText("chatai.chat.avatar")
+                        .SetShape(UIShape.Circle)
+                        .SetWidth(UILayoutLength.Absolute(AvatarSize))
+                    ),
                 new TextComponent()
                     .BindTitle<ChatMessageItem>(static x => x.TokenCount, UIBindingScope.Relative)
                     .BindTooltip<ChatMessageItem>(static x => x.TokenCountTooltip, UIBindingScope.Relative)
@@ -205,15 +219,21 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
 
     /// <summary>The model's thought, folded over its words; opened, it reads as plain Markdown set off as a quote by a line at its start.</summary>
     private static ExpanderComponent CreateThought()
-        => UIPage.BoundFold<ChatMessageItem>(static x => x.ThoughtTitle, UIBindingScope.Relative, false,
-                UIText.Quote(new MarkdownDisplayComponent()
-                        .BindText<ChatMessageItem>(static x => x.Thought, UIBindingScope.Relative)
-                        .SetLineBreaks(true),
-                    UIThemeColor.Muted
+        => UIPage.BoundFold<ChatMessageItem>(static x => x.ThoughtTitle, UIBindingScope.Relative, false)
+            .SetContent(CreateFoldQuote(new MarkdownDisplayComponent()
+                    .BindText<ChatMessageItem>(static x => x.Thought, UIBindingScope.Relative)
+                    .SetLineBreaks(true)
                 )
+                .SetMargin(UIThickness.All(0, -4, 0, 0))
             )
             .BindVisibility<ChatMessageItem>(static x => x.ThoughtVisibility, UIBindingScope.Relative)
             .SetMargin(UIThickness.All(0, 0, 0, 8));
+
+    /// <summary>A quote stroke flush with the top and bottom of its words inside a folded block.</summary>
+    private static SurfaceComponent CreateFoldQuote(IVisualComponent content)
+        => UIText.Quote(content, UIThemeColor.Muted)
+            .SetPadding(UIThickness.All(10, 0, 0, 0))
+            .SetVerticalAlignment(UIAlignment.Start);
 
     /// <summary>Three animated dots shown in the message's place while the model reads the prompt before any words arrive.</summary>
     private static SpinnerComponent CreateLoading()
@@ -264,36 +284,36 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
             .BindItems<ChatMessageItem>(static x => x.Records, UIBindingScope.Relative)
             .SetSpacing(6)
             .SetShowEmptyTemplate(false)
-            .SetTemplate(UIPage.BoundFold<ChatRecordItem>(static x => x.Title, UIBindingScope.Relative, false,
-                    new ContainerComponent()
-                        .SetColumn(24, UIGridUnit.Auto())
-                        .AddChild(UIText.Quote(new MarkdownDisplayComponent()
-                                    .BindText<ChatRecordItem>(static x => x.Text, UIBindingScope.Relative)
-                                    .SetLineBreaks(true),
-                                UIThemeColor.Muted
+            .SetTemplate(UIPage.BoundFold<ChatRecordItem>(static x => x.Title, UIBindingScope.Relative, false)
+                .SetContent(new ContainerComponent()
+                    .SetColumn(24, UIGridUnit.Auto())
+                    .SetMargin(UIThickness.All(0, -4, 0, 0))
+                    .AddChild(CreateFoldQuote(new MarkdownDisplayComponent()
+                                .BindText<ChatRecordItem>(static x => x.Text, UIBindingScope.Relative)
+                                .SetLineBreaks(true)
                             )
                             .BindVisibility<ChatRecordItem>(static x => x.TextVisibility, UIBindingScope.Relative)
                             .SetPlacement(1, 1, 23, 1)
+                    )
+                    .AddChild(new TextAreaComponent()
+                        .SetRows(4)
+                        .SetAutoGrow(20)
+                        .BindValue<ChatRecordItem>(static x => x.EditDraft, UIBindingScope.Relative)
+                        .OnEscape(nameof(ChatController.CancelRecordEditAsync), UIAction.ArgCurrentItemKey("recordId"))
+                        .BindVisibility<ChatRecordItem>(static x => x.EditorVisibility, UIBindingScope.Relative)
+                        .SetPlacement(1, 1, 23, 1)
+                    )
+                    .AddChild(UIButtons.Toolbar(
+                            RecordAction(UIIconButtons.Edit(), static x => x.ToolsVisibility, nameof(ChatController.EditRecordAsync)),
+                            RecordAction(UIIconButtons.Done(), static x => x.EditorVisibility, nameof(ChatController.SaveRecordEditAsync)),
+                            RecordAction(UIIconButtons.Cancel(), static x => x.EditorVisibility, nameof(ChatController.CancelRecordEditAsync)),
+                            UIIconButtons.Delete().SetSize(UISize.Small).OnClick(nameof(ChatController.DeleteRecordAsync), UIAction.ArgCurrentItemKey("recordId"))
                         )
-                        .AddChild(new TextAreaComponent()
-                            .SetRows(4)
-                            .SetAutoGrow(20)
-                            .BindValue<ChatRecordItem>(static x => x.EditDraft, UIBindingScope.Relative)
-                            .OnEscape(nameof(ChatController.CancelRecordEditAsync), UIAction.ArgCurrentItemKey("recordId"))
-                            .BindVisibility<ChatRecordItem>(static x => x.EditorVisibility, UIBindingScope.Relative)
-                            .SetPlacement(1, 1, 23, 1)
-                        )
-                        .AddChild(UIButtons.Toolbar(
-                                RecordAction(UIIconButtons.Edit(), static x => x.ToolsVisibility, nameof(ChatController.EditRecordAsync)),
-                                RecordAction(UIIconButtons.Done(), static x => x.EditorVisibility, nameof(ChatController.SaveRecordEditAsync)),
-                                RecordAction(UIIconButtons.Cancel(), static x => x.EditorVisibility, nameof(ChatController.CancelRecordEditAsync)),
-                                UIIconButtons.Delete().SetSize(UISize.Small).OnClick(nameof(ChatController.DeleteRecordAsync), UIAction.ArgCurrentItemKey("recordId"))
-                            )
-                            .SetVerticalAlignment(UIAlignment.Start)
-                            .SetMargin(UIThickness.All(8, 0, 0, 0))
-                            .BindVisibility<ChatRecordItem>(static x => x.ActionsVisibility, UIBindingScope.Relative)
-                            .SetPlacement(24, 1, 1, 1)
-                        )
+                        .SetVerticalAlignment(UIAlignment.Start)
+                        .SetMargin(UIThickness.All(8, 0, 0, 0))
+                        .BindVisibility<ChatRecordItem>(static x => x.ActionsVisibility, UIBindingScope.Relative)
+                        .SetPlacement(24, 1, 1, 1)
+                    )
                 )
             );
 

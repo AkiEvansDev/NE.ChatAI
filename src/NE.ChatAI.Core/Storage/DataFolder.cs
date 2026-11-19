@@ -16,9 +16,13 @@ namespace NE.ChatAI.Storage;
 /// <summary>The data folder and a store for each kind of document in it (<c>docs/STORAGE.md</c>).</summary>
 public sealed class DataFolder : IDisposable
 {
+    private sealed record CachedSettings(long LastWriteTicks, long Length, AppSettings Settings);
+
     private const string SettingsFile = "settings.json";
 
     private readonly SemaphoreSlim _settingsWrite = new(1, 1);
+    private readonly Lock _settingsCacheLock = new();
+    private CachedSettings? _cachedSettings;
 
     public DataFolder(string root)
     {
@@ -66,20 +70,55 @@ public sealed class DataFolder : IDisposable
     public async Task<AppSettings> ReadSettingsAsync(CancellationToken cancellationToken)
     {
         var path = Path.Combine(Root, SettingsFile);
+        FileInfo info = new(path);
 
-        if (!File.Exists(path))
+        if (!info.Exists)
+        {
+            lock (_settingsCacheLock)
+                _cachedSettings = null;
+
             return new AppSettings();
+        }
+
+        var lastWriteTicks = info.LastWriteTimeUtc.Ticks;
+        var length = info.Length;
+
+        lock (_settingsCacheLock)
+        {
+            if (_cachedSettings is { } cached && cached.LastWriteTicks == lastWriteTicks && cached.Length == length)
+                return cached.Settings;
+        }
 
         var content = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        ReadOnlySpan<byte> utf8 = content.AsSpan();
+
+        if (utf8.StartsWith("\uFEFF"u8))
+            utf8 = utf8[3..];
 
         try
         {
-            AppSettings settings = JsonSerializer.Deserialize<AppSettings>(content, DocumentJson.Options) ?? new AppSettings();
+            AppSettings settings = JsonSerializer.Deserialize<AppSettings>(utf8, DocumentJson.Options) ?? new AppSettings();
 
-            return settings.Format > Document.CurrentFormat ? throw new DocumentFormatException(path, $"format {settings.Format} is newer than this version writes.") : settings;
+            if (settings.Format > Document.CurrentFormat)
+            {
+                lock (_settingsCacheLock)
+                    _cachedSettings = null;
+
+                throw new DocumentFormatException(path, $"format {settings.Format} is newer than this version writes.");
+            }
+
+            var writtenTicks = File.GetLastWriteTimeUtc(path).Ticks;
+
+            lock (_settingsCacheLock)
+                _cachedSettings = new CachedSettings(writtenTicks, content.LongLength, settings);
+
+            return settings;
         }
         catch (JsonException exception)
         {
+            lock (_settingsCacheLock)
+                _cachedSettings = null;
+
             throw new DocumentFormatException(path, exception.Message, exception);
         }
     }
@@ -93,11 +132,31 @@ public sealed class DataFolder : IDisposable
         try
         {
             await AtomicFile.WriteAsync(Path.Combine(Root, SettingsFile), JsonSerializer.SerializeToUtf8Bytes(settings with { Format = Document.CurrentFormat }, DocumentJson.Options), cancellationToken).ConfigureAwait(false);
+
+            lock (_settingsCacheLock)
+                _cachedSettings = null;
         }
         finally
         {
             _ = _settingsWrite.Release();
         }
+    }
+
+    internal void InvalidateCaches()
+    {
+        lock (_settingsCacheLock)
+            _cachedSettings = null;
+
+        Connections.ClearCache();
+        ModelFormats.ClearCache();
+        SystemPrompts.ClearCache();
+        Prompts.ClearCache();
+        Samplers.ClearCache();
+        Characters.ClearCache();
+        Personas.ClearCache();
+        Worlds.ClearCache();
+        Scenarios.ClearCache();
+        Chats.ClearCache();
     }
 
     public void Dispose()

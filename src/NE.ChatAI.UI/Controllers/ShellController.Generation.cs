@@ -131,27 +131,54 @@ internal abstract partial class ShellController
     protected static void Fill<T>(RecursiveCollection<OptionItem> options, DocumentListing<T> listing)
         where T : NamedDocument
     {
-        options.Clear();
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(listing);
 
+        List<(string Id, string Title, string? Group)> ordered = [with(listing.Items.Count)];
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
         var hasBuiltIn = false;
 
         foreach (StoredDocument<T> stored in listing.Items)
         {
-            if (!DefaultDocuments.IsBuiltIn(stored.Id))
+            if (!DefaultDocuments.IsBuiltIn(stored.Id) || !kept.Add(stored.Id))
                 continue;
 
             hasBuiltIn = true;
-            options.Add(new OptionItem { Id = stored.Id, Title = stored.Document.Name.Length > 0 ? stored.Document.Name : stored.Id, IsContent = true });
+            ordered.Add((stored.Id, stored.Document.Name.Length > 0 ? stored.Document.Name : stored.Id, null));
         }
 
         var customGroup = hasBuiltIn ? CustomOptionGroup : null;
 
         foreach (StoredDocument<T> stored in listing.Items)
         {
-            if (DefaultDocuments.IsBuiltIn(stored.Id))
+            if (DefaultDocuments.IsBuiltIn(stored.Id) || !kept.Add(stored.Id))
                 continue;
 
-            options.Add(new OptionItem { Id = stored.Id, Title = stored.Document.Name.Length > 0 ? stored.Document.Name : stored.Id, Group = customGroup, IsContent = true });
+            ordered.Add((stored.Id, stored.Document.Name.Length > 0 ? stored.Document.Name : stored.Id, customGroup));
+        }
+
+        for (var i = options.Count - 1; i >= 0; i--)
+        {
+            if (!kept.Contains(options[i].Id))
+                _ = options.Remove(options[i].Id);
+        }
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            (var id, var title, var group) = ordered[i];
+
+            if (options.TryGet(id, out OptionItem? existing))
+            {
+                existing.Title = title;
+                existing.Group = group;
+
+                if (!string.Equals(options[i].Id, id, StringComparison.Ordinal))
+                    _ = options.Move(id, i);
+            }
+            else
+            {
+                options.Insert(i, new OptionItem { Id = id, Title = title, Group = group, IsContent = true });
+            }
         }
     }
 

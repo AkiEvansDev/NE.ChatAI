@@ -62,7 +62,10 @@ public static class ChatRecords
             {
                 replacements.Add((first, last, i, record));
             }
-            else if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex) && IsVariantActive(record, messages[afterIndex]))
+            else if (record.After is string afterId
+                && indexById.TryGetValue(afterId, out var afterIndex)
+                && IsVariantActive(record, messages[afterIndex])
+                && (!record.OneTurn || afterIndex == messages.Count - 1))
             {
                 if (!insertions.TryGetValue(afterIndex, out List<ChatRecord>? list))
                     insertions[afterIndex] = list = [];
@@ -98,7 +101,7 @@ public static class ChatRecords
             if (repCursor < replacements.Count && replacements[repCursor].First == i)
             {
                 (var first, var last, _, ChatRecord record) = replacements[repCursor];
-                turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, FormatRecordText(record), record.Thought), messages[first].Id, messages[last].Id, record.Id));
+                turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, FormatRecordText(record), record.Thought, ExpandMacros: true), messages[first].Id, messages[last].Id, record.Id));
                 AppendInsertions(turns, insertions, last, messages[last].Id);
                 i = last;
                 continue;
@@ -143,8 +146,13 @@ public static class ChatRecords
         {
             ChatRecord record = records[i];
 
-            if (record.Stale || record.Tag is not string tag || !TryResolveActiveAnchor(record, indexById, messages, out var anchor, out var span))
+            if (record.Stale
+                || record.Tag is not string tag
+                || !TryResolveActiveAnchor(record, indexById, messages, out var anchor, out var span)
+                || (record.OneTurn && record.Replaces is not { Count: >= 2 } && anchor != messages.Count - 1))
+            {
                 continue;
+            }
 
             bestByTag ??= [with(StringComparer.Ordinal)];
 
@@ -214,7 +222,7 @@ public static class ChatRecords
         for (var i = 0; i < list.Count; i++)
         {
             ChatRecord record = list[i];
-            turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, FormatRecordText(record), record.Thought), messageId, messageId, record.Id));
+            turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, FormatRecordText(record), record.Thought, ExpandMacros: true), messageId, messageId, record.Id));
         }
     }
 
@@ -341,6 +349,127 @@ public static class ChatRecords
 
             if (hasCutoff && anchorIndex >= cutoff)
                 continue;
+
+            if (best is null || anchorIndex > bestAnchor || (anchorIndex == bestAnchor && span >= bestSpan))
+            {
+                best = record;
+                bestAnchor = anchorIndex;
+                bestSpan = span;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Counts how many <see cref="MessageRole.User"/> turns stand along <paramref name="messages"/>.</summary>
+    public static int CountUserTurns(IReadOnlyList<ChatMessage> messages)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+
+        var count = 0;
+
+        for (var i = 0; i < messages.Count; i++)
+        {
+            if (messages[i].Role == MessageRole.User)
+                count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Counts how many <see cref="MessageRole.User"/> turns have elapsed strictly after the latest active-branch record or visual written by
+    /// <paramref name="scenarioId"/> on <paramref name="chat"/>; <c>null</c> when that scenario has no active output on the branch.
+    /// </summary>
+    public static int? TurnsSinceScenarioOutput(Chat chat, string? scenarioId)
+    {
+        ArgumentNullException.ThrowIfNull(chat);
+
+        if (string.IsNullOrWhiteSpace(scenarioId) || (chat.Records.Count == 0 && chat.Visuals.Count == 0))
+            return null;
+
+        var trimmed = scenarioId.Trim();
+        Dictionary<string, int>? indexById = chat.Messages.Count > 0 ? IndexMap(chat.Messages) : null;
+        var latestAnchor = int.MinValue;
+
+        if (indexById is not null)
+        {
+            for (var i = 0; i < chat.Records.Count; i++)
+            {
+                ChatRecord record = chat.Records[i];
+
+                if (record.Stale
+                    || !string.Equals(record.Scenario, trimmed, StringComparison.Ordinal)
+                    || !TryResolveActiveAnchor(record, indexById, chat.Messages, out var anchorIndex, out _))
+                {
+                    continue;
+                }
+
+                if (anchorIndex > latestAnchor)
+                    latestAnchor = anchorIndex;
+            }
+        }
+
+        for (var i = 0; i < chat.Visuals.Count; i++)
+        {
+            ChatVisual visual = chat.Visuals[i];
+
+            if (!string.Equals(visual.Scenario, trimmed, StringComparison.Ordinal))
+                continue;
+
+            if (visual.After is null)
+            {
+                if (-1 > latestAnchor)
+                    latestAnchor = -1;
+            }
+            else if (indexById is not null
+                && indexById.TryGetValue(visual.After, out var visualIndex)
+                && ChatVisuals.IsActive(visual, chat.Messages)
+                && visualIndex > latestAnchor)
+            {
+                latestAnchor = visualIndex;
+            }
+        }
+
+        if (latestAnchor == int.MinValue)
+            return null;
+
+        var turns = 0;
+
+        for (var i = Math.Max(0, latestAnchor + 1); i < chat.Messages.Count; i++)
+        {
+            if (chat.Messages[i].Role == MessageRole.User)
+                turns++;
+        }
+
+        return turns;
+    }
+
+    /// <summary>Finds the latest active-branch record written by <paramref name="scenarioId"/> along <paramref name="messages"/>, or <c>null</c> when none stands on the branch.</summary>
+    public static ChatRecord? LatestScenarioRecord(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records, string? scenarioId)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(records);
+
+        if (string.IsNullOrWhiteSpace(scenarioId) || records.Count == 0 || messages.Count == 0)
+            return null;
+
+        var trimmed = scenarioId.Trim();
+        Dictionary<string, int> indexById = IndexMap(messages);
+        ChatRecord? best = null;
+        var bestAnchor = -1;
+        var bestSpan = -1;
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            ChatRecord record = records[i];
+
+            if (record.Stale
+                || !string.Equals(record.Scenario, trimmed, StringComparison.Ordinal)
+                || !TryResolveActiveAnchor(record, indexById, messages, out var anchorIndex, out var span))
+            {
+                continue;
+            }
 
             if (best is null || anchorIndex > bestAnchor || (anchorIndex == bestAnchor && span >= bestSpan))
             {

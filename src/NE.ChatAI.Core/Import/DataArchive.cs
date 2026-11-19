@@ -430,6 +430,10 @@ public static class DataArchive
             : null;
         var fallbackConnectionId = replacedConnectionId is not null ? importedConnections[0] : null;
         var settingsApplied = await ApplySettingsAsync(data, manifest, incomingSettings, rootBackground, replacedConnectionId, fallbackConnectionId, cancellationToken).ConfigureAwait(false) || globalImagesImported;
+        data.InvalidateCaches();
+
+        if (presets > 0)
+            await Profiles.UpgradeLegacyScenariosAsync(data, cancellationToken).ConfigureAwait(false);
 
         return new DataArchiveImportSummary(settingsApplied, presets, characters, personas, worlds, chats);
     }

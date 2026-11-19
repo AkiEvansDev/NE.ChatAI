@@ -66,7 +66,16 @@ internal sealed partial class ScenarioController : ShellController
     public partial string TriggerKind { get; set; } = nameof(ScenarioTriggerKind.Manual);
 
     [RecursiveMember]
-    public partial decimal TriggerSharePercent { get; set; } = 50;
+    public partial bool GateEnabled { get; set; }
+
+    [RecursiveMember]
+    public partial int GateChance { get; set; } = ScenarioGate.DefaultChance;
+
+    [RecursiveMember]
+    public partial int GateCooldown { get; set; }
+
+    [RecursiveMember]
+    public partial int GateMinTurns { get; set; }
 
     [RecursiveMember]
     public partial UIVisibility TriggerVisibility { get; set; } = UIVisibility.Collapsed;
@@ -223,15 +232,20 @@ internal sealed partial class ScenarioController : ShellController
             return;
         }
 
-        var isSystem = chosen.Document.System;
+        Scenario normalized = chosen.Document.UpgradeLegacyTrigger();
+        var isSystem = normalized.System;
+        ScenarioGate gate = normalized.Trigger.Gate;
         ScenarioId = chosen.Id;
-        ScenarioEnabled = chosen.Document.Enabled;
-        ScenarioPinned = chosen.Document.Pinned;
-        TriggerKind = chosen.Document.Trigger.Kind.ToString();
-        TriggerSharePercent = Math.Clamp(Math.Round((decimal)chosen.Document.Trigger.Share * 100m), 5m, 95m);
+        ScenarioEnabled = normalized.Enabled;
+        ScenarioPinned = normalized.Pinned;
+        TriggerKind = normalized.Trigger.Kind.ToString();
+        GateEnabled = gate.Enabled;
+        GateChance = Math.Clamp(gate.Chance, 1, ScenarioGate.DefaultChance);
+        GateCooldown = Math.Clamp(gate.Cooldown, 0, ScenarioGate.MaxTurns);
+        GateMinTurns = Math.Clamp(gate.MinTurns, 0, ScenarioGate.MaxTurns);
         TriggerVisibility = isSystem ? UIVisibility.Collapsed : UIVisibility.Visible;
-        SheetTitle = UIPhrase.Text(chosen.Document.Name);
-        Sheet = ScenarioExecutor.ReadSheet(chosen.Document, key: chosen.Id);
+        SheetTitle = UIPhrase.Text(normalized.Name);
+        Sheet = ScenarioExecutor.ReadSheet(normalized, key: chosen.Id);
         EditorVisibility = UIVisibility.Visible;
         EmptyVisibility = UIVisibility.Collapsed;
 
@@ -303,9 +317,21 @@ internal sealed partial class ScenarioController : ShellController
         if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
             return;
 
-        ScenarioTriggerKind kind = Enum.TryParse(TriggerKind, out ScenarioTriggerKind parsed) ? parsed : current.Trigger.Kind;
-        var share = Math.Clamp((double)(TriggerSharePercent / 100m), 0.05, 0.95);
-        Scenario updated = current with { Enabled = ScenarioEnabled, Pinned = ScenarioPinned, Trigger = new ScenarioTrigger { Kind = kind, Share = share } };
+        Scenario normalized = current.UpgradeLegacyTrigger();
+        ScenarioTriggerKind kind = Enum.TryParse(TriggerKind, out ScenarioTriggerKind parsed) ? parsed : normalized.Trigger.Kind;
+        ScenarioGate gate = new()
+        {
+            Enabled = GateEnabled,
+            Chance = Math.Clamp(GateChance, 1, ScenarioGate.DefaultChance),
+            Cooldown = Math.Clamp(GateCooldown, 0, ScenarioGate.MaxTurns),
+            MinTurns = Math.Clamp(GateMinTurns, 0, ScenarioGate.MaxTurns)
+        };
+        Scenario updated = normalized with
+        {
+            Enabled = ScenarioEnabled,
+            Pinned = ScenarioPinned,
+            Trigger = new ScenarioTrigger { Kind = kind, Gate = gate }
+        };
 
         await Data.Scenarios.WriteAsync(id, updated, cancellationToken).ConfigureAwait(false);
     }
@@ -356,7 +382,7 @@ internal sealed partial class ScenarioController : ShellController
                     Name = chosenName,
                     Enabled = false,
                     Order = nextOrder,
-                    Trigger = new ScenarioTrigger { Kind = ScenarioTriggerKind.Manual, Share = 0.5 },
+                    Trigger = new ScenarioTrigger { Kind = ScenarioTriggerKind.Manual },
                     Sheet = ScenarioExecutor.WriteSheet(UINodeDocument.Empty)
                 };
             }
@@ -433,7 +459,8 @@ internal sealed partial class ScenarioController : ShellController
         if (targetId is null || !Slug.IsValidId(targetId) || await Data.Scenarios.ReadAsync(targetId, cancellationToken).ConfigureAwait(false) is not Scenario current)
             return UICommandResult.Ok();
 
-        await Data.Scenarios.WriteAsync(targetId, current with { Sheet = ScenarioExecutor.WriteSheet(sheet) }, cancellationToken).ConfigureAwait(false);
+        Scenario normalized = current.UpgradeLegacyTrigger();
+        await Data.Scenarios.WriteAsync(targetId, normalized with { Sheet = ScenarioExecutor.WriteSheet(sheet) }, cancellationToken).ConfigureAwait(false);
 
         if (!string.Equals(reason, UIGraphArguments.RunReason, StringComparison.Ordinal) && !string.Equals(reason, UIGraphArguments.RunAllReason, StringComparison.Ordinal))
             return UICommandResult.Ok();
@@ -441,7 +468,7 @@ internal sealed partial class ScenarioController : ShellController
         var lastChatId = (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).LastChat;
         Chat previewChat = (lastChatId is not null ? await Chats.ReadAsync(lastChatId, cancellationToken).ConfigureAwait(false) : null) ?? new Chat();
         KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
-        ScenarioRunScope scope = await ScenarioExecutor.CreateScopeAsync(Context.Services, Data, clients, previewChat, targetId, current.Name, sheet, commitToChat: false, _activeGenerations, onStreamChunkAsync: null, cancellationToken, chatId: lastChatId).ConfigureAwait(false);
+        ScenarioRunScope scope = await ScenarioExecutor.CreateScopeAsync(Context.Services, Data, clients, previewChat, targetId, normalized.Name, sheet, commitToChat: false, _activeGenerations, onStreamChunkAsync: null, cancellationToken, chatId: lastChatId, trigger: normalized.Trigger).ConfigureAwait(false);
 
         _ = await _runs.SavedAsync(Context.SendEffectsAsync, Context.Runtime.InvokeAsync, scope, reason ?? string.Empty, cancellationToken).ConfigureAwait(false);
 

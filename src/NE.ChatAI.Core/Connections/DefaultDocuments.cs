@@ -26,6 +26,7 @@ public static class DefaultDocuments
     public const string SummaryScenarioId = "summary-d5000001";
     public const string SceneReportScenarioId = "scene-report-d5000002";
     public const string ImpersonateScenarioId = "impersonate-d5000003";
+    public const string InitiativeScenarioId = "initiative-d5000004";
 
     // A resource is named `default/<kind>/<id>.json` by the project file; the kind is the data folder's own folder name.
     private const string Prefix = "default/";

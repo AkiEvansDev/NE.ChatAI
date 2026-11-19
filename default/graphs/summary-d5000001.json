@@ -4,40 +4,48 @@
   "enabled": true,
   "order": 0,
   "trigger": {
-    "kind": "contextShare",
-    "share": 0.5
+    "kind": "afterReply"
   },
   "sheet": {
     "nodes": [
       {
+        "id": "context",
+        "type": "chat.context",
+        "x": 0,
+        "y": 0,
+        "values": {
+          "Threshold": 50
+        }
+      },
+      {
         "id": "prompt",
         "type": "chat.prompt",
         "x": 0,
-        "y": 0
+        "y": 256
       },
       {
         "id": "persona",
         "type": "chat.persona",
         "x": 0,
-        "y": 128
+        "y": 384
       },
       {
         "id": "character",
         "type": "chat.character",
         "x": 0,
-        "y": 320
+        "y": 576
       },
       {
         "id": "world",
         "type": "chat.world",
         "x": 0,
-        "y": 544
+        "y": 800
       },
       {
         "id": "messages",
         "type": "chat.messages",
         "x": 0,
-        "y": 768,
+        "y": 992,
         "values": {
           "SkipStart": 2,
           "SkipEnd": 4
@@ -47,22 +55,22 @@
         "id": "instruction",
         "type": "graph.text",
         "x": 0,
-        "y": 1024,
+        "y": 1248,
         "values": {
-          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Write a concise factual summary of the dialogue and any earlier summary above in past tense, in the same language as the dialogue, preserving every event, decision, relationship shift, location, attire change and item introduced. Output only the summary prose, without headings, bullets, commentary or new dialogue."
+          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Merge any [Summary of earlier events] above with the turns that follow it into one concise, dry chronological summary in past tense, in the same language as the dialogue and using the character names used in the dialogue. Preserve established facts, promises, secrets, injuries, locations, attire changes, items and relationship shifts without compressing earlier events away. Output only plain summary prose, with no headings, bullets, commentary or new dialogue."
         }
       },
       {
         "id": "collector",
         "type": "chat.collector",
         "x": 320,
-        "y": 384
+        "y": 576
       },
       {
         "id": "model",
         "type": "chat.model-call",
-        "x": 608,
-        "y": 384,
+        "x": 640,
+        "y": 576,
         "values": {
           "Samplers": "precise-d4000003",
           "Thinking": "Off",
@@ -75,8 +83,8 @@
       {
         "id": "replace",
         "type": "chat.replace",
-        "x": 928,
-        "y": 384,
+        "x": 960,
+        "y": 576,
         "values": {
           "Role": "System",
           "Tag": "summary",
@@ -85,6 +93,13 @@
       }
     ],
     "edges": [
+      {
+        "id": "e0",
+        "fromNode": "context",
+        "fromPin": "Crossed",
+        "toNode": "model",
+        "toPin": "When"
+      },
       {
         "id": "e1",
         "fromNode": "prompt",

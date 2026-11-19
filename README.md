@@ -2,7 +2,7 @@
 
 A personal web front end for role-play chats with a language model, built on [NE.Standard](https://github.com/AkiEvansDev/NE.Standard).
 
-It connects to a local model server (`koboldcpp`), keeps characters, personas, worlds, presets, scenarios and chats as plain files under one `data/` folder, and adds token and context charts alongside node-graph scenarios that drive an auxiliary model behind the scenes (summaries, scene reports, impersonation).
+It connects to a local model server (`koboldcpp`), keeps characters, personas, worlds, presets, scenarios and chats as plain files under one `data/` folder, and adds token and context charts alongside node-graph scenarios that drive an auxiliary model behind the scenes (summaries, scene reports, narrative initiative, impersonation).
 
 ## Quick start
 

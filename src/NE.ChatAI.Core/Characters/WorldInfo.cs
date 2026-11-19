@@ -82,6 +82,28 @@ public static class WorldInfo
         return articles;
     }
 
+    /// <summary>
+    /// Whether <paramref name="triggers"/> (comma-separated <c>word</c>, <c>stem*</c> and <c>-exclusion</c> patterns, as on a world article)
+    /// match across <paramref name="texts"/>: at least one positive trigger when any are given, and no negative exclusion.
+    /// </summary>
+    public static bool Matches(IReadOnlyList<string> triggers, IReadOnlyList<string> texts)
+    {
+        ArgumentNullException.ThrowIfNull(triggers);
+        ArgumentNullException.ThrowIfNull(texts);
+
+        ParsedTriggers parsed = ParseTriggers(triggers);
+
+        if (parsed.IsConstant)
+            return false;
+
+        var window = texts as string[] ?? [.. texts];
+
+        if (MatchesAny(parsed.Negative, window))
+            return false;
+
+        return parsed.Positive.Length == 0 || MatchesAny(parsed.Positive, window);
+    }
+
     private static ParsedTriggers ParseTriggers(IReadOnlyList<string> rawTriggers)
     {
         if (rawTriggers.Count == 0)

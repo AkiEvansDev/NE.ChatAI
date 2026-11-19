@@ -4,82 +4,93 @@
   "enabled": false,
   "order": 2,
   "trigger": {
-    "kind": "afterReply",
-    "share": 0.5
+    "kind": "afterReply"
   },
   "sheet": {
     "nodes": [
       {
         "id": "prompt",
         "type": "chat.prompt",
-        "x": 320,
+        "x": 352,
         "y": 0
       },
       {
         "id": "persona",
         "type": "chat.persona",
-        "x": 320,
+        "x": 352,
         "y": 128
       },
       {
         "id": "character",
         "type": "chat.character",
-        "x": 320,
+        "x": 352,
         "y": 320
       },
       {
         "id": "world",
         "type": "chat.world",
-        "x": 320,
+        "x": 352,
         "y": 544
-      },
-      {
-        "id": "messages",
-        "type": "chat.messages",
-        "x": 320,
-        "y": 768,
-        "values": {
-          "Last": 3,
-          "Raw": true
-        }
       },
       {
         "id": "previous",
         "type": "chat.record",
         "x": 0,
-        "y": 832,
+        "y": 544,
         "values": {
-          "Tag": "scene"
+          "Tag": "scene",
+          "Fallback": "(none yet)"
+        }
+      },
+      {
+        "id": "context",
+        "type": "chat.messages",
+        "x": 0,
+        "y": 768,
+        "values": {
+          "SkipEnd": 1,
+          "Last": 2,
+          "Raw": true
+        }
+      },
+      {
+        "id": "latest",
+        "type": "chat.messages",
+        "x": 0,
+        "y": 1056,
+        "values": {
+          "Last": 1,
+          "Raw": true
         }
       },
       {
         "id": "ask",
         "type": "graph.text",
         "x": 0,
-        "y": 1024,
+        "y": 1344,
         "values": {
-          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Write in the same language as the latest messages above. State the current scene in four short factual lines in this exact order — Location:, Clothing:, Pose:, Mood: in English, or Место:, Одежда:, Поза:, Настроение: in Russian (translate the four labels if the chat uses another language) — based strictly on the latest messages, updating the previous report only where those messages changed it, or establishing it when there is none. Use {{char}}'s card only for baseline attire of the active outfit when unspecified in the messages, ignoring example dialogues and general habits. Include {{char}} (and {{user}} where the scene specifies their attire or position) in Clothing and Pose; Mood describes {{char}} only. Output only the four lines, with no bullets, bold, asterisks, quotes or extra text."
+          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Write in the same language as the messages above. State the current scene right after the latest message in four short factual lines in this exact order: Location:, Clothing:, Pose:, Mood: in English, or Место:, Одежда:, Поза:, Настроение: in Russian (translate the four labels if the chat uses another language). Treat the latest message as the current truth: any movement, distance change, posture shift or action on clothing in *asterisks* or dialogue there immediately replaces outdated details from the previous report or preceding context, while unchanged details carry forward. Use {{char}}'s card only for baseline attire of the active outfit when unspecified in the messages and previous report, ignoring example dialogues and general habits. Include {{char}} (and {{user}} where specified) in Clothing and Pose, noting held items, physical contact or visible injuries in Pose; Mood describes {{char}} only. Output only the four lines, with no bullets, bold, asterisks, quotes or extra text."
         }
       },
       {
         "id": "join",
         "type": "graph.join",
-        "x": 320,
-        "y": 1024,
+        "x": 352,
+        "y": 960,
         "values": {
-          "Template": "Previous scene report:\n{0}\n\nInstruction:\n{1}"
+          "Template": "Previous scene report:\n{0}\n\nPreceding context:\n{1}\n\nLatest message (just happened right now - highest priority):\n{2}\n\nInstruction:\n{3}"
         }
       },
       {
         "id": "collector",
         "type": "chat.collector",
-        "x": 640,
+        "x": 704,
         "y": 384
       },
       {
         "id": "model",
         "type": "chat.model-call",
-        "x": 960,
+        "x": 1024,
         "y": 384,
         "values": {
           "Samplers": "precise-d4000003",
@@ -87,13 +98,13 @@
           "OverrideReplyLength": true,
           "ReplyLength": 256,
           "OverrideTemperature": true,
-          "Temperature": 0.65
+          "Temperature": 0.4
         }
       },
       {
         "id": "insert",
         "type": "chat.insert",
-        "x": 1280,
+        "x": 1344,
         "y": 384,
         "values": {
           "Role": "System",
@@ -133,48 +144,55 @@
       },
       {
         "id": "e5",
-        "fromNode": "messages",
-        "fromPin": "Slice",
-        "toNode": "collector",
-        "toPin": "Messages"
-      },
-      {
-        "id": "e6",
         "fromNode": "previous",
         "fromPin": "Text",
         "toNode": "join",
         "toPin": "Values"
       },
       {
+        "id": "e6",
+        "fromNode": "context",
+        "fromPin": "Text",
+        "toNode": "join",
+        "toPin": "Values"
+      },
+      {
         "id": "e7",
+        "fromNode": "latest",
+        "fromPin": "Text",
+        "toNode": "join",
+        "toPin": "Values"
+      },
+      {
+        "id": "e8",
         "fromNode": "ask",
         "fromPin": "Result",
         "toNode": "join",
         "toPin": "Values"
       },
       {
-        "id": "e8",
+        "id": "e9",
         "fromNode": "join",
         "fromPin": "Text",
         "toNode": "collector",
         "toPin": "Instruction"
       },
       {
-        "id": "e9",
+        "id": "e10",
         "fromNode": "collector",
         "fromPin": "Blocks",
         "toNode": "model",
         "toPin": "Prompt"
       },
       {
-        "id": "e10",
-        "fromNode": "messages",
+        "id": "e11",
+        "fromNode": "latest",
         "fromPin": "Slice",
         "toNode": "insert",
         "toPin": "Slice"
       },
       {
-        "id": "e11",
+        "id": "e12",
         "fromNode": "model",
         "fromPin": "Text",
         "toNode": "insert",
