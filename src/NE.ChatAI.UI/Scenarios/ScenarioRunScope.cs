@@ -64,7 +64,7 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     private readonly List<ChatRecord> _stagedRecords = [];
     private readonly List<ChatVisual> _stagedVisuals = [];
     private UINodeNetwork? _network;
-    private (int CurrentTokens, int PreviousTokens, int ContextLength)? _measuredContext;
+    private Task<(int CurrentTokens, int PreviousTokens, int ContextLength)>? _measureTask;
     private bool? _chancePassed;
     private int _executedActions;
     private string? _stagedDraft;
@@ -749,17 +749,20 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     }
 
     /// <summary>Measures and caches the assembled main-prompt token counts for <see cref="Chat"/> and the pre-turn baseline against the active connection's context length.</summary>
-    public async Task<(int CurrentTokens, int PreviousTokens, int ContextLength)> MeasureContextAsync(CancellationToken cancellationToken)
+    public Task<(int CurrentTokens, int PreviousTokens, int ContextLength)> MeasureContextAsync(CancellationToken cancellationToken)
     {
         lock (_sync)
-        {
-            if (_measuredContext is (int current, int previous, int length))
-                return (current, previous, length);
-        }
+            return _measureTask ??= MeasureContextCoreAsync(cancellationToken);
+    }
 
+    private async Task<(int CurrentTokens, int PreviousTokens, int ContextLength)> MeasureContextCoreAsync(CancellationToken cancellationToken)
+    {
         if (ActiveProfile is not ActiveProfile profile)
             return (0, 0, 0);
 
+        using IDisposable? serverSlot = profile.Connection.Address is Uri slotAddress
+            ? await Clients.AcquireSlotAsync(slotAddress, cancellationToken).ConfigureAwait(false)
+            : null;
         KoboldCppClient? kobold = null;
         string? model = null;
         int contextLength;
@@ -786,13 +789,8 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         var previousTokens = previousChat is null
             ? 0
             : await CountChatPromptTokensAsync(profile, previousChat, contextLength, kobold, model, cancellationToken).ConfigureAwait(false);
-        (int CurrentTokens, int PreviousTokens, int ContextLength) measured = (currentTokens, previousTokens, contextLength);
 
-        lock (_sync)
-        {
-            _measuredContext ??= measured;
-            return _measuredContext.Value;
-        }
+        return (currentTokens, previousTokens, contextLength);
     }
 
     private static async Task<string?> TryGetModelNameAsync(KoboldCppClient kobold, CancellationToken cancellationToken)

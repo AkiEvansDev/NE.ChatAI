@@ -20,6 +20,7 @@ namespace NE.ChatAI.Controllers;
 internal sealed partial class ScenarioController : ShellController
 {
     public const string PageId = "chatai-scenarios-page";
+    public const string PanelId = "chatai-scenario-panel";
     public const string CanvasId = "chatai-scenario-canvas";
     public const string SaveFormId = "chatai-scenario-form";
     public const string RenameDialogKey = "chatai-scenario-rename";

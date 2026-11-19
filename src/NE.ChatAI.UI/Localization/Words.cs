@@ -405,6 +405,7 @@ internal static class Words
         ["chatai.stats.xtc.value"] = "вер. {probability} · порог {threshold}",
         ["chatai.stats.dynamic.value"] = "{min}–{max} (степ. {exponent})",
 
+        ["chatai.scenarios.panel"] = "Параметры сценария",
         ["chatai.scenarios.scenario"] = "Сценарий",
         ["chatai.scenarios.none"] = "Сценариев пока нет: создайте его кнопкой «Новый».",
         ["chatai.scenarios.new-name"] = "Новый сценарий",
@@ -866,6 +867,7 @@ internal static class Words
         ["chatai.stats.xtc.value"] = "prob {probability} · thr {threshold}",
         ["chatai.stats.dynamic.value"] = "{min}–{max} (exp {exponent})",
 
+        ["chatai.scenarios.panel"] = "Scenario settings",
         ["chatai.scenarios.scenario"] = "Scenario",
         ["chatai.scenarios.none"] = "No scenarios yet: make one with New.",
         ["chatai.scenarios.new-name"] = "New scenario",

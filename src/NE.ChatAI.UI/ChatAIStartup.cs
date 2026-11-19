@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NE.ChatAI.Chats;
 using NE.ChatAI.Controllers;
@@ -22,10 +23,13 @@ namespace NE.ChatAI;
 /// <summary>The application as the UI framework sees it, whatever the platform: its services, its routes and its words.</summary>
 internal sealed class ChatAIStartup : UIStartupBase
 {
+    private string? _logsDirectory;
+
     protected override void ConfigureServices(IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        _logsDirectory = ResolveLogsDirectory(services);
         _ = services.AddOptions<ChatAIOptions>().BindConfiguration(ChatAIOptions.Section);
 
         _ = services.AddSingleton(static provider =>
@@ -79,6 +83,33 @@ internal sealed class ChatAIStartup : UIStartupBase
         _ = services.AddHostedService<FirstStart>();
     }
 
+    private static string ResolveLogsDirectory(IServiceCollection services)
+    {
+        IConfiguration? configuration = null;
+        IHostEnvironment? environment = null;
+
+        foreach (ServiceDescriptor descriptor in services)
+        {
+            if (descriptor.ServiceType == typeof(IConfiguration) && descriptor.ImplementationInstance is IConfiguration config)
+                configuration = config;
+            else if (descriptor.ServiceType == typeof(IHostEnvironment) && descriptor.ImplementationInstance is IHostEnvironment env)
+                environment = env;
+        }
+
+        var configured = configuration?[$"{ChatAIOptions.Section}:{nameof(ChatAIOptions.DataPath)}"];
+        var dataPath = string.IsNullOrWhiteSpace(configured) ? DefaultDataPath() : configured;
+        var contentRoot = environment?.ContentRootPath ?? Directory.GetCurrentDirectory();
+
+        return Path.GetFullPath(Path.Combine(contentRoot, dataPath, "logs"));
+    }
+
+    private static string DefaultDataPath()
+    {
+        var env = Environment.GetEnvironmentVariable($"{ChatAIOptions.Section}__{nameof(ChatAIOptions.DataPath)}");
+
+        return string.IsNullOrWhiteSpace(env) ? new ChatAIOptions().DataPath : env;
+    }
+
     private static IEnumerable<string> ConfiguredSecretNames(IConfiguration configuration)
     {
         foreach (IConfigurationSection child in configuration.GetSection($"{ChatAIOptions.Section}:Secrets").GetChildren())
@@ -111,6 +142,12 @@ internal sealed class ChatAIStartup : UIStartupBase
 
         // A card or a preset file, several at once.
         _ = application.ConfigureFiles(static files => files.MaxFileSize = SettingsController.MaxImportBytes);
+
+        // Kept inside the data folder so launcher updates that replace app/ preserve past logs.
+        _ = application.ConfigureLogging(logging => logging.UseFile(
+            _logsDirectory ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), DefaultDataPath(), "logs")),
+            static file => file.MinimumLevel = LogLevel.Warning
+        ));
 
         _ = application.Route<ChatView, ChatController>(AppRoutes.Home);
         _ = application.Route<SettingsView, SettingsController>(AppRoutes.Settings);

@@ -7,13 +7,11 @@ using NE.ChatAI.Scenarios;
 namespace NE.ChatAI.Views;
 
 /// <summary>
-/// The scenarios page (<c>/scenarios</c>): a side rail with the scenario selector, Rename/Duplicate/Delete menu and trigger controls
-/// beside the full-height node canvas (<see cref="NodesComponent"/>), stacked one over the other on a phone.
+/// The scenarios page (<c>/scenarios</c>): a left drawer (pinnable to a column from <c>xl</c>) with the scenario selector,
+/// Rename/Duplicate/Delete menu and trigger controls beside the full-bleed node canvas (<see cref="NodesComponent"/>).
 /// </summary>
 internal sealed class ScenarioView : ShellView, IUIViewDefinition
 {
-    private const double SidebarWidth = 280;
-
     private static readonly OptionItem[] TriggerKinds =
     [
         new() { Id = nameof(ScenarioTriggerKind.Manual), Title = "chatai.scenarios.trigger.manual" },
@@ -30,10 +28,21 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
 
     protected override UIColumnWidth? HeadColumnWidth => null;
 
+    protected override IVisualComponent[] HeaderActions
+        => [UIButtons.Icon(AppIcons.Outline(AppIcons.Generation), "chatai.scenarios.panel").SetOpensDrawer(UISide.Left)];
+
     protected override UIResponsive<UIThickness> ContentPadding
         => UIResponsive<UIThickness>.Create(UIThickness.All(12, 4, 12, 12), md: UIThickness.All(24, 8, 24, 16));
 
-    protected override IVisualComponent CreatePage()
+    protected override IVisualComponent? CreatePageLeftSide()
+        => UIPage.Drawer(
+            ScenarioController.PanelId,
+            UISide.Left,
+            "chatai.scenarios.panel",
+            CreatePanel()
+        );
+
+    private static StackPanelComponent CreatePanel()
     {
         SelectComponent triggerSelect = new SelectComponent()
             .SetTitle("chatai.scenarios.trigger")
@@ -46,52 +55,59 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
             .BindValue<ScenarioController>(static x => x.GateEnabled)
             .OnChange(nameof(ScenarioController.SaveMetaAsync));
 
-        return new ContainerComponent(ScenarioController.PageId)
-            .SetColumn(1, UIGridUnit.Star(), md: UIGridUnit.Auto())
-            .SetRow(1, UIGridUnit.Auto(), md: UIGridUnit.Star())
-            .AddRow(UIGridUnit.Star(), md: UIGridUnit.Auto())
+        return UILayout.Stack(16,
+            new SelectComponent()
+                .SetTitle("chatai.scenarios.scenario")
+                .SetGroupTemplate(new DefaultGroupTemplate())
+                .BindOptions<ScenarioController>(static x => x.ScenarioOptions)
+                .BindValue<ScenarioController>(static x => x.ScenarioId)
+                .OnChange(nameof(ScenarioController.SelectScenarioAsync))
+                .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ScenarioController.CreateScenarioAsync), UIAction.Arg("copy", false)))
+                .AddTrailingAction(UIIconButtons.More()
+                    .BindItems<ScenarioController>(static x => x.ScenarioActions)
+                    .OnItemClick(nameof(ScenarioController.ScenarioMenuActionAsync), UIAction.ArgCurrentItemKey("action"))
+                    .BindVisibility<ScenarioController>(static x => x.EditorVisibility)
+                ),
+            UILayout.Stack(16,
+                    new SwitchComponent()
+                        .SetTitle("chatai.scenarios.enabled")
+                        .BindValue<ScenarioController>(static x => x.ScenarioEnabled)
+                        .OnChange(nameof(ScenarioController.SaveMetaAsync)),
+                    new SwitchComponent()
+                        .SetTitle("chatai.scenarios.pinned")
+                        .BindValue<ScenarioController>(static x => x.ScenarioPinned)
+                        .OnChange(nameof(ScenarioController.SaveMetaAsync)),
+                    triggerSelect,
+                    UILayout.Stack(12,
+                            gateSwitch,
+                            UILayout.Stack(12,
+                                    Number("chatai.scenarios.gate.chance", static x => x.GateChance, 1, ScenarioGate.DefaultChance, 5),
+                                    Number("chatai.scenarios.gate.cooldown", static x => x.GateCooldown, 0, ScenarioGate.MaxTurns, 1),
+                                    Number("chatai.scenarios.gate.min-turns", static x => x.GateMinTurns, 0, ScenarioGate.MaxTurns, 1)
+                                )
+                                .ShownWhen(gateSwitch)
+                        )
+                        .HiddenWhen(triggerSelect, nameof(ScenarioTriggerKind.Manual))
+                )
+                .BindVisibility<ScenarioController>(static x => x.TriggerVisibility)
+        );
+    }
+
+    private static NumberInputComponent Number(string title, Expression<Func<ScenarioController, object?>> value, decimal min, decimal max, decimal step)
+        => new NumberInputComponent()
+            .SetTitle(title)
+            .SetShowStepper(true)
+            .SetMin(min)
+            .SetMax(max)
+            .SetStep(step)
+            .BindValue(value)
+            .OnChange(nameof(ScenarioController.SaveMetaAsync));
+
+    protected override IVisualComponent CreatePage()
+        => new ContainerComponent(ScenarioController.PageId)
+            .SetRow(1, UIGridUnit.Star())
             .SetHeight(UILayoutLength.Fill())
             .SetWidth(UILayoutLength.Fill())
-            .AddChild(UILayout.Stack(16,
-                    new SelectComponent()
-                        .SetTitle("chatai.scenarios.scenario")
-                        .SetGroupTemplate(new DefaultGroupTemplate())
-                        .BindOptions<ScenarioController>(static x => x.ScenarioOptions)
-                        .BindValue<ScenarioController>(static x => x.ScenarioId)
-                        .OnChange(nameof(ScenarioController.SelectScenarioAsync))
-                        .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ScenarioController.CreateScenarioAsync), UIAction.Arg("copy", false)))
-                        .AddTrailingAction(UIIconButtons.More()
-                            .BindItems<ScenarioController>(static x => x.ScenarioActions)
-                            .OnItemClick(nameof(ScenarioController.ScenarioMenuActionAsync), UIAction.ArgCurrentItemKey("action"))
-                            .BindVisibility<ScenarioController>(static x => x.EditorVisibility)
-                        ),
-                    UILayout.Stack(16,
-                            new SwitchComponent()
-                                .SetTitle("chatai.scenarios.enabled")
-                                .BindValue<ScenarioController>(static x => x.ScenarioEnabled)
-                                .OnChange(nameof(ScenarioController.SaveMetaAsync)),
-                            new SwitchComponent()
-                                .SetTitle("chatai.scenarios.pinned")
-                                .BindValue<ScenarioController>(static x => x.ScenarioPinned)
-                                .OnChange(nameof(ScenarioController.SaveMetaAsync)),
-                            triggerSelect,
-                            UILayout.Stack(12,
-                                    gateSwitch,
-                                    UILayout.Stack(12,
-                                            Number("chatai.scenarios.gate.chance", static x => x.GateChance, 1, ScenarioGate.DefaultChance, 5),
-                                            Number("chatai.scenarios.gate.cooldown", static x => x.GateCooldown, 0, ScenarioGate.MaxTurns, 1),
-                                            Number("chatai.scenarios.gate.min-turns", static x => x.GateMinTurns, 0, ScenarioGate.MaxTurns, 1)
-                                        )
-                                        .ShownWhen(gateSwitch)
-                                )
-                                .HiddenWhen(triggerSelect, nameof(ScenarioTriggerKind.Manual))
-                        )
-                        .BindVisibility<ScenarioController>(static x => x.TriggerVisibility)
-                )
-                .SetWidth(UILayoutLength.Fill(), md: UILayoutLength.Absolute(SidebarWidth))
-                .SetMargin(UIThickness.All(0, 0, 0, 12), md: UIThickness.All(0, 0, 16, 0))
-                .SetPlacement(1, 1, 24, 1, md: UIGridPlacement.At(1, 1, 1, 1))
-            )
             .AddChild(new NodesComponent(ScenarioController.CanvasId)
                 .BindCatalog<ScenarioController>(static x => x.Catalog)
                 .BindPinChoices<ScenarioController>(static x => x.PinChoices)
@@ -108,23 +124,12 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                 .OnSave(nameof(ScenarioController.SaveSheetAsync), UIGraphArguments.Reason("reason"))
                 .OnStop(nameof(ScenarioController.StopRunAsync))
                 .BindVisibility<ScenarioController>(static x => x.EditorVisibility)
-                .SetPlacement(1, 2, 24, 1, md: UIGridPlacement.At(2, 1, 23, 1))
+                .SetPlacement(1, 1, 24, 1)
             )
             .AddChild(UIPage.Empty(AppIcons.Outline(AppIcons.Scenarios), "chatai.scenarios.none")
                 .BindVisibility<ScenarioController>(static x => x.EmptyVisibility)
-                .SetPlacement(1, 2, 24, 1, md: UIGridPlacement.At(2, 1, 23, 1))
+                .SetPlacement(1, 1, 24, 1)
             );
-    }
-
-    private static NumberInputComponent Number(string title, Expression<Func<ScenarioController, object?>> value, decimal min, decimal max, decimal step)
-        => new NumberInputComponent()
-            .SetTitle(title)
-            .SetShowStepper(true)
-            .SetMin(min)
-            .SetMax(max)
-            .SetStep(step)
-            .BindValue(value)
-            .OnChange(nameof(ScenarioController.SaveMetaAsync));
 
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
         =>

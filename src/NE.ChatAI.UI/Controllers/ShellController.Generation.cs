@@ -223,9 +223,11 @@ internal abstract partial class ShellController
     {
         try
         {
+            KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
+            // Wait for any active reply or scenario call on the same HTTP/1.0 server before starting the probe clock.
+            using IDisposable serverSlot = await clients.AcquireSlotAsync(address, cancellationToken).ConfigureAwait(false);
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(ModelInfoTimeout);
-            KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
             Backends.KoboldCpp.KoboldCppClient kobold = clients.For(address);
             var rawModel = await kobold.GetModelAsync(timeout.Token).ConfigureAwait(false);
             clients.CacheFor(address).UseModel(rawModel);

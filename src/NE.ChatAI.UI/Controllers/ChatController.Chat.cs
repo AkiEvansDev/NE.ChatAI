@@ -206,9 +206,11 @@ internal sealed partial class ChatController
         if (profile.Connection.Address is not Uri address)
             return;
 
+        KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
+        using IDisposable serverSlot = await clients.AcquireSlotAsync(address, cancellationToken).ConfigureAwait(false);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(1));
-        KoboldCppClient kobold = Context.Services.GetRequiredService<KoboldCppClients>().For(address);
+        KoboldCppClient kobold = clients.For(address);
         string? model;
         int contextLength;
 

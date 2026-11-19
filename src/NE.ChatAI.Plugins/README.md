@@ -13,7 +13,7 @@ Reference `NE.ChatAI.Plugins` with `ExcludeAssets="runtime"` so host contracts u
 </PropertyGroup>
 
 <ItemGroup>
-  <PackageReference Include="NE.ChatAI.Plugins" Version="1.5.0" ExcludeAssets="runtime" PrivateAssets="all" />
+  <PackageReference Include="NE.ChatAI.Plugins" Version="1.5.1" ExcludeAssets="runtime" PrivateAssets="all" />
   <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 </ItemGroup>
 ```

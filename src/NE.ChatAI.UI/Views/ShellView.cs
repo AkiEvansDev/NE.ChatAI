@@ -97,10 +97,10 @@ internal abstract class ShellView : UIViewBase
     protected virtual IReadOnlyList<UIDialog> CreatePageDialogs()
         => [];
 
-    /// <summary>The settings changed while chatting, with the ways to the settings and scenarios pages at its foot.</summary>
+    /// <summary>The page's left drawer: the chat's generation settings, or a page's own side panel.</summary>
     protected sealed override IVisualComponent? CreateLeftSide()
         => !HasGenerationPanel
-            ? null
+            ? CreatePageLeftSide()
             : UIPage.Drawer(
                 GenerationPanelId,
                 UISide.Left,
@@ -113,6 +113,9 @@ internal abstract class ShellView : UIViewBase
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.scenarios").SetIcon(AppIcons.Outline(AppIcons.Scenarios)).SetUrl(AppRoutes.Scenarios))
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.plugins").SetIcon(AppIcons.Outline(AppIcons.Plugins)).SetUrl(AppRoutes.Plugins))
             );
+
+    protected virtual IVisualComponent? CreatePageLeftSide()
+        => null;
 
     /// <summary>The chats to pick from, reloaded each time an unpinned drawer slides out.</summary>
     protected sealed override IVisualComponent? CreateRightSide()
