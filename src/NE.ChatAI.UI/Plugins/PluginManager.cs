@@ -31,20 +31,17 @@ internal sealed record PluginOperationResult(bool Succeeded, PluginStatus? Plugi
 
 internal sealed record PluginUpdateCheckResult(int UpdatesAvailable, int FailedCount);
 
-/// <summary>
-/// Manages scenario plugins under <c>data/plugins/</c>: loads installed assemblies on startup, installs and hot-updates releases from
-/// public GitHub repositories without locking <c>.dll</c> files on disk, and rebuilds <see cref="Catalog"/> live.
-/// </summary>
+/// <summary>Loads, installs, hot-updates, toggles, and uninstalls scenario plugins under <c>data/plugins/</c> and rebuilds <see cref="Catalog"/> live.</summary>
 internal sealed class PluginManager : IDisposable
 {
     public const string HttpClientName = "NE.ChatAI.Plugins";
     public const long MaxArchiveBytes = 64 * 1024 * 1024;
+    private const long MaxExtractedBytes = MaxArchiveBytes * 2;
+    private const long MaxManifestBytes = 256 * 1024;
 
     private const string PluginsFolderName = "plugins";
     private const string ManifestFileName = "plugin.json";
     private const string StateFileName = "plugins.json";
-
-    private static readonly HashSet<string> ReservedNodeKeys = BuildReservedNodeKeys();
 
     private readonly DataFolder _data;
     private readonly IHttpClientFactory _httpClients;
@@ -57,8 +54,16 @@ internal sealed class PluginManager : IDisposable
     private UINodeCatalog _catalog = ScenarioCatalog.BuiltIn;
     private bool _disposed;
 
-    /// <summary>Raised outside the internal lock whenever an install, hot-update, toggle or uninstall rebuilds <see cref="Catalog"/>.</summary>
     public event Action<UINodeCatalog>? CatalogChanged;
+
+    public UINodeCatalog Catalog
+    {
+        get
+        {
+            lock (_stateLock)
+                return _catalog;
+        }
+    }
 
     public PluginManager(DataFolder data, IHttpClientFactory httpClients, TimeProvider time)
     {
@@ -71,16 +76,6 @@ internal sealed class PluginManager : IDisposable
         _time = time;
 
         InitializeFromDisk();
-    }
-
-    private static HashSet<string> BuildReservedNodeKeys()
-    {
-        HashSet<string> keys = [with(StringComparer.Ordinal)];
-
-        for (var i = 0; i < ScenarioCatalog.BuiltIn.Types.Count; i++)
-            _ = keys.Add(ScenarioCatalog.BuiltIn.Types[i].Key);
-
-        return keys;
     }
 
     private void InitializeFromDisk()
@@ -103,10 +98,11 @@ internal sealed class PluginManager : IDisposable
 
         try
         {
-            var bytes = File.ReadAllBytes(statePath);
-            InstalledPluginsDocument? doc = JsonSerializer.Deserialize<InstalledPluginsDocument>(bytes, DocumentJson.Options);
+            using FileStream stream = new(statePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var bytes = new byte[stream.Length];
+            stream.ReadExactly(bytes);
 
-            if (doc?.Plugins is not { Count: > 0 } items)
+            if (DocumentJson.TryRead<InstalledPluginsDocument>(bytes)?.Plugins is not { Count: > 0 } items)
                 return [];
 
             List<InstalledPluginRecord> valid = [with(items.Count)];
@@ -152,7 +148,7 @@ internal sealed class PluginManager : IDisposable
     {
         try
         {
-            return JsonSerializer.Deserialize<PluginManifest>(utf8Json, DocumentJson.Options);
+            return JsonSerializer.Deserialize<PluginManifest>(DocumentJson.StripBom(utf8Json), DocumentJson.Options);
         }
         catch (JsonException)
         {
@@ -169,7 +165,7 @@ internal sealed class PluginManager : IDisposable
     private void RebuildCatalogLocked()
     {
         List<Type> combinedTypes = [.. ScenarioCatalog.BuiltInTypes];
-        HashSet<string> activeKeys = new(ReservedNodeKeys, StringComparer.Ordinal);
+        HashSet<string> activeKeys = new(ScenarioCatalog.BuiltInKeys, StringComparer.Ordinal);
         _loadErrors.Clear();
 
         List<InstalledPluginRecord> ordered = OrderRecords(_records);
@@ -208,10 +204,10 @@ internal sealed class PluginManager : IDisposable
             }
 
             for (var n = 0; n < handle.Nodes.Count; n++)
+            {
                 _ = activeKeys.Add(handle.Nodes[n].Summary.Key);
-
-            for (var t = 0; t < handle.Nodes.Count; t++)
-                combinedTypes.Add(handle.Nodes[t].NodeType);
+                combinedTypes.Add(handle.Nodes[n].NodeType);
+            }
         }
 
         _catalog = combinedTypes.Count == ScenarioCatalog.BuiltInTypes.Count
@@ -292,7 +288,7 @@ internal sealed class PluginManager : IDisposable
                 discovered.Add(new DiscoveredPluginNode(candidate, new PluginNodeSummary(attr.Key, title, category)));
             }
 
-            // Verify UINodeCatalog accepts every pin/attribute on the discovered types before activating the plugin.
+            // Validates every pin/attribute signature before committing the plugin to the live catalogue.
             _ = UINodeCatalog.FromTypes([.. rawNodeTypes]);
 
             return (new LoadedPluginHandle(version, loadContext, discovered), PluginErrorKind.None, null);
@@ -377,17 +373,6 @@ internal sealed class PluginManager : IDisposable
         return false;
     }
 
-    /// <summary>Gets the current scenario node catalogue including all enabled plugins.</summary>
-    public UINodeCatalog Catalog
-    {
-        get
-        {
-            lock (_stateLock)
-                return _catalog;
-        }
-    }
-
-    /// <summary>Returns an ordered snapshot of every installed plugin, its contributed nodes and any load error.</summary>
     public IReadOnlyList<PluginStatus> List()
     {
         lock (_stateLock)
@@ -396,9 +381,7 @@ internal sealed class PluginManager : IDisposable
             List<PluginStatus> result = [with(ordered.Count)];
 
             for (var i = 0; i < ordered.Count; i++)
-            {
                 result.Add(BuildStatusLocked(ordered[i]));
-            }
 
             return result;
         }
@@ -414,7 +397,6 @@ internal sealed class PluginManager : IDisposable
         return new PluginStatus(record, nodes, error);
     }
 
-    /// <summary>Installs or updates a plugin from the latest release of a public GitHub repository (<c>owner/repo</c> or URL).</summary>
     public async Task<PluginOperationResult> InstallAsync(string repositoryInput, CancellationToken cancellationToken)
     {
         if (PluginCoordinates.NormalizeRepository(repositoryInput) is not string repository)
@@ -446,7 +428,7 @@ internal sealed class PluginManager : IDisposable
 
         if (release.ManifestAssetUrl is not null)
         {
-            (var manifestBytes, PluginErrorKind dlErr, var dlDetail) = await DownloadBytesAsync(release.ManifestAssetUrl, maxBytes: 256 * 1024, cancellationToken).ConfigureAwait(false);
+            (var manifestBytes, PluginErrorKind dlErr, var dlDetail) = await DownloadBytesAsync(release.ManifestAssetUrl, MaxManifestBytes, cancellationToken).ConfigureAwait(false);
 
             if (manifestBytes is null)
                 return new PluginOperationResult(false, Error: dlErr, Detail: dlDetail);
@@ -590,7 +572,7 @@ internal sealed class PluginManager : IDisposable
                 return (null, PluginErrorKind.NetworkFailed, $"HTTP {(int)response.StatusCode}");
 
             if (response.Content.Headers.ContentLength is long length && length > maxBytes)
-                return (null, PluginErrorKind.ManifestInvalid, "Plugin archive exceeds the 64 MB limit.");
+                return (null, PluginErrorKind.ManifestInvalid, $"Plugin download exceeds the {FormatLimit(maxBytes)} limit.");
 
             Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
@@ -610,7 +592,7 @@ internal sealed class PluginManager : IDisposable
                     total += read;
 
                     if (total > maxBytes)
-                        return (null, PluginErrorKind.ManifestInvalid, "Plugin archive exceeds the 64 MB limit.");
+                        return (null, PluginErrorKind.ManifestInvalid, $"Plugin download exceeds the {FormatLimit(maxBytes)} limit.");
 
                     await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 }
@@ -628,25 +610,10 @@ internal sealed class PluginManager : IDisposable
         }
     }
 
-    /// <summary>Installs or hot-updates a plugin directly from a <c>.zip</c> archive stream.</summary>
-    internal async Task<PluginOperationResult> InstallArchiveAsync(string repository, Stream archiveStream, string? fallbackTagVersion, PluginManifest? externalManifest, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(archiveStream);
-
-        if (PluginCoordinates.NormalizeRepository(repository) is not string normalizedRepo)
-            return new PluginOperationResult(false, Error: PluginErrorKind.InvalidRepository);
-
-        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            return await InstallArchiveCoreAsync(normalizedRepo, archiveStream, fallbackTagVersion, externalManifest, expectedPluginId: null, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _ = _mutationGate.Release();
-        }
-    }
+    private static string FormatLimit(long maxBytes)
+        => maxBytes >= 1024 * 1024
+            ? string.Create(CultureInfo.InvariantCulture, $"{maxBytes / (1024 * 1024)} MB")
+            : string.Create(CultureInfo.InvariantCulture, $"{maxBytes / 1024} KB");
 
     private async Task<PluginOperationResult> InstallArchiveCoreAsync(string repository, Stream archiveStream, string? fallbackTagVersion, PluginManifest? externalManifest, string? expectedPluginId, CancellationToken cancellationToken)
     {
@@ -696,7 +663,6 @@ internal sealed class PluginManager : IDisposable
             if (verifiedHandle is null)
                 return new PluginOperationResult(false, Error: verifyError, Detail: verifyDetail);
 
-            // Unload the staging handle before moving the directory into its versioned slot.
             verifiedHandle.Context.Unload();
 
             var targetDir = VersionDirectoryOf(pluginId, version);
@@ -759,6 +725,14 @@ internal sealed class PluginManager : IDisposable
 
             return new PluginOperationResult(true, status);
         }
+        catch (InvalidDataException exception)
+        {
+            return new PluginOperationResult(false, Error: PluginErrorKind.ManifestInvalid, Detail: exception.Message);
+        }
+        catch (IOException exception)
+        {
+            return new PluginOperationResult(false, Error: PluginErrorKind.ManifestInvalid, Detail: exception.Message);
+        }
         finally
         {
             if (Directory.Exists(stagingRoot))
@@ -770,6 +744,7 @@ internal sealed class PluginManager : IDisposable
     {
         using ZipArchive archive = new(archiveStream, ZipArchiveMode.Read, leaveOpen: true);
         var rootFull = Path.GetFullPath(destinationDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var buffer = new byte[16384];
         long extractedBytes = 0;
 
         for (var i = 0; i < archive.Entries.Count; i++)
@@ -790,15 +765,27 @@ internal sealed class PluginManager : IDisposable
                 continue;
             }
 
-            extractedBytes += entry.Length;
-
-            if (extractedBytes > MaxArchiveBytes * 2)
+            if (entry.Length > MaxExtractedBytes - extractedBytes)
                 throw new InvalidDataException("Extracted plugin files exceed the size limit.");
 
             _ = Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
             using Stream source = entry.Open();
             using FileStream target = File.Create(targetPath);
-            source.CopyTo(target);
+
+            while (true)
+            {
+                var read = source.Read(buffer, 0, buffer.Length);
+
+                if (read == 0)
+                    break;
+
+                extractedBytes += read;
+
+                if (extractedBytes > MaxExtractedBytes)
+                    throw new InvalidDataException("Extracted plugin files exceed the size limit.");
+
+                target.Write(buffer, 0, read);
+            }
         }
     }
 
@@ -836,7 +823,7 @@ internal sealed class PluginManager : IDisposable
 
     private HashSet<string> CollectActiveKeysExceptLocked(string excludedPluginId)
     {
-        HashSet<string> keys = new(ReservedNodeKeys, StringComparer.Ordinal);
+        HashSet<string> keys = new(ScenarioCatalog.BuiltInKeys, StringComparer.Ordinal);
 
         foreach ((var id, LoadedPluginHandle handle) in _loaded)
         {
@@ -887,7 +874,25 @@ internal sealed class PluginManager : IDisposable
         return AtomicFile.WriteAsync(StateFilePath(), JsonSerializer.SerializeToUtf8Bytes(doc, DocumentJson.Options), cancellationToken);
     }
 
-    /// <summary>Checks GitHub Releases for every installed plugin and records any newer version found.</summary>
+    internal async Task<PluginOperationResult> InstallArchiveAsync(string repository, Stream archiveStream, string? fallbackTagVersion, PluginManifest? externalManifest, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(archiveStream);
+
+        if (PluginCoordinates.NormalizeRepository(repository) is not string normalizedRepo)
+            return new PluginOperationResult(false, Error: PluginErrorKind.InvalidRepository);
+
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            return await InstallArchiveCoreAsync(normalizedRepo, archiveStream, fallbackTagVersion, externalManifest, expectedPluginId: null, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _ = _mutationGate.Release();
+        }
+    }
+
     public async Task<PluginUpdateCheckResult> CheckUpdatesAsync(CancellationToken cancellationToken)
     {
         List<InstalledPluginRecord> snapshot;
@@ -916,7 +921,7 @@ internal sealed class PluginManager : IDisposable
 
             if (release.ManifestAssetUrl is not null)
             {
-                (var manifestBytes, _, _) = await DownloadBytesAsync(release.ManifestAssetUrl, maxBytes: 256 * 1024, cancellationToken).ConfigureAwait(false);
+                (var manifestBytes, _, _) = await DownloadBytesAsync(release.ManifestAssetUrl, MaxManifestBytes, cancellationToken).ConfigureAwait(false);
 
                 if (manifestBytes is not null && DeserializeManifest(manifestBytes) is { Version: { Length: > 0 } manifestVer })
                     candidateVersion = PluginCoordinates.NormalizeVersion(manifestVer);
@@ -967,7 +972,6 @@ internal sealed class PluginManager : IDisposable
         }
     }
 
-    /// <summary>Downloads and hot-swaps the latest GitHub release for an installed plugin without restarting the application.</summary>
     public async Task<PluginOperationResult> UpdateAsync(string pluginId, CancellationToken cancellationToken)
     {
         if (!Slug.IsValidId(pluginId))
@@ -996,7 +1000,6 @@ internal sealed class PluginManager : IDisposable
         }
     }
 
-    /// <summary>Enables or disables an installed plugin and updates the live node catalogue immediately.</summary>
     public async Task<PluginOperationResult> SetEnabledAsync(string pluginId, bool enabled, CancellationToken cancellationToken)
     {
         if (!Slug.IsValidId(pluginId))
@@ -1036,7 +1039,6 @@ internal sealed class PluginManager : IDisposable
         }
     }
 
-    /// <summary>Unloads and removes an installed plugin and its files under <c>data/plugins/&lt;id&gt;/</c>.</summary>
     public async Task<bool> UninstallAsync(string pluginId, CancellationToken cancellationToken)
     {
         if (!Slug.IsValidId(pluginId))

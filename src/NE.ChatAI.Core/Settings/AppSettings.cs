@@ -25,7 +25,7 @@ public sealed record AppSettings : Document
     /// <summary>The chat the home page opens when its address names none.</summary>
     public string? LastChat { get; init; }
 
-    /// <summary>Whether each message in the chat stands on a subtle surface of its own over the background picture.</summary>
+    /// <summary>Whether the central chat column stands on a subtle semi-transparent backdrop over the background picture.</summary>
     public bool MessageBackground { get; init; }
 
     /// <summary>How far the picture behind the chat is dimmed toward the theme's ground, from 0 (none) to 1 (solid theme ground).</summary>
@@ -34,7 +34,7 @@ public sealed record AppSettings : Document
     /// <summary>The PIN's hash when one is set; none, and every browser on the network gets in.</summary>
     public string? PinHash { get; init; }
 
-    /// <summary>The reader's quick phrases, each sent into the chat as it stands with one press.</summary>
+    /// <summary>The reader's quick phrases, inserted into the composer draft from the chat's extras menu.</summary>
     public IReadOnlyList<string> Phrases { get; init; } = [];
 
     /// <summary>The tags a character is given, each with the colour its badge is drawn in.</summary>

@@ -18,7 +18,7 @@ internal sealed partial class PhraseItem : RecursiveObservable, IBindableItem
     public partial string Text { get; set; } = string.Empty;
 }
 
-/// <summary>The quick phrases: a field each with its remove, then a new one; the chat's extras send each with one press.</summary>
+/// <summary>Quick phrases edited on <c>/settings</c> and inserted into the chat composer draft from Extras.</summary>
 internal sealed partial class SettingsController
 {
     [RecursiveMember(false)]

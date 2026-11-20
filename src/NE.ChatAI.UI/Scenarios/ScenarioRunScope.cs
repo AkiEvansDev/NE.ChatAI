@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Net.Http;
 using System.Security.Cryptography;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using NE.ChatAI.Backends.KoboldCpp;
@@ -50,10 +49,7 @@ internal sealed record ScenarioDelta(IReadOnlyList<ChatRecord> Records, IReadOnl
     }
 }
 
-/// <summary>
-/// Per-run context passed through <see cref="UINodeRunContext.Services"/> while one scenario sheet executes: the chat it reads,
-/// live streaming callbacks for the feed's folded block, and the records and generations staged for atomic commit when the run ends.
-/// </summary>
+/// <summary>Per-run context passed through <see cref="UINodeRunContext.Services"/> while one scenario sheet executes.</summary>
 internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvider, IScenarioContext, IScenarioSecrets, IScenarioMedia
 {
     private readonly Lock _sync = new();
@@ -70,8 +66,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     private string? _stagedDraft;
     private string? _stagedDraftGenerationId;
     private bool _stagedDraftContinued;
-    private string? _lastGenerationId;
-    private string? _lastThought;
 
     public required DataFolder Data { get; init; }
 
@@ -89,7 +83,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
 
     public required Chat Chat { get; init; }
 
-    /// <summary>Optional snapshot of the chat before the current turn started, used by <see cref="ContextNode"/> to detect rising-edge threshold crossings.</summary>
     public Chat? PreTurnChat { get; init; }
 
     public Character? Character { get; init; }
@@ -110,17 +103,19 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
 
     public required UINodeDocument Document { get; init; }
 
-    /// <summary>Whether writers stage records onto the chat; <c>false</c> during a canvas preview run on <c>/scenarios</c>.</summary>
     public bool CommitToChat { get; init; } = true;
 
-    /// <summary>Whether trigger gates and single-branch pre-model <c>When</c> guards pass unconditionally because the reader started the scenario by hand.</summary>
     public bool BypassGates { get; init; }
 
-    /// <summary>Optional deterministic <c>[0, maxExclusive)</c> generator for testing <see cref="ScenarioGate"/> and <see cref="CueMenuNode"/>.</summary>
     public Func<int, int>? RandomNext { get; init; }
 
-    /// <summary>The composer draft as it stood before the scenario started, so a draft-writing model call can continue it.</summary>
     public string InitialDraft { get; init; } = string.Empty;
+
+    // Unsent composer text during BeforeReply/AfterReply is not yet part of the conversation turn.
+    public string? PendingOutgoingDraft
+        => (Trigger.Kind == ScenarioTriggerKind.BeforeSend || !CommitToChat) && !string.IsNullOrWhiteSpace(InitialDraft)
+            ? InitialDraft
+            : null;
 
     public ActiveGenerations? ActiveGenerations { get; init; }
 
@@ -208,13 +203,12 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         => context.Services?.GetService(typeof(ScenarioRunScope)) as ScenarioRunScope
             ?? throw new UINodeFailureException("Chat nodes run only inside a chat scenario.");
 
-    /// <summary>Checks the scenario's sidebar <see cref="ScenarioGate"/> before any node runs; rolls <see cref="ScenarioGate.Chance"/> eagerly when the sheet has no <c>When</c> edges.</summary>
     public bool CheckTriggerGateBeforeRun()
     {
         if (BypassGates || !CommitToChat || Trigger.Kind == ScenarioTriggerKind.Manual || !Trigger.Gate.Enabled)
             return true;
 
-        var pendingOutgoingTurn = InitialDraft.Length > 0 && (Chat.Messages.Count == 0 || Chat.Messages[^1].Role != MessageRole.User) ? 1 : 0;
+        var pendingOutgoingTurn = PendingOutgoingDraft is not null && (Chat.Messages.Count == 0 || Chat.Messages[^1].Role != MessageRole.User) ? 1 : 0;
         var userTurns = ChatRecords.CountUserTurns(Chat.Messages) + pendingOutgoingTurn;
         var minTurns = Math.Max(0, Trigger.Gate.MinTurns);
 
@@ -236,8 +230,8 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
             UINodeEdge edge = Document.Edges[i];
 
             if (string.Equals(edge.ToPin, nameof(ModelCallNode.When), StringComparison.Ordinal)
-                && FindEnabledNode(edge.FromNode) is not null
-                && FindEnabledNode(edge.ToNode) is UINode target
+                && ScenarioDependencies.FindEnabledNode(Document, edge.FromNode) is not null
+                && ScenarioDependencies.FindEnabledNode(Document, edge.ToNode) is UINode target
                 && IsActionNode(target.Type))
             {
                 return true;
@@ -245,19 +239,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         }
 
         return false;
-    }
-
-    private UINode? FindEnabledNode(string nodeId)
-    {
-        for (var i = 0; i < Document.Nodes.Length; i++)
-        {
-            UINode node = Document.Nodes[i];
-
-            if (node.Enabled && string.Equals(node.Id, nodeId, StringComparison.Ordinal))
-                return node;
-        }
-
-        return null;
     }
 
     private static bool IsActionNode(string nodeType)
@@ -300,7 +281,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
                 ? Math.Clamp(RandomNext(maxExclusive), 0, maxExclusive - 1)
                 : RandomNumberGenerator.GetInt32(maxExclusive);
 
-    /// <summary>Evaluates whether an action node (<see cref="ModelCallNode"/> or writer) should execute, propagating upstream skips and lazy gate rolls.</summary>
     public bool ShouldRunAction(UINodeRunContext context, bool whenValue)
     {
         if (HasSkippedUpstream(context.NodeId))
@@ -345,34 +325,38 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     {
         lock (_sync)
         {
-            if (_skippedNodes.Count == 0)
-                return false;
-
-            HashSet<string> visited = [with(StringComparer.Ordinal), nodeId];
-            Queue<string> pending = new();
-            pending.Enqueue(nodeId);
-
-            while (pending.Count > 0)
-            {
-                var currentId = pending.Dequeue();
-
-                for (var i = 0; i < Document.Edges.Length; i++)
-                {
-                    UINodeEdge edge = Document.Edges[i];
-
-                    if (!string.Equals(edge.ToNode, currentId, StringComparison.Ordinal))
-                        continue;
-
-                    if (_skippedNodes.Contains(edge.FromNode))
-                        return true;
-
-                    if (FindEnabledNode(edge.FromNode) is UINode source && visited.Add(source.Id))
-                        pending.Enqueue(source.Id);
-                }
-            }
-
-            return false;
+            return _skippedNodes.Count > 0 && SearchUpstream(nodeId, (fromNodeId, _) => _skippedNodes.Contains(fromNodeId));
         }
+    }
+
+    private bool SearchUpstream(string startNodeId, Func<string, UINode?, bool> match)
+    {
+        HashSet<string> visited = [with(StringComparer.Ordinal), startNodeId];
+        Queue<string> pending = new();
+        pending.Enqueue(startNodeId);
+
+        while (pending.Count > 0)
+        {
+            var currentId = pending.Dequeue();
+
+            for (var i = 0; i < Document.Edges.Length; i++)
+            {
+                UINodeEdge edge = Document.Edges[i];
+
+                if (!string.Equals(edge.ToNode, currentId, StringComparison.Ordinal))
+                    continue;
+
+                UINode? source = ScenarioDependencies.FindEnabledNode(Document, edge.FromNode);
+
+                if (match(edge.FromNode, source))
+                    return true;
+
+                if (source is not null && visited.Add(source.Id))
+                    pending.Enqueue(source.Id);
+            }
+        }
+
+        return false;
     }
 
     private void MarkSkipped(string nodeId)
@@ -387,32 +371,7 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
             && CountPreModelWhenTargets() <= 1;
 
     private bool HasUpstreamActionNode(string nodeId)
-    {
-        HashSet<string> visited = [with(StringComparer.Ordinal), nodeId];
-        Queue<string> pending = new();
-        pending.Enqueue(nodeId);
-
-        while (pending.Count > 0)
-        {
-            var currentId = pending.Dequeue();
-
-            for (var i = 0; i < Document.Edges.Length; i++)
-            {
-                UINodeEdge edge = Document.Edges[i];
-
-                if (!string.Equals(edge.ToNode, currentId, StringComparison.Ordinal) || FindEnabledNode(edge.FromNode) is not UINode source)
-                    continue;
-
-                if (IsActionNode(source.Type))
-                    return true;
-
-                if (visited.Add(source.Id))
-                    pending.Enqueue(source.Id);
-            }
-        }
-
-        return false;
-    }
+        => SearchUpstream(nodeId, static (_, source) => source is not null && IsActionNode(source.Type));
 
     private int CountPreModelWhenTargets()
     {
@@ -423,8 +382,8 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
             UINodeEdge edge = Document.Edges[i];
 
             if (string.Equals(edge.ToPin, nameof(ModelCallNode.When), StringComparison.Ordinal)
-                && FindEnabledNode(edge.FromNode) is not null
-                && FindEnabledNode(edge.ToNode) is UINode target
+                && ScenarioDependencies.FindEnabledNode(Document, edge.FromNode) is not null
+                && ScenarioDependencies.FindEnabledNode(Document, edge.ToNode) is UINode target
                 && IsActionNode(target.Type)
                 && !HasUpstreamActionNode(target.Id))
             {
@@ -447,8 +406,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         {
             _generations.Add(record);
             _generationsByNode[nodeId] = (record.Id, thought);
-            _lastGenerationId = record.Id;
-            _lastThought = thought;
         }
     }
 
@@ -456,39 +413,11 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     {
         lock (_sync)
         {
-            if (FindUpstreamGenerationUnlocked(writerNodeId) is (var id, var thought))
-                return (id, thought);
+            (string GenerationId, string? Thought) found = default;
+            var matched = SearchUpstream(writerNodeId, (fromNodeId, _) => _generationsByNode.TryGetValue(fromNodeId, out found));
 
-            return (_lastGenerationId, _lastThought);
+            return matched ? (found.GenerationId, found.Thought) : (null, null);
         }
-    }
-
-    private (string GenerationId, string? Thought)? FindUpstreamGenerationUnlocked(string writerNodeId)
-    {
-        HashSet<string> visited = [with(StringComparer.Ordinal), writerNodeId];
-        Queue<string> pending = new();
-        pending.Enqueue(writerNodeId);
-
-        while (pending.Count > 0)
-        {
-            var currentId = pending.Dequeue();
-
-            for (var i = 0; i < Document.Edges.Length; i++)
-            {
-                UINodeEdge edge = Document.Edges[i];
-
-                if (!string.Equals(edge.ToNode, currentId, StringComparison.Ordinal))
-                    continue;
-
-                if (_generationsByNode.TryGetValue(edge.FromNode, out (string GenerationId, string? Thought) found))
-                    return found;
-
-                if (FindEnabledNode(edge.FromNode) is UINode source && visited.Add(source.Id))
-                    pending.Enqueue(source.Id);
-            }
-        }
-
-        return null;
     }
 
     public void StageRecord(ChatRecord record)
@@ -519,34 +448,19 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
             return new ScenarioDelta([.. _stagedRecords], [.. _generations], _stagedDraft, _stagedDraftGenerationId, _stagedDraftContinued, _stagedVisuals.Count == 0 ? null : [.. _stagedVisuals]);
     }
 
-    /// <summary>Resolves the <see cref="DraftWriteMode"/> of an enabled downstream <see cref="WriteDraftNode"/>, or <c>null</c> when <paramref name="modelNodeId"/> does not feed one.</summary>
     public DraftWriteMode? ResolveDraftWriteMode(string modelNodeId)
     {
-        HashSet<string> visited = [with(StringComparer.Ordinal), modelNodeId];
-        Queue<string> pending = new();
-        pending.Enqueue(modelNodeId);
-
-        while (pending.Count > 0)
+        for (var i = 0; i < Document.Edges.Length; i++)
         {
-            var currentId = pending.Dequeue();
+            UINodeEdge edge = Document.Edges[i];
 
-            for (var i = 0; i < Document.Edges.Length; i++)
+            if (string.Equals(edge.FromNode, modelNodeId, StringComparison.Ordinal)
+                && string.Equals(edge.FromPin, nameof(ModelCallNode.Text), StringComparison.Ordinal)
+                && string.Equals(edge.ToPin, nameof(WriteDraftNode.Text), StringComparison.Ordinal)
+                && ScenarioDependencies.FindEnabledNode(Document, edge.ToNode) is UINode target
+                && string.Equals(target.Type, WriteDraftNode.NodeKey, StringComparison.Ordinal))
             {
-                UINodeEdge edge = Document.Edges[i];
-
-                if (!string.Equals(edge.FromNode, currentId, StringComparison.Ordinal))
-                    continue;
-
-                UINode? target = FindEnabledNode(edge.ToNode);
-
-                if (target is null)
-                    continue;
-
-                if (string.Equals(target.Type, WriteDraftNode.NodeKey, StringComparison.Ordinal))
-                    return ReadDraftWriteMode(target);
-
-                if (visited.Add(target.Id))
-                    pending.Enqueue(target.Id);
+                return ReadDraftWriteMode(target);
             }
         }
 
@@ -554,21 +468,8 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
     }
 
     internal static DraftWriteMode ReadDraftWriteMode(UINode node)
-    {
-        if (!node.Values.TryGetValue(nameof(WriteDraftNode.Mode), out var value) || value is null)
-            return DraftWriteMode.Replace;
+        => ScenarioDependencies.ReadEnum(node, nameof(WriteDraftNode.Mode), DraftWriteMode.Replace);
 
-        return value switch
-        {
-            DraftWriteMode mode => mode,
-            JsonElement { ValueKind: JsonValueKind.String } element when Enum.TryParse(element.GetString(), ignoreCase: true, out DraftWriteMode parsed) => parsed,
-            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetInt32(out var index) && Enum.IsDefined((DraftWriteMode)index) => (DraftWriteMode)index,
-            string text when Enum.TryParse(text, ignoreCase: true, out DraftWriteMode parsed) => parsed,
-            _ => DraftWriteMode.Replace
-        };
-    }
-
-    /// <summary>Finds the message id under which a streaming model call's folded block should appear before downstream writers run.</summary>
     public string? ResolveStreamingAnchor(string modelNodeId)
     {
         if (Chat.Messages.Count == 0)
@@ -590,7 +491,7 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
                 if (!string.Equals(edge.FromNode, currentId, StringComparison.Ordinal))
                     continue;
 
-                UINode? target = FindEnabledNode(edge.ToNode);
+                UINode? target = ScenarioDependencies.FindEnabledNode(Document, edge.ToNode);
 
                 if (target is null)
                     continue;
@@ -636,7 +537,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         return null;
     }
 
-    /// <summary>Finds the earliest target anchor message id written by an enabled writer node carrying <paramref name="tag"/>, so a reader of the same tag skips a record already sitting at that anchor.</summary>
     public string? ResolveOverwrittenAnchor(string? tag)
     {
         if (Chat.Messages.Count == 0 || string.IsNullOrWhiteSpace(tag))
@@ -678,14 +578,13 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
 
     private static string? ResolveWriterTag(UINodeNetwork network, UINodeInstance instance)
     {
-        var direct = instance.Node switch
-        {
-            InsertRecordNode insert => insert.Tag,
-            ReplaceRecordNode replace => replace.Tag,
-            _ => null
-        };
+        string? direct;
 
-        if (direct is null)
+        if (instance.Node is InsertRecordNode insert)
+            direct = insert.Tag;
+        else if (instance.Node is ReplaceRecordNode replace)
+            direct = replace.Tag;
+        else
             return null;
 
         for (var i = 0; i < network.Connections.Length; i++)
@@ -739,7 +638,7 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
 
             if (string.Equals(edge.ToNode, toNodeId, StringComparison.Ordinal)
                 && string.Equals(edge.ToPin, toPin, StringComparison.Ordinal)
-                && FindEnabledNode(edge.FromNode) is not null)
+                && ScenarioDependencies.FindEnabledNode(Document, edge.FromNode) is not null)
             {
                 return true;
             }
@@ -748,7 +647,6 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         return false;
     }
 
-    /// <summary>Measures and caches the assembled main-prompt token counts for <see cref="Chat"/> and the pre-turn baseline against the active connection's context length.</summary>
     public Task<(int CurrentTokens, int PreviousTokens, int ContextLength)> MeasureContextAsync(CancellationToken cancellationToken)
     {
         lock (_sync)
@@ -774,7 +672,7 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
             contextLength = resolved.Length;
 
             if (!resolved.ServerAway)
-                model = await TryGetModelNameAsync(kobold, cancellationToken).ConfigureAwait(false);
+                model = await KoboldCppClients.TryGetModelNameAsync(kobold, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -793,18 +691,19 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
         return (currentTokens, previousTokens, contextLength);
     }
 
-    private static async Task<string?> TryGetModelNameAsync(KoboldCppClient kobold, CancellationToken cancellationToken)
+    private static Chat? DerivePreviousTurnChat(Chat chat)
     {
-        try
-        {
-            var model = (await kobold.GetModelAsync(cancellationToken).ConfigureAwait(false)).Trim();
+        var count = chat.Messages.Count;
 
-            return model.Length == 0 ? null : model;
-        }
-        catch (HttpRequestException)
-        {
+        if (count == 0)
             return null;
-        }
+
+        var trimFrom = count - 1;
+
+        if (chat.Messages[trimFrom].Role == MessageRole.Character && trimFrom > 0 && chat.Messages[trimFrom - 1].Role == MessageRole.User)
+            trimFrom--;
+
+        return ChatEditing.DeleteFrom(chat, chat.Messages[trimFrom].Id);
     }
 
     private async Task<int> CountChatPromptTokensAsync(ActiveProfile profile, Chat chat, int contextLength, KoboldCppClient? kobold, string? model, CancellationToken cancellationToken)
@@ -824,37 +723,8 @@ internal sealed class ScenarioRunScope(IServiceProvider outer) : IServiceProvide
             History = projectedHistory
         };
 
-        if (kobold is not null && profile.Connection.Address is Uri address)
-        {
-            try
-            {
-                ITokenCounter counter = Clients.CounterFor(address, kobold, model);
-                BuiltPrompt exact = await PromptBuilder.BuildAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, counter, cancellationToken).ConfigureAwait(false);
+        BuiltPrompt built = await Clients.BuildPromptWithFallbackAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, profile.Connection.Address, kobold, model, cancellationToken).ConfigureAwait(false);
 
-                return exact.Tokens;
-            }
-            catch (HttpRequestException)
-            {
-            }
-        }
-
-        BuiltPrompt approximate = await PromptBuilder.BuildAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, ApproximateTokenCounter.Instance, cancellationToken).ConfigureAwait(false);
-
-        return approximate.Tokens;
-    }
-
-    private static Chat? DerivePreviousTurnChat(Chat chat)
-    {
-        var count = chat.Messages.Count;
-
-        if (count == 0)
-            return null;
-
-        var trimFrom = count - 1;
-
-        if (chat.Messages[trimFrom].Role == MessageRole.Character && trimFrom > 0 && chat.Messages[trimFrom - 1].Role == MessageRole.User)
-            trimFrom--;
-
-        return ChatEditing.DeleteFrom(chat, chat.Messages[trimFrom].Id);
+        return built.Tokens;
     }
 }

@@ -10,6 +10,33 @@ public static class AtomicFile
 {
     public const string TemporaryExtension = ".tmp";
 
+    /// <summary>Reads <paramref name="path"/> while allowing concurrent atomic moves or deletes on Windows.</summary>
+    public static async Task<byte[]> ReadBytesAsync(string path, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+
+        FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
+
+        await using (stream.ConfigureAwait(false))
+        {
+            var length = stream.Length;
+            var buffer = new byte[checked((int)length)];
+            var offset = 0;
+
+            while (offset < buffer.Length)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(offset, buffer.Length - offset), cancellationToken).ConfigureAwait(false);
+
+                if (read == 0)
+                    return buffer[..offset];
+
+                offset += read;
+            }
+
+            return buffer;
+        }
+    }
+
     public static async Task WriteAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -40,6 +67,34 @@ public static class AtomicFile
         }
     }
 
+    /// <summary>Copies <paramref name="sourcePath"/> to <paramref name="targetPath"/> atomically via a temporary sibling file.</summary>
+    public static void Copy(string sourcePath, string targetPath)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(sourcePath);
+        ArgumentException.ThrowIfNullOrEmpty(targetPath);
+
+        if (string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(targetPath), StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var directory = Path.GetDirectoryName(targetPath);
+
+        if (!string.IsNullOrEmpty(directory))
+            _ = Directory.CreateDirectory(directory);
+
+        var temporary = $"{targetPath}.{Guid.NewGuid():N}{TemporaryExtension}";
+
+        try
+        {
+            File.Copy(sourcePath, temporary, overwrite: true);
+            File.Move(temporary, targetPath, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(temporary);
+            throw;
+        }
+    }
+
     private static void TryDelete(string path)
     {
         try
@@ -52,7 +107,7 @@ public static class AtomicFile
         }
     }
 
-    /// <summary>Deletes what a crash left behind under <paramref name="directory"/>: temporary files nothing will finish.</summary>
+    /// <summary>Deletes unfinished temporary files left behind under <paramref name="directory"/> after a crash.</summary>
     public static void SweepTemporaries(string directory)
     {
         if (!Directory.Exists(directory))

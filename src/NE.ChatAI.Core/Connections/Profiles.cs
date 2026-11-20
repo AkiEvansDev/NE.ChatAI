@@ -16,19 +16,13 @@ namespace NE.ChatAI.Connections;
 /// <summary>A connection with the documents it names read: what a generation is made with.</summary>
 public sealed record ActiveProfile(string ConnectionId, ConnectionProfile Connection, ModelFormat Format, SystemPromptPreset SystemPrompt, PromptPreset Prompt, SamplerPreset Samplers);
 
-/// <summary>The active connection and its parts, and the documents a first start lays down so a chat works at once.</summary>
+/// <summary>Loads active connection profiles, seeds first-start defaults and upgrades legacy preset fields.</summary>
 public static class Profiles
 {
-    /// <summary>The field a prompt preset kept its system prompt in before the system prompt became a document of its own.</summary>
     private const string LegacySystemPrompt = "systemPrompt";
-
-    /// <summary>The field a prompt preset kept where author's notes go in before it became the global note's setting.</summary>
     private const string LegacyNotePlacement = "authorsNote";
 
-    /// <summary>
-    /// The connection the settings name, with its model format, system prompt, prompt and samplers; a reference to a document that is
-    /// gone falls back to the defaults rather than refusing to generate. <c>null</c> when no connection is chosen or it is gone.
-    /// </summary>
+    /// <summary>Loads the active connection profile and its referenced documents, or <see langword="null"/> when none is configured.</summary>
     public static async Task<ActiveProfile?> LoadActiveAsync(DataFolder data, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -55,11 +49,7 @@ public static class Profiles
         return new ActiveProfile(id, connection, format, system, prompt, samplers);
     }
 
-    /// <summary>
-    /// On a data folder with no connection yet: the base set of presets (<see cref="DefaultDocuments"/>) and a koboldcpp connection at
-    /// <paramref name="koboldCppAddress"/> naming its Gemma 4 format, roleplay prompts and balanced samplers, made the active one. A
-    /// folder that has a connection is left as it is, save that what older versions kept inside a prompt preset is moved out.
-    /// </summary>
+    /// <summary>Seeds shipped presets and a default koboldcpp connection on an empty data folder, or upgrades legacy documents in place.</summary>
     public static async Task EnsureDefaultsAsync(DataFolder data, Uri koboldCppAddress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -134,7 +124,7 @@ public static class Profiles
             await data.Scenarios.WriteAsync(DefaultDocuments.ImpersonateScenarioId, updated, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Upgrades any on-disk scenarios still carrying a legacy <c>contextShare</c> trigger or retired <c>chat.gate</c> node.</summary>
+    /// <summary>Upgrades any on-disk scenarios carrying a legacy <c>contextShare</c> trigger or retired <c>chat.gate</c> node.</summary>
     public static async Task UpgradeLegacyScenariosAsync(DataFolder data, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -151,10 +141,7 @@ public static class Profiles
         }
     }
 
-    /// <summary>
-    /// Each prompt preset's own system prompt, from before it was a document of its own, becomes one under the preset's name; every
-    /// connection naming the preset and no system prompt is pointed at it, and the preset forgets the field.
-    /// </summary>
+    /// <summary>Extracts embedded <c>systemPrompt</c> fields from legacy prompt presets into standalone system prompt documents.</summary>
     public static async Task MoveSystemPromptsOutAsync(DataFolder data, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -183,10 +170,7 @@ public static class Profiles
         }
     }
 
-    /// <summary>
-    /// Where author's notes go, from before it was the global note's setting: the active connection's prompt preset's placement
-    /// becomes the settings' — its depth and role, "before the last message" a depth of 1 — and every preset forgets the field.
-    /// </summary>
+    /// <summary>Extracts embedded <c>authorsNote</c> placement objects from legacy prompt presets into <see cref="AppSettings.AuthorsNotePlacement"/>.</summary>
     public static async Task MoveNotePlacementOutAsync(DataFolder data, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);

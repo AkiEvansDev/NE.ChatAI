@@ -82,7 +82,7 @@ public static class DataArchive
             if (scopes != DataArchiveScopes.None)
             {
                 AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-                await WriteJsonEntryAsync(archive, SettingsFile, settings with { Format = Document.CurrentFormat, PinHash = null }, cancellationToken).ConfigureAwait(false);
+                await WriteJsonEntryAsync(archive, SettingsFile, ScopedSettings(settings, scopes), cancellationToken).ConfigureAwait(false);
             }
 
             if (scopes.HasFlag(DataArchiveScopes.Settings))
@@ -111,6 +111,32 @@ public static class DataArchive
         return buffer.ToArray();
     }
 
+    private static AppSettings ScopedSettings(AppSettings settings, DataArchiveScopes scopes)
+    {
+        if (scopes.HasFlag(DataArchiveScopes.Settings))
+        {
+            return settings with
+            {
+                Format = Document.CurrentFormat,
+                PinHash = null,
+                Persona = scopes.HasFlag(DataArchiveScopes.Content) ? settings.Persona : null,
+                LastChat = scopes.HasFlag(DataArchiveScopes.Chats) ? settings.LastChat : null
+            };
+        }
+
+        var includeContent = scopes.HasFlag(DataArchiveScopes.Content);
+
+        return new AppSettings
+        {
+            Format = Document.CurrentFormat,
+            Persona = includeContent ? settings.Persona : null,
+            LastChat = scopes.HasFlag(DataArchiveScopes.Chats) ? settings.LastChat : null,
+            Tags = includeContent ? settings.Tags : [],
+            PersonaTags = includeContent ? settings.PersonaTags : [],
+            WorldTags = includeContent ? settings.WorldTags : []
+        };
+    }
+
     private static async Task WriteJsonEntryAsync<T>(ZipArchive archive, string entryPath, T value, CancellationToken cancellationToken)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(value, DocumentJson.Options);
@@ -129,7 +155,7 @@ public static class DataArchive
 
     private static async Task AddFileEntryAsync(ZipArchive archive, string entryPath, string filePath, CancellationToken cancellationToken)
     {
-        var bytes = await File.ReadAllBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
+        var bytes = await AtomicFile.ReadBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
         ZipArchiveEntry entry = archive.CreateEntry(entryPath, CompressionLevel.Optimal);
         Stream output = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
 
@@ -147,16 +173,10 @@ public static class DataArchive
             var id = Path.GetFileNameWithoutExtension(file);
             var ext = Path.GetExtension(file);
 
-            if (Slug.IsValidId(id) && IsPictureExtension(ext))
+            if (Slug.IsValidId(id) && PictureFiles.IsExtension(ext))
                 await AddFileEntryAsync(archive, $"{archivePrefix}/{id}{ext.ToLowerInvariant()}", file, cancellationToken).ConfigureAwait(false);
         }
     }
-
-    private static bool IsPictureExtension(string extension)
-        => extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
 
     private static async Task AddStoreFilesAsync(ZipArchive archive, string root, string folderName, CancellationToken cancellationToken)
     {
@@ -217,7 +237,7 @@ public static class DataArchive
 
         return (string.Equals(stem, CardPictures.Avatar, StringComparison.OrdinalIgnoreCase)
             || string.Equals(stem, CardPictures.Background, StringComparison.OrdinalIgnoreCase))
-            && IsPictureExtension(ext);
+            && PictureFiles.IsExtension(ext);
     }
 
     private static async Task AddChatFilesAsync(ZipArchive archive, DataFolder data, CancellationToken cancellationToken)
@@ -249,12 +269,12 @@ public static class DataArchive
         ArgumentNullException.ThrowIfNull(data);
 
         Dictionary<string, byte[]> entries = StripCommonRootFolder(await ReadEntriesAsync(archiveBytes, cancellationToken).ConfigureAwait(false));
-        ArchiveManifest? explicitManifest = entries.TryGetValue(ManifestFile, out var manifestBytes) ? TryDeserialize<ArchiveManifest>(manifestBytes) : null;
+        ArchiveManifest? explicitManifest = entries.TryGetValue(ManifestFile, out var manifestBytes) ? DocumentJson.TryRead<ArchiveManifest>(manifestBytes) : null;
 
         if (entries.ContainsKey(ManifestFile) && explicitManifest is null)
             return new DataArchiveImportSummary(false, 0, 0, 0, 0, 0);
 
-        AppSettings? incomingSettings = entries.TryGetValue(SettingsFile, out var settingsBytes) ? TryDeserialize<AppSettings>(settingsBytes) : null;
+        AppSettings? incomingSettings = entries.TryGetValue(SettingsFile, out var settingsBytes) ? DocumentJson.TryRead<AppSettings>(settingsBytes) : null;
         ArchiveManifest manifest = explicitManifest ?? new ArchiveManifest
         {
             Settings = incomingSettings is not null,
@@ -289,7 +309,7 @@ public static class DataArchive
                 var stem = Path.GetFileNameWithoutExtension(parts[0]);
                 var ext = Path.GetExtension(parts[0]);
 
-                if (manifest.Settings && string.Equals(stem, CardPictures.Background, StringComparison.OrdinalIgnoreCase) && IsPictureExtension(ext))
+                if (manifest.Settings && string.Equals(stem, CardPictures.Background, StringComparison.OrdinalIgnoreCase) && PictureFiles.IsExtension(ext))
                     rootBackground = (CardPictures.Background + ext.ToLowerInvariant(), content);
 
                 continue;
@@ -323,7 +343,7 @@ public static class DataArchive
                 var id = Path.GetFileNameWithoutExtension(parts[1]);
                 var ext = Path.GetExtension(parts[1]);
 
-                if (Slug.IsValidId(id) && IsPictureExtension(ext))
+                if (Slug.IsValidId(id) && PictureFiles.IsExtension(ext))
                 {
                     var globalFolder = GalleryPictures.GlobalFolderOf(data);
                     _ = Directory.CreateDirectory(globalFolder);
@@ -340,7 +360,7 @@ public static class DataArchive
                 var id = Path.GetFileNameWithoutExtension(parts[1]);
                 var ext = Path.GetExtension(parts[1]);
 
-                if (Slug.IsValidId(id) && IsPictureExtension(ext))
+                if (Slug.IsValidId(id) && PictureFiles.IsExtension(ext))
                     chatPictures.Add((id, ext.ToLowerInvariant(), content));
 
                 continue;
@@ -374,7 +394,7 @@ public static class DataArchive
                 var imageId = Path.GetFileNameWithoutExtension(parts[3]);
                 var ext = Path.GetExtension(parts[3]);
 
-                if (!Slug.IsValidId(imageId) || !IsPictureExtension(ext))
+                if (!Slug.IsValidId(imageId) || !PictureFiles.IsExtension(ext))
                     continue;
 
                 if (parts[0] == CharactersFolder && manifest.Content)
@@ -430,10 +450,18 @@ public static class DataArchive
             : null;
         var fallbackConnectionId = replacedConnectionId is not null ? importedConnections[0] : null;
         var settingsApplied = await ApplySettingsAsync(data, manifest, incomingSettings, rootBackground, replacedConnectionId, fallbackConnectionId, cancellationToken).ConfigureAwait(false) || globalImagesImported;
+
+        if (manifest.Content || manifest.Settings)
+            await SanitizeCharacterImageTagsAsync(data, cancellationToken).ConfigureAwait(false);
+
         data.InvalidateCaches();
 
         if (presets > 0)
+        {
+            await Profiles.MoveSystemPromptsOutAsync(data, cancellationToken).ConfigureAwait(false);
+            await Profiles.MoveNotePlacementOutAsync(data, cancellationToken).ConfigureAwait(false);
             await Profiles.UpgradeLegacyScenariosAsync(data, cancellationToken).ConfigureAwait(false);
+        }
 
         return new DataArchiveImportSummary(settingsApplied, presets, characters, personas, worlds, chats);
     }
@@ -519,21 +547,7 @@ public static class DataArchive
 
     private static bool IsKnownRootSegment(string segment)
         => segment is ManifestFile or SettingsFile or ConnectionsFolder or FormatsFolder or SystemPromptsFolder or PromptsFolder or SamplersFolder or ScenariosFolder or ImagesFolder or CharactersFolder or PersonasFolder or WorldsFolder or ChatsFolder
-            || (string.Equals(Path.GetFileNameWithoutExtension(segment), CardPictures.Background, StringComparison.OrdinalIgnoreCase) && IsPictureExtension(Path.GetExtension(segment)));
-
-    private static T? TryDeserialize<T>(byte[] content) where T : Document
-    {
-        try
-        {
-            T? doc = JsonSerializer.Deserialize<T>(content, DocumentJson.Options);
-
-            return doc is not null && doc.Format <= Document.CurrentFormat ? doc : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+            || (string.Equals(Path.GetFileNameWithoutExtension(segment), CardPictures.Background, StringComparison.OrdinalIgnoreCase) && PictureFiles.IsExtension(Path.GetExtension(segment)));
 
     private static async Task<string?> FindDefaultConnectionPlaceholderAsync(DataFolder data, CancellationToken cancellationToken)
     {
@@ -545,7 +559,8 @@ public static class DataArchive
         StoredDocument<ConnectionProfile> single = existing[0];
         ConnectionProfile connection = single.Document;
 
-        return connection.Name == "koboldcpp"
+        return string.Equals(single.Id, DefaultDocuments.ConnectionId, StringComparison.Ordinal)
+            && connection.Name == "koboldcpp"
             && connection.Backend == BackendKind.KoboldCpp
             && connection.Address == DefaultKoboldAddress
             && connection.Secret is null
@@ -559,6 +574,18 @@ public static class DataArchive
             : null;
     }
 
+    private static Task<bool> ImportChatEntryAsync(DataFolder data, string id, byte[] content, CancellationToken cancellationToken)
+        => WriteVerifiedAsync(data.Chats, id, content, cancellationToken);
+
+    private static async Task<bool> WriteVerifiedAsync<T>(DocumentStore<T> store, string id, byte[] content, CancellationToken cancellationToken) where T : NamedDocument
+    {
+        if (DocumentJson.TryRead<T>(content) is not T document)
+            return false;
+
+        await store.WriteAsync(id, document, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     private static Task<bool> ImportPresetEntryAsync(DataFolder data, string folder, string id, byte[] content, CancellationToken cancellationToken)
         => folder switch
         {
@@ -570,15 +597,6 @@ public static class DataArchive
             ScenariosFolder => WriteVerifiedAsync(data.Scenarios, id, content, cancellationToken),
             _ => Task.FromResult(false)
         };
-
-    private static async Task<bool> WriteVerifiedAsync<T>(DocumentStore<T> store, string id, byte[] content, CancellationToken cancellationToken) where T : NamedDocument
-    {
-        if (TryDeserialize<T>(content) is not T document)
-            return false;
-
-        await store.WriteAsync(id, document, cancellationToken).ConfigureAwait(false);
-        return true;
-    }
 
     private static async Task<(bool Imported, string? Kind)> ImportCardDocumentAsync(DataFolder data, string folder, string id, string fileName, byte[] content, CancellationToken cancellationToken)
     {
@@ -635,9 +653,6 @@ public static class DataArchive
         }
     }
 
-    private static Task<bool> ImportChatEntryAsync(DataFolder data, string id, byte[] content, CancellationToken cancellationToken)
-        => WriteVerifiedAsync(data.Chats, id, content, cancellationToken);
-
     private static async Task<bool> ApplySettingsAsync(DataFolder data, ArchiveManifest manifest, AppSettings? incoming, (string FileName, byte[] Content)? background, string? replacedConnectionId, string? fallbackConnectionId, CancellationToken cancellationToken)
     {
         if (background is (var fileName, var bytes))
@@ -678,7 +693,7 @@ public static class DataArchive
                 Tags = tags,
                 PersonaTags = personaTags,
                 WorldTags = worldTags,
-                ImageTags = MergeImageTags(GalleryPictures.GlobalFolderOf(data), current.ImageTags, incoming.ImageTags)
+                ImageTags = MergeGlobalImageTags(data, current.ImageTags, incoming.ImageTags)
             };
 
             await data.WriteSettingsAsync(updated, cancellationToken).ConfigureAwait(false);
@@ -722,24 +737,88 @@ public static class DataArchive
         return [.. merged.Values];
     }
 
-    private static IReadOnlyDictionary<string, string> MergeImageTags(string globalFolder, IReadOnlyDictionary<string, string> current, IReadOnlyDictionary<string, string> incoming)
+    private static IReadOnlyDictionary<string, string> MergeGlobalImageTags(DataFolder data, IReadOnlyDictionary<string, string> current, IReadOnlyDictionary<string, string> incoming)
     {
-        SortedDictionary<string, string> merged = [with(StringComparer.Ordinal)];
+        var globalFolder = GalleryPictures.GlobalFolderOf(data);
+        IReadOnlyList<GalleryImage> globalImages = GalleryPictures.ListGlobal(data);
         HashSet<string> usedTags = [with(StringComparer.Ordinal), GalleryPictures.GlobalScope];
+
+        for (var i = 0; i < globalImages.Count; i++)
+            _ = usedTags.Add(globalImages[i].Id);
+
+        SortedDictionary<string, string> merged = [with(StringComparer.Ordinal)];
 
         foreach ((var id, var tag) in incoming)
         {
-            if (Slug.IsValidId(id) && Slug.IsValidId(tag) && PictureFiles.Find(globalFolder, id) is not null && usedTags.Add(tag))
+            if (Slug.IsValidId(id) && Slug.IsValidId(tag) && PictureFiles.Find(globalFolder, id) is not null && (string.Equals(id, tag, StringComparison.Ordinal) || usedTags.Add(tag)))
                 merged[id] = tag;
         }
 
         foreach ((var id, var tag) in current)
         {
-            if (!merged.ContainsKey(id) && Slug.IsValidId(id) && Slug.IsValidId(tag) && PictureFiles.Find(globalFolder, id) is not null && usedTags.Add(tag))
+            if (!merged.ContainsKey(id) && Slug.IsValidId(id) && Slug.IsValidId(tag) && PictureFiles.Find(globalFolder, id) is not null && (string.Equals(id, tag, StringComparison.Ordinal) || usedTags.Add(tag)))
                 merged[id] = tag;
         }
 
         return merged.Count == 0 ? FrozenDictionary<string, string>.Empty : merged;
+    }
+
+    private static async Task SanitizeCharacterImageTagsAsync(DataFolder data, CancellationToken cancellationToken)
+    {
+        AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<GalleryImage> globalImages = GalleryPictures.ListGlobal(data, settings.ImageTags);
+        HashSet<string> globalReserved = [with(StringComparer.Ordinal), GalleryPictures.GlobalScope];
+
+        for (var i = 0; i < globalImages.Count; i++)
+        {
+            _ = globalReserved.Add(globalImages[i].Id);
+
+            if (globalImages[i].Tag is string globalTag)
+                _ = globalReserved.Add(globalTag);
+        }
+
+        DocumentListing<Character> characters = await data.Characters.ListAsync(cancellationToken).ConfigureAwait(false);
+
+        for (var i = 0; i < characters.Items.Count; i++)
+        {
+            StoredDocument<Character> stored = characters.Items[i];
+            Character character = stored.Document;
+
+            if (character.ImageTags.Count == 0)
+                continue;
+
+            var charFolder = GalleryPictures.CharacterFolderOf(data, stored.Id);
+            IReadOnlyList<GalleryImage> charImages = GalleryPictures.ListCharacter(data, stored.Id);
+            HashSet<string> used = [with(StringComparer.Ordinal), .. globalReserved];
+
+            for (var j = 0; j < charImages.Count; j++)
+                _ = used.Add(charImages[j].Id);
+
+            SortedDictionary<string, string> sanitized = [with(StringComparer.Ordinal)];
+            var changed = false;
+
+            foreach ((var id, var tag) in character.ImageTags)
+            {
+                if (Slug.IsValidId(id)
+                    && Slug.IsValidId(tag)
+                    && PictureFiles.Find(charFolder, id) is not null
+                    && !globalReserved.Contains(tag)
+                    && (string.Equals(id, tag, StringComparison.Ordinal) || used.Add(tag)))
+                {
+                    sanitized[id] = tag;
+                }
+                else
+                {
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                IReadOnlyDictionary<string, string> updatedTags = sanitized.Count == 0 ? FrozenDictionary<string, string>.Empty : sanitized;
+                await data.Characters.WriteAsync(stored.Id, character with { ImageTags = updatedTags }, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private sealed record ArchiveManifest : Document

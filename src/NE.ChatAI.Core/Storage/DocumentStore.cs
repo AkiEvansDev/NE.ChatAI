@@ -39,10 +39,7 @@ public sealed class DocumentFormatException : Exception
     public string? Path { get; }
 }
 
-/// <summary>
-/// One kind of document under the data folder: a file per document (<c>prompts/&lt;id&gt;.json</c>) or a folder per document
-/// holding its file and whatever goes with it (<c>characters/&lt;id&gt;/character.json</c>, its avatar beside it).
-/// </summary>
+/// <summary>File- or folder-backed store for one kind of <see cref="NamedDocument"/> inside <see cref="DataFolder"/>.</summary>
 public sealed class DocumentStore<T> where T : NamedDocument
 {
     private sealed record CachedDocument(long LastWriteTicks, long Length, T Document);
@@ -52,10 +49,13 @@ public sealed class DocumentStore<T> where T : NamedDocument
     private readonly string _directory;
     private readonly string? _fileName;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _writes = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, CachedDocument> _cache = new(StringComparer.Ordinal);
+    private readonly Lock _cacheLock = new();
+    private readonly Lock _idReservationLock = new();
+    private readonly Dictionary<string, CachedDocument> _cache = [with(StringComparer.Ordinal)];
+    private readonly HashSet<string> _reservedIds = [with(StringComparer.Ordinal)];
+    private long _writeGeneration;
 
-    /// <param name="directory">The kind's folder.</param>
-    /// <param name="fileName">The document's file inside its own folder, or <c>null</c> for a file per document.</param>
+    /// <summary>Creates a store rooted at <paramref name="directory"/>, keeping one file or one subfolder per document.</summary>
     public DocumentStore(string directory, string? fileName = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(directory);
@@ -64,6 +64,7 @@ public sealed class DocumentStore<T> where T : NamedDocument
         _fileName = fileName;
     }
 
+    /// <summary>Lists all readable documents sorted by display name alongside any unreadable document ids.</summary>
     public async Task<DocumentListing<T>> ListAsync(CancellationToken cancellationToken)
     {
         List<StoredDocument<T>> items = [];
@@ -123,51 +124,58 @@ public sealed class DocumentStore<T> where T : NamedDocument
 
         if (!info.Exists)
         {
-            _ = _cache.TryRemove(id, out _);
+            InvalidateCached(id);
             return null;
         }
 
         var lastWriteTicks = info.LastWriteTimeUtc.Ticks;
         var length = info.Length;
 
-        if (_cache.TryGetValue(id, out CachedDocument? cached) && cached.LastWriteTicks == lastWriteTicks && cached.Length == length)
-            return cached.Document;
-
-        FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
-
-        await using (stream.ConfigureAwait(false))
+        lock (_cacheLock)
         {
-            T? document;
-
-            try
-            {
-                document = await JsonSerializer.DeserializeAsync<T>(stream, DocumentJson.Options, cancellationToken).ConfigureAwait(false);
-            }
-            catch (JsonException exception)
-            {
-                _ = _cache.TryRemove(id, out _);
-                throw new DocumentFormatException(path, exception.Message, exception);
-            }
-
-            if (document is null)
-            {
-                _ = _cache.TryRemove(id, out _);
-                throw new DocumentFormatException(path, "the file holds no document.");
-            }
-
-            if (document.Format > Document.CurrentFormat)
-            {
-                _ = _cache.TryRemove(id, out _);
-                throw new DocumentFormatException(path, $"format {document.Format} is newer than this version writes ({Document.CurrentFormat}).");
-            }
-
-            _cache[id] = new CachedDocument(File.GetLastWriteTimeUtc(path).Ticks, stream.Length, document);
-            return document;
+            if (_cache.TryGetValue(id, out CachedDocument? cached) && cached.LastWriteTicks == lastWriteTicks && cached.Length == length)
+                return cached.Document;
         }
+
+        var generation = Volatile.Read(ref _writeGeneration);
+        byte[] content;
+
+        try
+        {
+            content = await AtomicFile.ReadBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            InvalidateCached(id);
+            return null;
+        }
+
+        T document;
+
+        try
+        {
+            document = DocumentJson.Read<T>(content, path);
+        }
+        catch (DocumentFormatException)
+        {
+            InvalidateCached(id);
+            throw;
+        }
+
+        lock (_cacheLock)
+        {
+            if (_writeGeneration == generation && content.LongLength == length)
+                _cache[id] = new CachedDocument(lastWriteTicks, length, document);
+        }
+
+        return document;
     }
 
-    private string PathOf(string id)
-        => _fileName is null ? Path.Combine(_directory, Checked(id) + Extension) : Path.Combine(FolderOf(id), _fileName + Extension);
+    private void InvalidateCached(string id)
+    {
+        lock (_cacheLock)
+            _ = _cache.Remove(id);
+    }
 
     /// <summary>The folder a document keeps its files in (its avatar, its source card); only for a kind kept as folders.</summary>
     public string FolderOf(string id)
@@ -178,6 +186,9 @@ public sealed class DocumentStore<T> where T : NamedDocument
         return Path.Combine(_directory, Checked(id));
     }
 
+    private string PathOf(string id)
+        => _fileName is null ? Path.Combine(_directory, Checked(id) + Extension) : Path.Combine(FolderOf(id), _fileName + Extension);
+
     private static string Checked(string id)
         => Slug.IsValidId(id) ? id : throw new ArgumentException($"'{id}' is not a document id.", nameof(id));
 
@@ -186,17 +197,42 @@ public sealed class DocumentStore<T> where T : NamedDocument
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        string id;
+        var id = ReserveTargetId(Slug.NewId(document.Name), document.Name);
 
-        do
-            id = Slug.NewId(document.Name);
-        while (Exists(id));
-
-        await WriteAsync(id, document, cancellationToken).ConfigureAwait(false);
-
-        return id;
+        try
+        {
+            await WriteAsync(id, document, cancellationToken).ConfigureAwait(false);
+            return id;
+        }
+        finally
+        {
+            ReleaseReservedId(id);
+        }
     }
 
+    private string ReserveTargetId(string preferredId, string name)
+    {
+        lock (_idReservationLock)
+        {
+            var candidate = preferredId;
+
+            while (IsSlotOccupied(candidate) || !_reservedIds.Add(candidate))
+                candidate = Slug.NewId(name);
+
+            return candidate;
+        }
+    }
+
+    private bool IsSlotOccupied(string id)
+        => Exists(id) || (_fileName is not null && Directory.Exists(FolderOf(id)));
+
+    private void ReleaseReservedId(string id)
+    {
+        lock (_idReservationLock)
+            _ = _reservedIds.Remove(id);
+    }
+
+    /// <summary>Whether a document file exists under <paramref name="id"/>.</summary>
     public bool Exists(string id)
         => File.Exists(PathOf(id));
 
@@ -213,8 +249,14 @@ public sealed class DocumentStore<T> where T : NamedDocument
 
         try
         {
+            _ = Interlocked.Increment(ref _writeGeneration);
             await AtomicFile.WriteAsync(path, content, cancellationToken).ConfigureAwait(false);
-            _ = _cache.TryRemove(id, out _);
+
+            lock (_cacheLock)
+            {
+                _ = Interlocked.Increment(ref _writeGeneration);
+                _ = _cache.Remove(id);
+            }
         }
         finally
         {
@@ -227,18 +269,15 @@ public sealed class DocumentStore<T> where T : NamedDocument
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        var targetId = Slug.RenamedId(Checked(id), document.Name);
+        var preferredId = Slug.RenamedId(Checked(id), document.Name);
 
-        if (string.Equals(targetId, id, StringComparison.Ordinal))
+        if (string.Equals(preferredId, id, StringComparison.Ordinal))
         {
             await WriteAsync(id, document, cancellationToken).ConfigureAwait(false);
-
             return id;
         }
 
-        while (Exists(targetId))
-            targetId = Slug.NewId(document.Name);
-
+        var targetId = ReserveTargetId(preferredId, document.Name);
         SemaphoreSlim oldGate = _writes.GetOrAdd(id, static _ => new SemaphoreSlim(1, 1));
         await oldGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -259,18 +298,28 @@ public sealed class DocumentStore<T> where T : NamedDocument
 
                 if (Directory.Exists(oldFolder))
                 {
-                    _ = Directory.CreateDirectory(_directory);
+                    var content = JsonSerializer.SerializeToUtf8Bytes(document with { Format = Document.CurrentFormat }, DocumentJson.Options);
+                    _ = Interlocked.Increment(ref _writeGeneration);
+                    await AtomicFile.WriteAsync(PathOf(id), content, cancellationToken).ConfigureAwait(false);
                     Directory.Move(oldFolder, newFolder);
                 }
-
-                await WriteAsync(targetId, document, cancellationToken).ConfigureAwait(false);
+                else
+                {
+                    await WriteAsync(targetId, document, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         finally
         {
-            _ = _cache.TryRemove(id, out _);
+            lock (_cacheLock)
+            {
+                _ = Interlocked.Increment(ref _writeGeneration);
+                _ = _cache.Remove(id);
+                _ = _cache.Remove(targetId);
+            }
+
             _ = oldGate.Release();
-            _ = _writes.TryRemove(id, out _);
+            ReleaseReservedId(targetId);
         }
 
         return targetId;
@@ -279,20 +328,44 @@ public sealed class DocumentStore<T> where T : NamedDocument
     /// <summary>Removes the document — with its folder and everything in it, for a kind kept as folders.</summary>
     public bool Delete(string id)
     {
-        if (!Exists(id))
-            return false;
+        SemaphoreSlim gate = _writes.GetOrAdd(Checked(id), static _ => new SemaphoreSlim(1, 1));
+        gate.Wait();
 
-        if (_fileName is null)
-            File.Delete(PathOf(id));
-        else
-            Directory.Delete(FolderOf(id), recursive: true);
+        try
+        {
+            var fileExists = Exists(id);
+            var folderExists = _fileName is not null && Directory.Exists(FolderOf(id));
 
-        _ = _cache.TryRemove(id, out _);
-        _ = _writes.TryRemove(id, out _);
+            if (!fileExists && !folderExists)
+                return false;
 
-        return true;
+            _ = Interlocked.Increment(ref _writeGeneration);
+
+            if (_fileName is null)
+                File.Delete(PathOf(id));
+            else
+                Directory.Delete(FolderOf(id), recursive: true);
+
+            lock (_cacheLock)
+            {
+                _ = Interlocked.Increment(ref _writeGeneration);
+                _ = _cache.Remove(id);
+            }
+
+            return fileExists;
+        }
+        finally
+        {
+            _ = gate.Release();
+        }
     }
 
     internal void ClearCache()
-        => _cache.Clear();
+    {
+        lock (_cacheLock)
+        {
+            _ = Interlocked.Increment(ref _writeGeneration);
+            _cache.Clear();
+        }
+    }
 }

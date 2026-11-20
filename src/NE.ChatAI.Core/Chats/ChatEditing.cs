@@ -4,14 +4,7 @@ using System.Linq;
 
 namespace NE.ChatAI.Chats;
 
-/// <summary>
-/// The changes a chat's messages take — a reply added, a variant chosen or added, a message made again, words edited or continued,
-/// messages deleted.
-/// </summary>
-/// <remarks>
-/// Each returns the chat changed, or the chat as it was when the message named is not in it. The chat's messages are the variants
-/// shown; what followed a variant not shown is kept in that variant (<see cref="MessageVariant.Tail"/>) and comes back with it.
-/// </remarks>
+/// <summary>Immutable operations over a chat's messages, variants, branch tails and generation history.</summary>
 public static class ChatEditing
 {
     /// <summary>Adds a message at the end, with the record of how it was made and the chat's seed after it.</summary>
@@ -26,10 +19,7 @@ public static class ChatEditing
     private static IReadOnlyList<GenerationRecord> Recorded(Chat chat, GenerationRecord? record)
         => record is null ? chat.Generations : [.. chat.Generations, record];
 
-    /// <summary>
-    /// Shows another of a message's variants with what followed it: the messages after the message go into the variant shown so far,
-    /// and the chosen one's come out of it. An index past either end is held at it.
-    /// </summary>
+    /// <summary>Switches <paramref name="messageId"/> to the variant at <paramref name="index"/>, swapping downstream messages with that variant's <see cref="MessageVariant.Tail"/>.</summary>
     public static Chat Choose(Chat chat, string messageId, int index)
     {
         ArgumentNullException.ThrowIfNull(chat);
@@ -77,14 +67,52 @@ public static class ChatEditing
     internal static int Shown(ChatMessage message)
         => Math.Clamp(message.Chosen, 0, Math.Max(0, message.Variants.Count - 1));
 
-    /// <summary>The messages after the one at <paramref name="at"/>, to keep in a variant; none kept as no list at all.</summary>
+    internal static Dictionary<string, int> IndexMap(IReadOnlyList<ChatMessage> messages)
+    {
+        Dictionary<string, int> map = new(messages.Count, StringComparer.Ordinal);
+
+        for (var i = 0; i < messages.Count; i++)
+            map[messages[i].Id] = i;
+
+        return map;
+    }
+
+    internal static HashSet<string> CollectAllMessageIds(IReadOnlyList<ChatMessage> messages)
+    {
+        HashSet<string> ids = [with(StringComparer.Ordinal)];
+        AddMessageIds(messages, ids);
+        return ids;
+    }
+
+    private static void AddMessageIds(IReadOnlyList<ChatMessage> messages, HashSet<string> ids)
+    {
+        for (var i = 0; i < messages.Count; i++)
+        {
+            ChatMessage message = messages[i];
+            _ = ids.Add(message.Id);
+
+            for (var j = 0; j < message.Variants.Count; j++)
+            {
+                if (message.Variants[j].Tail is { Count: > 0 } tail)
+                    AddMessageIds(tail, ids);
+            }
+        }
+    }
+
+    internal static List<T> CopyPrefix<T>(IReadOnlyList<T> items, int count)
+    {
+        List<T> copy = [with(items.Count)];
+
+        for (var i = 0; i < count; i++)
+            copy.Add(items[i]);
+
+        return copy;
+    }
+
     private static List<ChatMessage>? After(Chat chat, int at)
         => at + 1 < chat.Messages.Count ? [.. chat.Messages.Skip(at + 1)] : null;
 
-    /// <summary>
-    /// Adds a variant to a message and shows it, the messages after the message kept with the variant shown so far; the chat's seed
-    /// stays, as a new variant changes this message alone.
-    /// </summary>
+    /// <summary>Appends and selects <paramref name="variant"/> on <paramref name="messageId"/>, preserving the previous variant's downstream tail.</summary>
     public static Chat AddVariant(Chat chat, string messageId, MessageVariant variant, GenerationRecord? record)
     {
         ArgumentNullException.ThrowIfNull(chat);
@@ -200,10 +228,7 @@ public static class ChatEditing
         return changed with { Records = ChatRecords.OnMessageEdited(chat.Messages, chat.Records, at) };
     }
 
-    /// <summary>
-    /// Takes one message out of the chat, those after it staying where they are, and what followed its other variants with it; the
-    /// records of its generations stay, as the calls were made all the same.
-    /// </summary>
+    /// <summary>Removes <paramref name="messageId"/> while keeping later messages on the active timeline and preserving recorded generations.</summary>
     public static Chat Delete(Chat chat, string messageId)
     {
         ArgumentNullException.ThrowIfNull(chat);
@@ -234,15 +259,19 @@ public static class ChatEditing
             return chat;
 
         ChatMessage last = WithoutTails(chat.Messages[at]);
-
-        if (at == chat.Messages.Count - 1 && ReferenceEquals(last, chat.Messages[at]))
-            return chat;
-
-        IReadOnlyList<ChatMessage> kept = [.. chat.Messages.Take(at), last];
+        IReadOnlyList<ChatMessage> kept = at == chat.Messages.Count - 1 && ReferenceEquals(last, chat.Messages[at])
+            ? chat.Messages
+            : [.. chat.Messages.Take(at), last];
         IReadOnlyList<ChatRecord> keptRecords = ChatRecords.OnBranchedUpTo(chat.Messages, chat.Records, at, kept);
         IReadOnlyList<ChatVisual> keptVisuals = ChatVisuals.OnBranchedUpTo(chat.Messages, chat.Visuals, at, kept);
+        IReadOnlyList<GenerationRecord> keptGenerations = KeptGenerations(chat, at, kept, keptRecords, keptVisuals);
 
-        return chat with { Messages = kept, Records = keptRecords, Visuals = keptVisuals, Generations = KeptGenerations(chat, at, kept, keptRecords, keptVisuals) };
+        return ReferenceEquals(kept, chat.Messages)
+            && keptRecords.Count == chat.Records.Count
+            && keptVisuals.Count == chat.Visuals.Count
+            && keptGenerations.Count == chat.Generations.Count
+            ? chat
+            : chat with { Messages = kept, Records = keptRecords, Visuals = keptVisuals, Generations = keptGenerations };
     }
 
     private static ChatMessage WithoutTails(ChatMessage message)
@@ -258,6 +287,7 @@ public static class ChatEditing
         if (chat.Generations.Count == 0)
             return chat.Generations;
 
+        HashSet<string> survivingMessageIds = CollectAllMessageIds(kept);
         HashSet<string> keptIds = [];
         CollectGenerations(kept, keptIds);
 
@@ -294,6 +324,12 @@ public static class ChatEditing
         {
             if (!keptVisualIds.Contains(visual.Id) && visual.Generation is not null && !keptIds.Contains(visual.Generation))
                 _ = droppedIds.Add(visual.Generation);
+        }
+
+        foreach (GenerationRecord record in chat.Generations)
+        {
+            if (!keptIds.Contains(record.Id) && record.AnchorMessage is string anchor && !survivingMessageIds.Contains(anchor))
+                _ = droppedIds.Add(record.Id);
         }
 
         var lastKeptIndex = -1;

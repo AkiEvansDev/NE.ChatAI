@@ -5,20 +5,12 @@ using NE.ChatAI.Controllers;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>
-/// What a character's, a persona's and a world's editor dialog share: the picture, cropped to a circle as it is picked; the name;
-/// the tags, picked here and made, renamed, recoloured and deleted in their own dialog; the description; and the delete at the dialog's head.
-/// Every field is kept as it lets go of its value.
-/// </summary>
 internal static class CardEditor
 {
     private const double AvatarSize = 112;
-
-    /// <summary>A tag's swatch, square at a field's height: too narrow for its value, it shows the colour alone.</summary>
     private const double SwatchSize = 40;
 
-    /// <summary>The picture, aligned to the field boxes of the name and the tags beside it.</summary>
-    /// <remarks>The air is the picture's margin, not the grid's spacing: that stands between all twenty-four tracks and squeezed the picture's column to nothing on a phone.</remarks>
+    // Margin on the avatar rather than grid spacing, which would apply across all 24 columns and crush mobile width.
     public static ContainerComponent CreateHead()
         => new ContainerComponent()
             .SetColumn(1, UIGridUnit.Auto())
@@ -55,8 +47,7 @@ internal static class CardEditor
                 .SetPlacement(2, 1, 23, 1)
             );
 
-    /// <summary>The world the card is played in, picked from every world; a character's wins over the persona's.</summary>
-    public static IVisualComponent WorldField(string hint)
+    public static StackPanelComponent WorldField(string hint)
         => UIForm.Field(new SelectComponent()
                 .SetTitle("chatai.card.world")
                 .BindOptions<ShellController>(static x => x.CardWorldOptions)
@@ -65,7 +56,6 @@ internal static class CardEditor
             hint
         );
 
-    /// <summary>A Markdown and macro field of the card kept as it lets go, optionally expandable into the full-height editor.</summary>
     public static IVisualComponent Area<TSource>(string title, Expression<Func<TSource, object?>> property, int rows, bool expandable = false, string? hint = null)
     {
         CodeInputComponent field = SettingsEditors.MacroInput(title, rows, expandable: expandable)
@@ -75,7 +65,6 @@ internal static class CardEditor
         return hint is null ? field : UIForm.Field(field, hint);
     }
 
-    /// <summary>A Markdown and macro field that stretches to the bottom of a full-height dialog tab or screen.</summary>
     public static ContainerComponent FillArea<TSource>(string title, Expression<Func<TSource, object?>> property, bool lineNumbers = false, bool expandable = false, string? hint = null)
     {
         CodeInputComponent area = SettingsEditors.MacroInput(title, 12, lineNumbers, expandable)
@@ -100,7 +89,7 @@ internal static class CardEditor
             );
     }
 
-    /// <summary>A scrollable tab body inside a full-height card dialog, keeping horizontal bleed room for focus rings and switches.</summary>
+    // Bleed margin preserves focus rings and switch halos inside full-height dialog tabs.
     public static ScrollContainerComponent Scroll(IVisualComponent content)
         => new ScrollContainerComponent()
             .SetHeight(UILayoutLength.Fill())
@@ -109,7 +98,6 @@ internal static class CardEditor
             .SetPadding(UIThickness.Symmetric(8, 2))
             .AddChild(content);
 
-    /// <summary>One row of an accordion list in a card editor with a delete action in the header and its content inside.</summary>
     public static ExpanderComponent Fold<TItem>(string removeCommand, string keyName, IVisualComponent content)
         where TItem : CardFoldItem
         => new ExpanderComponent()
@@ -127,7 +115,6 @@ internal static class CardEditor
             .BindExpanded<TItem>(static x => x.Expanded, UIBindingScope.Relative)
             .SetContent(content);
 
-    /// <summary>One row of an accordion list in a card editor: its renamable two-line header, its rename and delete actions, and its fields inside.</summary>
     public static ExpanderComponent Fold(string saveCommand, string removeCommand, string keyName, params IVisualComponent[] fields)
     {
         ExpanderHeaderRegion? headerRegion = null;
@@ -141,6 +128,7 @@ internal static class CardEditor
                     .SetTitleColor(UIThemeColor.Muted)
                     .SetDescriptionType(UITextAppearance.Caption)
                     .SetDescriptionColor(UIThemeColor.Muted)
+                    .SetDescriptionPlain(true)
                     .SetMargin(UIThickness.All(0, 0, 68, 0))
                     .SetRenamable(true)
                     .BindTitle<ArticleItem>(static x => x.Header, UIBindingScope.Relative)
@@ -151,21 +139,16 @@ internal static class CardEditor
             .BindExpanded<ArticleItem>(static x => x.Expanded, UIBindingScope.Relative)
             .SetContent(UILayout.Stack(12, fields));
 
-        return expander.SetHeaderAction(new StackPanelComponent()
-            .SetOrientation(UIOrientation.Horizontal)
-            .SetSpacing(4)
-            .AddChild(UIIconButtons.Rename()
+        return expander.SetHeaderAction(UILayout.Row(4,
+            UIIconButtons.Rename()
                 .SetSize(UISize.Small)
-                .InteractOn(EventNames.Click, new RenameItemEffect(headerRegion!))
-            )
-            .AddChild(UIIconButtons.Delete()
+                .InteractOn(EventNames.Click, new RenameItemEffect(headerRegion!)),
+            UIIconButtons.Delete()
                 .SetSize(UISize.Small)
                 .OnClick(removeCommand, UIAction.ArgCurrentItemKey(keyName))
-            )
-        );
+        ));
     }
 
-    /// <summary>A wide full-height card-editor dialog with a fixed header, token count, duplicate and delete buttons in it, and a stretched body.</summary>
     public static UIDialog CreateDialog(string key, string title, IVisualComponent body)
         => UIDialogs.Fill(
             key,
@@ -187,27 +170,21 @@ internal static class CardEditor
         );
 
     private static TextComponent TokensCaption(Expression<Func<ShellController, object?>> tokens)
-        => new TextComponent()
-            .SetTitleType(UITextAppearance.Caption)
-            .SetTitleColor(UIThemeColor.Muted)
+        => UIText.Caption()
+            .Muted()
             .SetTitleWrap(false)
             .SetVerticalAlignment(UIAlignment.Center)
             .SetMargin(UIThickness.All(0, 0, 4, 0))
             .BindTitle(tokens);
 
-    /// <summary>The tags dialog and the question before a tag is deleted.</summary>
     public static IReadOnlyList<UIDialog> CreateTagsDialogs()
         =>
         [
             CreateTagsDialog(),
-            UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteTagDialogKey, "chatai.tags.delete.title", static x => x.DeleteTagQuestion, "chatai.card.delete", nameof(ShellController.DeleteTagAsync))
+            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeleteTagDialogKey, "chatai.tags.delete.title", static x => x.DeleteTagQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeleteTagAsync))
         ];
 
-    /// <summary>
-    /// Every tag known on a line — the swatch its colour is picked from, its name kept as it lets go with its delete inside — under
-    /// the field a new one is made in; each change is every card's.
-    /// </summary>
-    /// <remarks>Opacity is on so setting it to zero clears a tag's colour back to the default transparent badge.</remarks>
+    // Color opacity allows resetting alpha to 0 to restore the default untinted badge.
     private static UIDialog CreateTagsDialog()
         => UIDialogs.Create(ShellController.TagsDialogKey, "chatai.tags.title", UILayout.Stack(16,
                 new TextInputComponent()

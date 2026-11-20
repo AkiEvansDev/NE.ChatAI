@@ -12,11 +12,7 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>
-/// The scenarios page (<c>/scenarios</c>): chooses, creates, copies, renames and removes scenario documents in <c>graphs/</c>,
-/// auto-saves their trigger and node sheet as the reader edits them, and runs preview executions on the canvas against the last
-/// open chat without committing records to it.
-/// </summary>
+/// <summary>The <c>/scenarios</c> page: manages scenario documents in <c>graphs/</c>, auto-saves their trigger and node sheet, and runs canvas previews.</summary>
 internal sealed partial class ScenarioController : ShellController
 {
     public const string PageId = "chatai-scenarios-page";
@@ -100,12 +96,18 @@ internal sealed partial class ScenarioController : ShellController
     public partial UIVisibility EmptyVisibility { get; set; } = UIVisibility.Visible;
 
     [RecursiveMember]
+    public partial UIPhrase? RenameDialogTitle { get; set; } = new("chatai.settings.rename.title");
+
+    [RecursiveMember]
+    public partial UIPhrase? RenameDialogAction { get; set; } = new("chatai.settings.rename");
+
+    [RecursiveMember]
     public partial string RenameName { get; set; } = string.Empty;
 
     [RecursiveMember]
     public partial UIPhrase? DeleteQuestion { get; set; }
 
-    protected override void OnProfileLoaded(ActiveProfile? profile)
+    protected override Task OnProfileLoadedAsync(ActiveProfile? profile, bool runtimeActive, CancellationToken cancellationToken)
     {
         PinChoices = new Dictionary<string, IReadOnlyList<UIChoice>>(StringComparer.Ordinal)
         {
@@ -113,6 +115,8 @@ internal sealed partial class ScenarioController : ShellController
             [ModelCallNode.SamplerChoicesKey] = ToChoices(SamplerOptions)
         };
         _runs.PinChoices = PinChoices;
+
+        return Task.CompletedTask;
     }
 
     private static List<UIChoice> ToChoices(RecursiveCollection<OptionItem> options)
@@ -134,16 +138,6 @@ internal sealed partial class ScenarioController : ShellController
         EnsureCatalogSubscription();
     }
 
-    protected override async Task OnNavigatedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(navigation);
-
-        EnsureCatalogSubscription();
-        _ = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false);
-        var named = navigation.TryGetParameter(AppRoutes.CardParameter, out var id) ? id : null;
-        await LoadScenariosAsync(named, cancellationToken).ConfigureAwait(false);
-    }
-
     private void EnsureCatalogSubscription()
     {
         if (_unsubscribeCatalog is null && Context.Services.GetService<PluginManager>() is PluginManager plugins)
@@ -163,42 +157,28 @@ internal sealed partial class ScenarioController : ShellController
             return Task.CompletedTask;
         });
 
-    protected override void Dispose(bool disposing)
+    protected override async Task OnNavigatedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)
     {
-        if (disposing)
-        {
-            _unsubscribeCatalog?.Invoke();
-            _unsubscribeCatalog = null;
-        }
+        ArgumentNullException.ThrowIfNull(navigation);
 
-        base.Dispose(disposing);
+        EnsureCatalogSubscription();
+        await StopPreviewRunAsync(cancellationToken).ConfigureAwait(false);
+        var named = navigation.TryGetParameter(AppRoutes.CardParameter, out var id) ? id : null;
+        await LoadScenariosAsync(named, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task StopPreviewRunAsync(CancellationToken cancellationToken)
+    {
+        if (_runs.IsRunning)
+            _runs.Stop();
+
+        await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task LoadScenariosAsync(string? preferredId, CancellationToken cancellationToken)
     {
         List<StoredDocument<Scenario>> ordered = ScenarioExecutor.Order((await Data.Scenarios.ListAsync(cancellationToken).ConfigureAwait(false)).Items);
-        ScenarioOptions.Clear();
-
-        var hasBuiltIn = false;
-
-        for (var i = 0; i < ordered.Count; i++)
-        {
-            if (!DefaultDocuments.IsBuiltIn(ordered[i].Id))
-                continue;
-
-            hasBuiltIn = true;
-            ScenarioOptions.Add(new OptionItem { Id = ordered[i].Id, Title = ordered[i].Document.Name, IsContent = true });
-        }
-
-        var customGroup = hasBuiltIn ? CustomOptionGroup : null;
-
-        for (var i = 0; i < ordered.Count; i++)
-        {
-            if (DefaultDocuments.IsBuiltIn(ordered[i].Id))
-                continue;
-
-            ScenarioOptions.Add(new OptionItem { Id = ordered[i].Id, Title = ordered[i].Document.Name, Group = customGroup, IsContent = true });
-        }
+        Fill(ScenarioOptions, new DocumentListing<Scenario>(ordered, []));
 
         StoredDocument<Scenario>? chosen = FindScenario(ordered, preferredId) ?? FindScenario(ordered, ScenarioId) ?? (ordered.Count > 0 ? ordered[0] : null);
         ShowScenario(chosen);
@@ -257,12 +237,23 @@ internal sealed partial class ScenarioController : ShellController
             delete.Enabled = !isSystem;
     }
 
-    /// <summary>Switches the canvas to the scenario chosen in the selector.</summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _runs.Stop();
+            _ = _activeGenerations.AbortAllAsync(onFailure: null, CancellationToken.None);
+            _unsubscribeCatalog?.Invoke();
+            _unsubscribeCatalog = null;
+        }
+
+        base.Dispose(disposing);
+    }
+
     [UICommand]
     public async Task<UICommandResult> SelectScenarioAsync(CancellationToken cancellationToken)
     {
-        if (_runs.IsRunning)
-            _runs.Stop();
+        await StopPreviewRunAsync(cancellationToken).ConfigureAwait(false);
 
         if (ScenarioId is string id && Slug.IsValidId(id) && await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is Scenario scenario)
         {
@@ -276,16 +267,16 @@ internal sealed partial class ScenarioController : ShellController
         return UICommandResult.Ok();
     }
 
-    /// <summary>Opens the name dialog to create a blank scenario — or a copy of the open one — at the end of the order.</summary>
     [UICommand]
     public async Task<UICommandResult> CreateScenarioAsync(bool copy, CancellationToken cancellationToken)
     {
-        if (_runs.IsRunning)
-            _runs.Stop();
+        await StopPreviewRunAsync(cancellationToken).ConfigureAwait(false);
 
         _renamingId = null;
         _creatingScenario = true;
         _copyingScenarioId = copy ? ScenarioId : null;
+        RenameDialogTitle = new UIPhrase(copy ? UIStandardAction.Duplicate.Title : "chatai.scenarios.new-name");
+        RenameDialogAction = new UIPhrase(copy ? UIStandardAction.Duplicate.Title : "chatai.card.create");
 
         if (copy && ScenarioId is string sourceId && Slug.IsValidId(sourceId) && await Data.Scenarios.ReadAsync(sourceId, cancellationToken).ConfigureAwait(false) is Scenario source)
         {
@@ -300,7 +291,6 @@ internal sealed partial class ScenarioController : ShellController
         return UICommandResult.Ok([new OpenDialogEffect(RenameDialogKey)]);
     }
 
-    /// <summary>Dispatches Rename, Copy and Delete from the scenario selector's overflow menu.</summary>
     [UICommand]
     public Task<UICommandResult> ScenarioMenuActionAsync(string action, CancellationToken cancellationToken)
         => action switch
@@ -311,7 +301,34 @@ internal sealed partial class ScenarioController : ShellController
             _ => Task.FromResult(UICommandResult.Ok())
         };
 
-    /// <summary>Keeps the open scenario's enabled switch and trigger settings as they change.</summary>
+    [UICommand]
+    public async Task<UICommandResult> AskRenameAsync(CancellationToken cancellationToken)
+    {
+        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
+            return UICommandResult.Ok();
+
+        _creatingScenario = false;
+        _copyingScenarioId = null;
+        _renamingId = id;
+        RenameDialogTitle = new UIPhrase("chatai.settings.rename.title");
+        RenameDialogAction = new UIPhrase("chatai.settings.rename");
+        RenameName = current.Name;
+
+        return UICommandResult.Ok([new OpenDialogEffect(RenameDialogKey)]);
+    }
+
+    [UICommand]
+    public async Task<UICommandResult> AskDeleteAsync(CancellationToken cancellationToken)
+    {
+        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
+            return UICommandResult.Ok();
+
+        _deletingId = id;
+        DeleteQuestion = UIPhrase.Of("chatai.scenarios.delete.question", ("name", current.Name));
+
+        return UICommandResult.Ok([new OpenDialogEffect(DeleteDialogKey)]);
+    }
+
     [UICommand]
     public async Task SaveMetaAsync(CancellationToken cancellationToken)
     {
@@ -335,20 +352,6 @@ internal sealed partial class ScenarioController : ShellController
         };
 
         await Data.Scenarios.WriteAsync(id, updated, cancellationToken).ConfigureAwait(false);
-    }
-
-    [UICommand]
-    public async Task<UICommandResult> AskRenameAsync(CancellationToken cancellationToken)
-    {
-        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
-            return UICommandResult.Ok();
-
-        _creatingScenario = false;
-        _copyingScenarioId = null;
-        _renamingId = id;
-        RenameName = current.Name;
-
-        return UICommandResult.Ok([new OpenDialogEffect(RenameDialogKey)]);
     }
 
     [UICommand]
@@ -406,18 +409,6 @@ internal sealed partial class ScenarioController : ShellController
     }
 
     [UICommand]
-    public async Task<UICommandResult> AskDeleteAsync(CancellationToken cancellationToken)
-    {
-        if (ScenarioId is not string id || !Slug.IsValidId(id) || await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is not { System: false } current)
-            return UICommandResult.Ok();
-
-        _deletingId = id;
-        DeleteQuestion = UIPhrase.Of("chatai.scenarios.delete.question", ("name", current.Name));
-
-        return UICommandResult.Ok([new OpenDialogEffect(DeleteDialogKey)]);
-    }
-
-    [UICommand]
     public async Task<UICommandResult> DeleteAsync(CancellationToken cancellationToken)
     {
         var id = _deletingId;
@@ -425,9 +416,7 @@ internal sealed partial class ScenarioController : ShellController
 
         if (id is not null && Slug.IsValidId(id) && await Data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is { System: false })
         {
-            if (_runs.IsRunning)
-                _runs.Stop();
-
+            await StopPreviewRunAsync(cancellationToken).ConfigureAwait(false);
             _ = Data.Scenarios.Delete(id);
             ScenarioId = null;
             await LoadScenariosAsync(null, cancellationToken).ConfigureAwait(false);
@@ -438,24 +427,12 @@ internal sealed partial class ScenarioController : ShellController
         return UICommandResult.Ok([new CloseDialogEffect(DeleteDialogKey), new PushAddressEffect(parameters)]);
     }
 
-    /// <summary>
-    /// Auto-saves the node sheet under the document key it was opened with, and — when the save was raised by the run panel's Run or
-    /// Run all — runs a preview execution against the last open chat without writing records to it.
-    /// </summary>
-    [UICommand(ConcurrencyMode = UICommandConcurrencyMode.Background, MaxConcurrent = 4)]
+    [UICommand]
     public async Task<UICommandResult> SaveSheetAsync(string? reason, CancellationToken cancellationToken)
     {
-        string? activeId = null;
-        UINodeDocument sheet = UINodeDocument.Empty;
-
-        await Context.Runtime.InvokeAsync(() =>
-        {
-            activeId = ScenarioId;
-            sheet = Sheet;
-            Catalog = ScenarioCatalog.Resolve(Context.Services);
-        }, cancellationToken).ConfigureAwait(false);
-
-        var targetId = sheet.Key ?? activeId;
+        Catalog = ScenarioCatalog.Resolve(Context.Services);
+        UINodeDocument sheet = Sheet;
+        var targetId = sheet.Key ?? ScenarioId;
 
         if (targetId is null || !Slug.IsValidId(targetId) || await Data.Scenarios.ReadAsync(targetId, cancellationToken).ConfigureAwait(false) is not Scenario current)
             return UICommandResult.Ok();
@@ -487,11 +464,8 @@ internal sealed partial class ScenarioController : ShellController
         return UICommandResult.Ok();
     }
 
-    /// <summary>Stops the preview run on the canvas and aborts every model call it has in flight.</summary>
-    [UICommand]
-    public async Task StopRunAsync(CancellationToken cancellationToken)
-    {
-        _runs.Stop();
-        await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), cancellationToken).ConfigureAwait(false);
-    }
+    // Background concurrency lets Stop cancel an active preview run while Exclusive SaveSheetAsync is still awaiting SavedAsync.
+    [UICommand(ConcurrencyMode = UICommandConcurrencyMode.Background)]
+    public Task StopRunAsync(CancellationToken cancellationToken)
+        => StopPreviewRunAsync(cancellationToken);
 }

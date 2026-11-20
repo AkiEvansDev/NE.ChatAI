@@ -22,16 +22,7 @@ internal sealed partial class SettingsController
     }
 
     private void ShowGlobalGallery(IReadOnlyDictionary<string, string>? imageTags)
-    {
-        GlobalGallery.Clear();
-        IReadOnlyList<GalleryImage> images = GalleryPictures.ListGlobal(Data, imageTags);
-
-        for (var i = 0; i < images.Count; i++)
-        {
-            GalleryImage image = images[i];
-            GlobalGallery.Add(GalleryItem.From(image, Pictures.GlobalGalleryImageOf(image.Id)));
-        }
-    }
+        => SyncGallery(GlobalGallery, GalleryPictures.ListGlobal(Data, imageTags), Pictures.GlobalGalleryImageOf);
 
     /// <summary>Adds every uploaded picture to the global gallery under collision-free slugs.</summary>
     [UICommand]

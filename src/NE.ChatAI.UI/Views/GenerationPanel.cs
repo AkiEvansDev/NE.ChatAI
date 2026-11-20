@@ -5,11 +5,6 @@ using NE.ChatAI.Samplers;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>
-/// The generation panel's body: what is changed most — thinking, the context, the reply's length — always in sight; the samplers
-/// with their preset in a section open by default; the connection, what the server runs and the other presets in one folded
-/// below. Each change is kept as it lands.
-/// </summary>
 internal static class GenerationPanel
 {
     public static StackPanelComponent Create()
@@ -20,6 +15,10 @@ internal static class GenerationPanel
             .SetOptions(ShellController.SeedModes)
             .BindValue<ShellController>(static x => x.SeedMode)
             .OnChange(nameof(ShellController.SaveSamplersAsync));
+
+        // Only ChatView mounts this panel, so ChatSeed binds directly to ChatController.
+        NumberInputComponent chatSeed = Number<ChatController>("chatai.samplers.chat-seed", static x => x.ChatSeed, 0, int.MaxValue, 1, nameof(ChatController.SaveChatSeedAsync))
+            .ShownWhen(seedMode, nameof(SeedMode.PerChat));
 
         return UILayout.Stack(16,
             UILayout.Stack(12,
@@ -39,13 +38,11 @@ internal static class GenerationPanel
                 seedMode,
                 Number<ShellController>("chatai.samplers.seed-value", static x => x.SeedValue, 0, int.MaxValue, 1, nameof(ShellController.SaveSamplersAsync))
                     .ShownWhen(seedMode, nameof(SeedMode.Fixed)),
-                // Only the chat has this panel, so the chat's own seed is bound here though the panel is the shell's.
-                Number<ChatController>("chatai.samplers.chat-seed", static x => x.ChatSeed, 0, int.MaxValue, 1, nameof(ChatController.SaveChatSeedAsync))
-                    .ShownWhen(seedMode, nameof(SeedMode.PerChat))
+                chatSeed
             ),
             Fold("chatai.generation.presets", false,
                 Select("chatai.generation.connection", static x => x.ConnectionOptions, static x => x.ConnectionId, nameof(ShellController.SelectConnectionAsync))
-                    .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Connect), "chatai.connection.check").OnClick(nameof(ShellController.CheckConnectionAsync))),
+                    .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Connect), "chatai.connection.check").OnClickShowingLoading(nameof(ShellController.CheckConnectionAsync))),
                 UIText.Note().BindDescription<ShellController>(static x => x.ModelLine),
                 Select("chatai.generation.format", static x => x.FormatOptions, static x => x.FormatId, nameof(ShellController.SelectPresetsAsync)),
                 Select("chatai.generation.system-prompt", static x => x.SystemPromptOptions, static x => x.SystemPromptId, nameof(ShellController.SelectPresetsAsync)),
@@ -76,7 +73,6 @@ internal static class GenerationPanel
             .BindValue<ShellController>(static x => x.IncludeNames)
             .OnChange(nameof(ShellController.SaveIncludeNamesAsync));
 
-    /// <remarks>The stepper shown, which a number field leaves off by default.</remarks>
     private static NumberInputComponent Number<TSource>(string title, Expression<Func<TSource, object?>> value, decimal min, decimal max, decimal step, string command)
         => new NumberInputComponent()
             .SetTitle(title)

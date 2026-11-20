@@ -222,7 +222,6 @@ internal abstract partial class ShellController
         return UICommandResult.Ok([new OpenDialogEffect(CreateCardDialogKey)]);
     }
 
-    /// <summary>Creates the character, persona or world under the typed name and opens its wide editor dialog.</summary>
     [UICommand]
     public async Task<UICommandResult> CreateCardAsync(CancellationToken cancellationToken)
     {
@@ -230,25 +229,22 @@ internal abstract partial class ShellController
         var typed = NewCardName.Trim();
         _creatingCardList = null;
 
-        TagScope scope;
+        TagScope scope = PanelScopeOf(list);
         string cardId;
 
-        if (list == WorldsList)
+        if (scope == TagScope.World)
         {
             var name = typed.Length > 0 ? typed : Context.Translate("chatai.world.new-name") ?? string.Empty;
-            scope = TagScope.World;
             cardId = await Data.Worlds.CreateAsync(new World { Name = name }, cancellationToken).ConfigureAwait(false);
         }
-        else if (list == PersonasList)
+        else if (scope == TagScope.Persona)
         {
             var name = typed.Length > 0 ? typed : Context.Translate("chatai.persona.new-name") ?? string.Empty;
-            scope = TagScope.Persona;
             cardId = await Data.Personas.CreateAsync(new Persona { Name = name }, cancellationToken).ConfigureAwait(false);
         }
         else
         {
             var name = typed.Length > 0 ? typed : Context.Translate("chatai.character.new-name") ?? string.Empty;
-            scope = TagScope.Character;
             cardId = await Data.Characters.CreateAsync(new Character { Name = name }, cancellationToken).ConfigureAwait(false);
         }
 
@@ -260,6 +256,14 @@ internal abstract partial class ShellController
 
         return UICommandResult.Ok([new CloseDialogEffect(CreateCardDialogKey), new OpenDialogEffect(dialogKey)]);
     }
+
+    protected static TagScope PanelScopeOf(string list)
+        => list switch
+        {
+            PersonasList => TagScope.Persona,
+            WorldsList => TagScope.World,
+            _ => TagScope.Character
+        };
 
     /// <summary>Lets the open page refresh its state when a card or its pictures change.</summary>
     protected virtual Task OnCardChangedAsync(CancellationToken cancellationToken)
@@ -369,14 +373,45 @@ internal abstract partial class ShellController
     }
 
     private void ShowCharacterGallery(string cardId, IReadOnlyDictionary<string, string>? imageTags)
+        => SyncGallery(CharacterGallery, GalleryPictures.ListCharacter(Data, cardId, imageTags), imageId => Pictures.CharacterGalleryImageOf(cardId, imageId));
+
+    protected static void SyncGallery(RecursiveCollection<GalleryItem> target, IReadOnlyList<GalleryImage> images, Func<string, string?> previewOf)
     {
-        CharacterGallery.Clear();
-        IReadOnlyList<GalleryImage> images = GalleryPictures.ListCharacter(Data, cardId, imageTags);
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(images);
+        ArgumentNullException.ThrowIfNull(previewOf);
+
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < images.Count; i++)
+            _ = kept.Add(images[i].Id);
+
+        for (var i = target.Count - 1; i >= 0; i--)
+        {
+            if (!kept.Contains(target[i].Id))
+                _ = target.Remove(target[i].Id);
+        }
 
         for (var i = 0; i < images.Count; i++)
         {
             GalleryImage image = images[i];
-            CharacterGallery.Add(GalleryItem.From(image, Pictures.CharacterGalleryImageOf(cardId, image.Id)));
+            var preview = previewOf(image.Id);
+            var tooltip = !string.IsNullOrEmpty(image.Tag) ? $"{image.Tag} · {image.Key}" : image.Key;
+
+            if (target.TryGet(image.Id, out GalleryItem? existing))
+            {
+                existing.CopyText = image.CopyKey;
+                existing.Tooltip = tooltip;
+                existing.Tag = image.Tag;
+                existing.Preview = preview;
+
+                if (!string.Equals(target[i].Id, image.Id, StringComparison.Ordinal))
+                    _ = target.Move(image.Id, i);
+            }
+            else
+            {
+                target.Insert(i, GalleryItem.From(image, preview));
+            }
         }
     }
 
@@ -436,21 +471,11 @@ internal abstract partial class ShellController
             ? UICommandResult.Ok([new OpenDialogEffect(dialogKey)])
             : UICommandResult.Ok();
 
-    /// <summary>Opens the editor dialog of a card from its row in the panel's list.</summary>
     [UICommand]
     public async Task<UICommandResult> EditPanelCardAsync(string cardId, CancellationToken cancellationToken)
-    {
-        TagScope scope = PanelList switch
-        {
-            PersonasList => TagScope.Persona,
-            WorldsList => TagScope.World,
-            _ => TagScope.Character
-        };
-
-        return await OpenCardEditorAsync(scope, cardId, cancellationToken).ConfigureAwait(false) is string dialogKey
+        => await OpenCardEditorAsync(PanelScopeOf(PanelList), cardId, cancellationToken).ConfigureAwait(false) is string dialogKey
             ? UICommandResult.Ok([new OpenDialogEffect(dialogKey)])
             : UICommandResult.Ok();
-    }
 
     /// <summary>Opens the panel character's editor dialog.</summary>
     [UICommand]
@@ -476,7 +501,8 @@ internal abstract partial class ShellController
                 if (await Data.Personas.ReadAsync(cardId, cancellationToken).ConfigureAwait(false) is not Persona persona)
                     return;
 
-                var newPersonaId = await DocumentRenames.SavePersonaAsync(Data, cardId, persona with { Name = name.Length == 0 ? persona.Name : name, Description = description, World = _editingCardWorld }, cancellationToken).ConfigureAwait(false);
+                var personaName = ResolveEditableCardName(name, persona.Name, allowRename: !IsGenerating || cardId != ActivePersonaId);
+                var newPersonaId = await DocumentRenames.SavePersonaAsync(Data, cardId, persona with { Name = personaName, Description = description, World = _editingCardWorld }, cancellationToken).ConfigureAwait(false);
 
                 if (!string.Equals(newPersonaId, cardId, StringComparison.Ordinal))
                 {
@@ -506,7 +532,8 @@ internal abstract partial class ShellController
                 if (await Data.Characters.ReadAsync(cardId, cancellationToken).ConfigureAwait(false) is not Character character)
                     return;
 
-                Character updatedCharacter = ApplyCharacterFields(character with { Name = name.Length == 0 ? character.Name : name, Description = description, World = _editingCardWorld });
+                var characterName = ResolveEditableCardName(name, character.Name, allowRename: !IsGenerating || cardId != OpenCharacterId);
+                Character updatedCharacter = ApplyCharacterFields(character with { Name = characterName, Description = description, World = _editingCardWorld });
                 var newCharacterId = await DocumentRenames.SaveCharacterAsync(Data, cardId, updatedCharacter, cancellationToken).ConfigureAwait(false);
 
                 if (!string.Equals(newCharacterId, cardId, StringComparison.Ordinal))
@@ -527,6 +554,20 @@ internal abstract partial class ShellController
         RefreshCardTokens();
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
         await OnCardChangedAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private string ResolveEditableCardName(string requested, string current, bool allowRename)
+    {
+        if (requested.Length == 0)
+            return current;
+
+        if (!allowRename && !string.Equals(Slug.Of(requested), Slug.Of(current), StringComparison.Ordinal))
+        {
+            CardName = current;
+            return current;
+        }
+
+        return requested;
     }
 
     private World ApplyWorldFields(World card)
@@ -750,7 +791,6 @@ internal abstract partial class ShellController
     protected virtual Task OnGlobalGalleryChangedAsync(CancellationToken cancellationToken)
         => Task.CompletedTask;
 
-    /// <summary>A new greeting to write, opened on its own; it is kept once it has a note or words.</summary>
     [UICommand]
     public void AddGreeting()
     {

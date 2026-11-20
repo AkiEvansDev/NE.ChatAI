@@ -38,13 +38,9 @@ public sealed class ApproximateTokenCounter : ITokenCounter
     }
 }
 
-/// <summary>
-/// A tokenizer's counts kept by text, for one model: a prompt is mostly the same texts generation after generation — the card, the
-/// older messages — so only what is new is asked of the server.
-/// </summary>
+/// <summary>Bounded in-memory cache of exact token counts keyed by text for the currently loaded model.</summary>
 public sealed class TokenCache
 {
-    /// <summary>Past this many texts the cache starts over rather than grow with a long session.</summary>
     private const int MaxEntries = 20_000;
 
     private readonly Dictionary<string, int> _counts = [with(StringComparer.Ordinal)];

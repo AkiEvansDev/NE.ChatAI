@@ -23,7 +23,6 @@ public static class PngText
 
         var offset = Signature.Length;
 
-        // Each chunk: its length, its type, its data, its CRC; a chunk that runs past the file ends the reading.
         while (offset + 12 <= file.Length)
         {
             var length = BinaryPrimitives.ReadUInt32BigEndian(file[offset..]);
@@ -47,7 +46,6 @@ public static class PngText
         return texts;
     }
 
-    /// <summary><c>keyword \0 text</c>, both Latin-1.</summary>
     private static void ReadText(ReadOnlySpan<byte> data, Dictionary<string, string> texts)
     {
         var separator = data.IndexOf((byte)0);
@@ -56,11 +54,11 @@ public static class PngText
             texts[Encoding.Latin1.GetString(data[..separator])] = Encoding.Latin1.GetString(data[(separator + 1)..]);
     }
 
-    /// <summary><c>keyword \0 compressed method language \0 translated \0 text</c>; a compressed one is passed over.</summary>
     private static void ReadInternationalText(ReadOnlySpan<byte> data, Dictionary<string, string> texts)
     {
         var separator = data.IndexOf((byte)0);
 
+        // Byte after the keyword null terminator is the compression flag; compressed iTXt chunks are skipped.
         if (separator <= 0 || separator + 3 > data.Length || data[separator + 1] != 0)
             return;
 

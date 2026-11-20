@@ -61,15 +61,18 @@ internal sealed partial class SettingsController : ShellController
     [RecursiveMember]
     public partial UIPhrase? DeleteQuestion { get; set; }
 
-    /// <summary>The name the rename dialog edits, kept on its Rename.</summary>
+    [RecursiveMember]
+    public partial UIPhrase? RenameDialogTitle { get; set; } = new("chatai.settings.rename.title");
+
+    [RecursiveMember]
+    public partial UIPhrase? RenameDialogAction { get; set; } = new("chatai.settings.rename");
+
     [RecursiveMember]
     public partial string RenameName { get; set; } = string.Empty;
 
-    /// <summary>The picture behind a chat whose character has none.</summary>
     [RecursiveMember]
     public partial PictureSlot Background { get; set; } = new();
 
-    /// <summary>Whether each message in the chat stands on a subtle surface of its own over the background picture.</summary>
     [RecursiveMember]
     public partial bool MessageBackground { get; set; }
 
@@ -234,6 +237,8 @@ internal sealed partial class SettingsController : ShellController
         _renaming = null;
         _creatingKind = kind;
         _creatingCopy = copy;
+        RenameDialogTitle = new UIPhrase(copy ? UIStandardAction.Duplicate.Title : UIStandardAction.New.Title);
+        RenameDialogAction = new UIPhrase(copy ? UIStandardAction.Duplicate.Title : "chatai.card.create");
 
         if (copy && editor.Name is string sourceName)
         {
@@ -302,6 +307,8 @@ internal sealed partial class SettingsController : ShellController
         _creatingKind = null;
         _creatingCopy = false;
         _renaming = kind;
+        RenameDialogTitle = new UIPhrase("chatai.settings.rename.title");
+        RenameDialogAction = new UIPhrase("chatai.settings.rename");
         RenameName = name;
 
         return UICommandResult.Ok([new OpenDialogEffect(RenameDialogKey)]);

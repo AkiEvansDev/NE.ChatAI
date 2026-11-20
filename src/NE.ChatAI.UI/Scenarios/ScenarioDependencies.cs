@@ -6,10 +6,7 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Scenarios;
 
-/// <summary>
-/// Infers read-after-write and write-after-write dependencies across an ordered batch of scenarios so independent sheets run in
-/// parallel while sheets sharing projected history, record tags or draft state wait for their upstream writers.
-/// </summary>
+/// <summary>Infers read/write data dependencies across an ordered scenario batch so independent sheets run concurrently.</summary>
 internal static class ScenarioDependencies
 {
     public static int[][] Analyze(IReadOnlyList<StoredDocument<Scenario>> scenarios, IReadOnlyList<UINodeDocument> documents)
@@ -70,6 +67,11 @@ internal static class ScenarioDependencies
                 if (!IsRawMessagesNode(document, node))
                     access.ReadsProjectedHistory = true;
             }
+            else if (string.Equals(node.Type, WorldNode.NodeKey, StringComparison.Ordinal))
+            {
+                // WorldNode only scans recent turns for lore triggers; marking ReadsProjectedHistory would serialize Raw-message sheets behind Summary.
+                access.ReadsDraft = true;
+            }
             else if (string.Equals(node.Type, ContextNode.NodeKey, StringComparison.Ordinal))
             {
                 access.ReadsProjectedHistory = true;
@@ -108,7 +110,7 @@ internal static class ScenarioDependencies
             {
                 access.WritesDraft = true;
 
-                if (ScenarioRunScope.ReadDraftWriteMode(node) == DraftWriteMode.Continue)
+                if (ReadEnum(node, nameof(WriteDraftNode.Mode), DraftWriteMode.Replace) == DraftWriteMode.Continue)
                     access.ReadsDraft = true;
             }
             else if (string.Equals(node.Type, SetVisualNode.NodeKey, StringComparison.Ordinal))
@@ -116,7 +118,11 @@ internal static class ScenarioDependencies
                 if (FindIncomingSource(document, node.Id, nameof(SetVisualNode.Target)) is not null)
                     access.WritesAnyVisualTarget = true;
                 else
-                    _ = access.WrittenVisualTargets.Add(ReadVisualTarget(node));
+                    _ = access.WrittenVisualTargets.Add(ReadEnum(node, nameof(SetVisualNode.Target), ChatVisualTarget.Stage));
+            }
+            else if (!ScenarioCatalog.BuiltInKeys.Contains(node.Type))
+            {
+                access.ReadsDraft = true;
             }
         }
 
@@ -131,39 +137,6 @@ internal static class ScenarioDependencies
             return string.Equals(wiredSource.Type, "graph.bool", StringComparison.Ordinal) && !HasIncomingEdge(document, wiredSource.Id) && ReadBool(wiredSource, "Value");
 
         return ReadBool(node, nameof(MessagesNode.Raw));
-    }
-
-    private static void ResolveTagPin(UINodeDocument document, UINode node, string pinName, HashSet<string> tags, out bool dynamicTag, out bool untagged)
-    {
-        dynamicTag = false;
-        untagged = false;
-
-        UINode? wiredSource = FindIncomingSource(document, node.Id, pinName);
-
-        if (wiredSource is not null)
-        {
-            if (string.Equals(wiredSource.Type, "graph.text", StringComparison.Ordinal) && !HasIncomingEdge(document, wiredSource.Id))
-            {
-                var constant = ReadString(wiredSource, "Value");
-
-                if (string.IsNullOrWhiteSpace(constant))
-                    untagged = true;
-                else
-                    _ = tags.Add(constant.Trim());
-
-                return;
-            }
-
-            dynamicTag = true;
-            return;
-        }
-
-        var direct = ReadString(node, pinName);
-
-        if (string.IsNullOrWhiteSpace(direct))
-            untagged = true;
-        else
-            _ = tags.Add(direct.Trim());
     }
 
     private static UINode? FindIncomingSource(UINodeDocument document, string toNodeId, string toPin)
@@ -184,7 +157,7 @@ internal static class ScenarioDependencies
         return null;
     }
 
-    private static UINode? FindEnabledNode(UINodeDocument document, string nodeId)
+    internal static UINode? FindEnabledNode(UINodeDocument document, string nodeId)
     {
         for (var i = 0; i < document.Nodes.Length; i++)
         {
@@ -225,6 +198,39 @@ internal static class ScenarioDependencies
         };
     }
 
+    private static void ResolveTagPin(UINodeDocument document, UINode node, string pinName, HashSet<string> tags, out bool dynamicTag, out bool untagged)
+    {
+        dynamicTag = false;
+        untagged = false;
+
+        UINode? wiredSource = FindIncomingSource(document, node.Id, pinName);
+
+        if (wiredSource is not null)
+        {
+            if (string.Equals(wiredSource.Type, "graph.text", StringComparison.Ordinal) && !HasIncomingEdge(document, wiredSource.Id))
+            {
+                var constant = ReadString(wiredSource, "Value");
+
+                if (string.IsNullOrWhiteSpace(constant))
+                    untagged = true;
+                else
+                    _ = tags.Add(constant.Trim());
+
+                return;
+            }
+
+            dynamicTag = true;
+            return;
+        }
+
+        var direct = ReadString(node, pinName);
+
+        if (string.IsNullOrWhiteSpace(direct))
+            untagged = true;
+        else
+            _ = tags.Add(direct.Trim());
+    }
+
     private static string? ReadString(UINode node, string key)
     {
         if (!node.Values.TryGetValue(key, out var value) || value is null)
@@ -238,18 +244,19 @@ internal static class ScenarioDependencies
         };
     }
 
-    private static ChatVisualTarget ReadVisualTarget(UINode node)
+    internal static TEnum ReadEnum<TEnum>(UINode node, string key, TEnum fallback)
+        where TEnum : struct, Enum
     {
-        if (!node.Values.TryGetValue(nameof(SetVisualNode.Target), out var value) || value is null)
-            return ChatVisualTarget.Stage;
+        if (!node.Values.TryGetValue(key, out var value) || value is null)
+            return fallback;
 
         return value switch
         {
-            ChatVisualTarget target => target,
-            JsonElement { ValueKind: JsonValueKind.String } element when Enum.TryParse(element.GetString(), ignoreCase: true, out ChatVisualTarget parsed) => parsed,
-            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetInt32(out var index) && Enum.IsDefined((ChatVisualTarget)index) => (ChatVisualTarget)index,
-            string text when Enum.TryParse(text, ignoreCase: true, out ChatVisualTarget parsed) => parsed,
-            _ => ChatVisualTarget.Stage
+            TEnum direct when Enum.IsDefined(direct) => direct,
+            JsonElement { ValueKind: JsonValueKind.String } element when Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed) && Enum.IsDefined(parsed) => parsed,
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetInt32(out var index) && Enum.IsDefined((TEnum)(object)index) => (TEnum)(object)index,
+            string text when Enum.TryParse(text, ignoreCase: true, out TEnum parsed) && Enum.IsDefined(parsed) => parsed,
+            _ => fallback
         };
     }
 

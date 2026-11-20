@@ -19,10 +19,7 @@ public enum TagScope
 /// <summary>A tag known to the application: its name and its colour, written as the UI writes one; none, and it is drawn plain.</summary>
 public sealed record KnownTag(string Name, string? Color);
 
-/// <summary>
-/// The tags known for a kind of card — those the settings keep with a colour and those cards of that kind carry — made, renamed,
-/// recoloured and deleted for every card of that kind at once. A tag is matched by its name, case aside.
-/// </summary>
+/// <summary>Lists, adds, recolours, renames and deletes card tags per <see cref="TagScope"/>, matching names case-insensitively.</summary>
 public static class TagCatalog
 {
     private static readonly StringComparer Names = StringComparer.OrdinalIgnoreCase;
@@ -45,14 +42,6 @@ public static class TagCatalog
         return [.. known.Values.OrderBy(static tag => tag.Name, StringComparer.CurrentCultureIgnoreCase)];
     }
 
-    private static IReadOnlyList<TagStyle> StylesOf(AppSettings settings, TagScope scope)
-        => scope switch
-        {
-            TagScope.Persona => settings.PersonaTags,
-            TagScope.World => settings.WorldTags,
-            _ => settings.Tags
-        };
-
     private static Task<IReadOnlyList<string>> CarriedAsync(DataFolder data, TagScope scope, CancellationToken cancellationToken)
         => scope switch
         {
@@ -67,6 +56,14 @@ public static class TagCatalog
 
         return [.. cards.Items.SelectMany(static stored => stored.Document.Tags)];
     }
+
+    private static IReadOnlyList<TagStyle> StylesOf(AppSettings settings, TagScope scope)
+        => scope switch
+        {
+            TagScope.Persona => settings.PersonaTags,
+            TagScope.World => settings.WorldTags,
+            _ => settings.Tags
+        };
 
     /// <summary>Makes a tag no card of <paramref name="scope"/> carries yet; one already known is left as it is.</summary>
     public static async Task<bool> AddAsync(DataFolder data, TagScope scope, string name, CancellationToken cancellationToken)
@@ -99,16 +96,18 @@ public static class TagCatalog
     {
         ArgumentNullException.ThrowIfNull(data);
 
+        name = name.Trim();
+
+        if (name.Length == 0)
+            return;
+
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<TagStyle> styles = StylesOf(settings, scope);
 
         await data.WriteSettingsAsync(WithStyles(settings, scope, [.. styles.Where(style => !Names.Equals(style.Name, name)), new TagStyle(name, color)]), cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Renames a tag on every card of <paramref name="scope"/> that carries it, its colour going with it; renamed to a tag already
-    /// known in <paramref name="scope"/>, the two become one, keeping that one's colour where it has one.
-    /// </summary>
+    /// <summary>Renames <paramref name="from"/> to <paramref name="to"/> across all cards and styles in <paramref name="scope"/>, merging when <paramref name="to"/> already exists.</summary>
     public static async Task<bool> RenameAsync(DataFolder data, TagScope scope, string from, string to, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -116,12 +115,16 @@ public static class TagCatalog
         from = from.Trim();
         to = to.Trim();
 
-        if (to.Length == 0 || string.Equals(from, to, StringComparison.Ordinal))
+        if (from.Length == 0 || to.Length == 0 || string.Equals(from, to, StringComparison.Ordinal))
             return false;
 
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<TagStyle> styles = StylesOf(settings, scope);
         TagStyle? source = styles.FirstOrDefault(style => Names.Equals(style.Name, from));
+
+        if (source is null && !(await CarriedAsync(data, scope, cancellationToken).ConfigureAwait(false)).Contains(from, Names))
+            return false;
+
         TagStyle? target = styles.FirstOrDefault(style => Names.Equals(style.Name, to) && !Names.Equals(style.Name, from));
         TagStyle renamed = new(to, target?.Color ?? source?.Color);
 
@@ -139,7 +142,6 @@ public static class TagCatalog
             _ => RetagAsync(data.Characters, from, to, cancellationToken)
         };
 
-    /// <summary>Every card carrying <paramref name="from"/> carries <paramref name="to"/> in its place, once; none, and it carries neither.</summary>
     private static async Task RetagAsync<T>(DocumentStore<T> store, string from, string? to, CancellationToken cancellationToken) where T : Card
     {
         DocumentListing<T> cards = await store.ListAsync(cancellationToken).ConfigureAwait(false);
@@ -162,6 +164,11 @@ public static class TagCatalog
     public static async Task DeleteAsync(DataFolder data, TagScope scope, string name, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
+
+        name = name.Trim();
+
+        if (name.Length == 0)
+            return;
 
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<TagStyle> styles = StylesOf(settings, scope);

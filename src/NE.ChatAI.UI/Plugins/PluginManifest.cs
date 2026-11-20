@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Plugins;
@@ -72,7 +73,6 @@ internal sealed record PluginStatus(InstalledPluginRecord Record, IReadOnlyList<
 /// <summary>Parses GitHub repository coordinates and compares plugin release versions.</summary>
 internal static class PluginCoordinates
 {
-    /// <summary>Normalizes <c>owner/repo</c> or a GitHub URL into <c>owner/repo</c>, or returns <c>null</c> when invalid.</summary>
     public static string? NormalizeRepository(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -128,7 +128,6 @@ internal static class PluginCoordinates
         return true;
     }
 
-    /// <summary>Strips a leading <c>v</c> prefix from a tag or manifest version string.</summary>
     public static string NormalizeVersion(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -142,7 +141,6 @@ internal static class PluginCoordinates
         return trimmed;
     }
 
-    /// <summary>Safe directory name for a version under <c>data/plugins/&lt;id&gt;/</c>.</summary>
     public static string VersionFolderName(string version)
     {
         var normalized = NormalizeVersion(version);
@@ -160,7 +158,6 @@ internal static class PluginCoordinates
         return folder.Length == 0 ? "0.0.0" : folder;
     }
 
-    /// <summary>Compares two semantic/numeric version strings, ordering stable releases ahead of pre-releases of the same core version.</summary>
     public static int CompareVersions(string? left, string? right)
     {
         var normLeft = NormalizeVersion(left);
@@ -172,23 +169,32 @@ internal static class PluginCoordinates
         SplitPreRelease(normLeft, out var coreLeft, out var preLeft);
         SplitPreRelease(normRight, out var coreRight, out var preRight);
 
-        if (TryParseCoreVersion(coreLeft, out Version? vLeft) && TryParseCoreVersion(coreRight, out Version? vRight))
+        var leftValid = TryParseCoreVersion(coreLeft, out Version vLeft);
+        var rightValid = TryParseCoreVersion(coreRight, out Version vRight);
+
+        if (leftValid && rightValid)
         {
             var byCore = vLeft.CompareTo(vRight);
 
             if (byCore != 0)
                 return byCore;
 
-            if (string.IsNullOrEmpty(preLeft) && !string.IsNullOrEmpty(preRight))
+            if (string.IsNullOrEmpty(preLeft) && string.IsNullOrEmpty(preRight))
+                return 0;
+
+            if (string.IsNullOrEmpty(preLeft))
                 return 1;
 
-            if (!string.IsNullOrEmpty(preLeft) && string.IsNullOrEmpty(preRight))
+            if (string.IsNullOrEmpty(preRight))
                 return -1;
 
-            return string.Compare(preLeft, preRight, StringComparison.OrdinalIgnoreCase);
+            return ComparePreRelease(preLeft, preRight);
         }
 
-        return string.Compare(normLeft, normRight, StringComparison.OrdinalIgnoreCase);
+        if (leftValid != rightValid)
+            return leftValid ? 1 : -1;
+
+        return 0;
     }
 
     private static void SplitPreRelease(string value, out string core, out string preRelease)
@@ -212,7 +218,7 @@ internal static class PluginCoordinates
     {
         var parts = value.Split('.');
 
-        if (parts.Length == 1 && int.TryParse(parts[0], out var majorOnly) && majorOnly >= 0)
+        if (parts.Length == 1 && int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var majorOnly))
         {
             version = new Version(majorOnly, 0, 0, 0);
             return true;
@@ -233,7 +239,40 @@ internal static class PluginCoordinates
         return false;
     }
 
-    /// <summary>Trims, filters blanks and deduplicates optional plugin manifest tags case-insensitively.</summary>
+    private static int ComparePreRelease(string left, string right)
+    {
+        var leftParts = left.Split('.');
+        var rightParts = right.Split('.');
+        var common = Math.Min(leftParts.Length, rightParts.Length);
+
+        for (var i = 0; i < common; i++)
+        {
+            var leftIsNum = ulong.TryParse(leftParts[i], NumberStyles.None, CultureInfo.InvariantCulture, out var leftNum);
+            var rightIsNum = ulong.TryParse(rightParts[i], NumberStyles.None, CultureInfo.InvariantCulture, out var rightNum);
+
+            if (leftIsNum && rightIsNum)
+            {
+                var byNum = leftNum.CompareTo(rightNum);
+
+                if (byNum != 0)
+                    return byNum;
+            }
+            else if (leftIsNum != rightIsNum)
+            {
+                return leftIsNum ? -1 : 1;
+            }
+            else
+            {
+                var byText = string.Compare(leftParts[i], rightParts[i], StringComparison.OrdinalIgnoreCase);
+
+                if (byText != 0)
+                    return byText;
+            }
+        }
+
+        return leftParts.Length.CompareTo(rightParts.Length);
+    }
+
     public static IReadOnlyList<string> NormalizeTags(IReadOnlyList<string>? raw)
     {
         if (raw is not { Count: > 0 })

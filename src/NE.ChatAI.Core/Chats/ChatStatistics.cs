@@ -125,11 +125,15 @@ public static class ChatStatistics
         if (chat.Generations.Count == 0)
             return [];
 
+        HashSet<string> activeMessageIds = [with(StringComparer.Ordinal)];
         HashSet<string> activeIds = [];
         HashSet<string> activeRecordIds = [];
         HashSet<string> inactiveRecordIds = [];
         HashSet<string> continuationIds = [];
         Dictionary<string, string> messageByGeneration = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < chat.Messages.Count; i++)
+            _ = activeMessageIds.Add(chat.Messages[i].Id);
 
         CollectActive(chat.Messages, activeIds, messageByGeneration);
         CollectAll(chat.Messages, continuationIds, messageByGeneration);
@@ -155,11 +159,13 @@ public static class ChatStatistics
 
             if (kind == GenerationCallKind.Auxiliary)
             {
-                include |= activeRecordIds.Contains(record.Id) || (!inactiveRecordIds.Contains(record.Id) && lastTurnActive);
+                var anchorSurvives = record.AnchorMessage is null || activeMessageIds.Contains(record.AnchorMessage);
+                include |= activeRecordIds.Contains(record.Id) || (!inactiveRecordIds.Contains(record.Id) && lastTurnActive && anchorSurvives);
             }
             else if (kind == GenerationCallKind.Impersonate && !messageByGeneration.ContainsKey(record.Id) && i > lastMessageGenIndex)
             {
-                include |= lastTurnActive;
+                var anchorSurvives = record.AnchorMessage is null || activeMessageIds.Contains(record.AnchorMessage);
+                include |= lastTurnActive && anchorSurvives;
             }
             else
             {
@@ -172,7 +178,9 @@ public static class ChatStatistics
                 continue;
 
             var index = selected.Count + 1;
-            _ = messageByGeneration.TryGetValue(record.Id, out var messageId);
+            if (!messageByGeneration.TryGetValue(record.Id, out var messageId) && record.AnchorMessage is string anchor && activeMessageIds.Contains(anchor))
+                messageId = anchor;
+
             selected.Add(SummarizeCall(record, index, kind, messageId));
         }
 

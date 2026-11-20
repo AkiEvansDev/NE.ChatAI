@@ -4,19 +4,17 @@ using NE.ChatAI.Controllers;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>A picture picked for behind the chats — a character's or the application's — with a live chat preview once loaded and its remove under it.</summary>
 internal static class PictureFields
 {
-    /// <summary>The largest picture taken: a photograph, not a scan.</summary>
     public const long MaxBackgroundBytes = 16 * 1024 * 1024;
 
+    private const string GalleryAccept = ".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg";
     private const double PreviewHeight = 180;
     private const double PreviewColumnWidth = 480;
     private const double PreviewAvatarSize = 40;
     private const double GalleryTileWidth = 228;
     private const double GalleryDesktopTileWidth = 244;
 
-    /// <summary>The field over the controller's <see cref="PictureSlot"/> at <paramref name="slot"/>, its upload kept by <paramref name="save"/>; a dimmed preview with a sample message once loaded, and the remove beneath.</summary>
     public static StackPanelComponent Background<TSource>(string title, string hint, Expression<Func<TSource, PictureSlot>> slot, string save, string remove, Expression<Func<TSource, object?>>? author = null, Expression<Func<TSource, object?>>? avatar = null, string? dimSliderId = null)
     {
         RecursivePath path = RecursivePath.FromExpression(slot);
@@ -110,11 +108,10 @@ internal static class PictureFields
         return surface;
     }
 
-    /// <summary>A gallery editor: search field with an embedded upload button over a wrapping grid of large flush tiles with lightbox preview and context-menu actions.</summary>
     public static StackPanelComponent Gallery<TSource>(string searchId, string description, string emptyTitle, Expression<Func<TSource, object?>> selectionId, string uploadCommand, Expression<Func<TSource, object?>> items, string replaceCommand, string actionCommand)
     {
         FileInputComponent uploadPicker = new FileInputComponent()
-            .SetAccept(".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg")
+            .SetAccept(GalleryAccept)
             .SetMultiple(true)
             .SetMaxFileSize(MaxBackgroundBytes)
             .BindSelectionId(selectionId)
@@ -155,7 +152,7 @@ internal static class PictureFields
             .AsContent(TextComponent.TitleProperty, ITooltipComponent.TooltipProperty);
 
         FileInputComponent replacePicker = new FileInputComponent()
-            .SetAccept(".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg")
+            .SetAccept(GalleryAccept)
             .SetMaxFileSize(MaxBackgroundBytes)
             .BindSelectionId<GalleryItem>(static x => x.ReplaceSelectionId, UIBindingScope.Relative)
             .OnChange(replaceCommand, UIAction.ArgCurrentItemKey("imageId"))

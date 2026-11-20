@@ -54,7 +54,7 @@ public static class ChatPictures
         var folder = FolderOf(data);
         var fileName = targetChatId + Path.GetExtension(sourcePath).ToLowerInvariant();
         PictureFiles.Delete(folder, targetChatId);
-        File.Copy(sourcePath, Path.Combine(folder, fileName), overwrite: true);
+        AtomicFile.Copy(sourcePath, Path.Combine(folder, fileName));
 
         return fileName;
     }

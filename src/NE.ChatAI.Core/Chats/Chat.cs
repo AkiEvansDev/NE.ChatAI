@@ -90,10 +90,13 @@ public sealed record GenerationRecord
 
     public DateTimeOffset Started { get; init; }
 
-    /// <summary>Seconds from sending the prompt to the first streamed token; <c>null</c> when no token arrived or before this field existed.</summary>
+    /// <summary>Seconds from sending the prompt to the first streamed token; <c>null</c> when no token arrived.</summary>
     public double? PromptSeconds { get; init; }
 
     public double Seconds { get; init; }
+
+    /// <summary>Message id of the turn an auxiliary call ran on, so active-branch statistics drop calls from deleted turns.</summary>
+    public string? AnchorMessage { get; init; }
 
     /// <summary>Every token sent in the prompt, across all blocks.</summary>
     [JsonIgnore]
@@ -123,7 +126,7 @@ public sealed record ChatRecord
     /// <summary>The id of the scenario document that wrote this record.</summary>
     public string? Scenario { get; init; }
 
-    /// <summary>An optional key; a new record with the same tag replaces the chat's earlier one.</summary>
+    /// <summary>Optional tag grouping records of one kind (<see cref="ChatRecords.MaxActivePerTag"/> active anchors kept, latest projected).</summary>
     public string? Tag { get; init; }
 
     /// <summary>The first and last message ids of the range sent as this record; <c>null</c> when <see cref="After"/> is set.</summary>
@@ -132,7 +135,7 @@ public sealed record ChatRecord
     /// <summary>The id of the message this record is sent immediately after; <c>null</c> when <see cref="Replaces"/> is set.</summary>
     public string? After { get; init; }
 
-    /// <summary>The zero-based variant index of the <see cref="After"/> message this record belongs to; <c>null</c> for replacements or legacy records before variant switches.</summary>
+    /// <summary>Zero-based variant index of the <see cref="After"/> message this record belongs to; <c>null</c> when unscoped to a variant.</summary>
     public int? Variant { get; init; }
 
     public MessageRole Role { get; init; } = MessageRole.System;
@@ -175,7 +178,7 @@ public sealed record ChatVisual
     /// <summary>The id of the message this visual takes effect immediately after; <c>null</c> when set before the chat's first message.</summary>
     public string? After { get; init; }
 
-    /// <summary>The zero-based variant index of the <see cref="After"/> message this visual belongs to; <c>null</c> when <see cref="After"/> is <c>null</c> or before variant switches.</summary>
+    /// <summary>Zero-based variant index of the <see cref="After"/> message this visual belongs to; <c>null</c> when unscoped to a variant.</summary>
     public int? Variant { get; init; }
 
     /// <summary>Canonical image key (<c>global.&lt;id&gt;</c>, <c>&lt;char-id&gt;.&lt;id&gt;</c> or <c>chat/&lt;chat-id&gt;/&lt;id&gt;</c>), or <c>null</c> when clearing <see cref="Target"/> from this turn onward.</summary>
@@ -191,6 +194,9 @@ public sealed record Chat : NamedDocument
     public string? Character { get; init; }
 
     public string? Persona { get; init; }
+
+    /// <summary>Creation timestamp used to sort a greeting-less chat before its first message is sent.</summary>
+    public DateTimeOffset? Created { get; init; }
 
     /// <summary>The chat's own seed under <see cref="SeedMode.PerChat"/>.</summary>
     public long? Seed { get; init; }

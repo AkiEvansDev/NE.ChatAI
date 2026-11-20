@@ -22,29 +22,26 @@ public enum NamesBehavior
 /// <summary>How a thinking model marks what it thinks before it answers.</summary>
 public sealed record ThoughtFormat
 {
-    /// <summary>Off, the reply is opened with an empty thought, so the model answers at once and spends no tokens on it.</summary>
+    /// <summary>When <see langword="false"/>, opens the reply with an empty thought block so the model answers immediately.</summary>
     public bool Enabled { get; init; } = true;
 
     public string Prefix { get; init; } = string.Empty;
 
     public string Suffix { get; init; } = string.Empty;
 
-    /// <summary>What opens the system text while thinking is on: Gemma 4 thinks only when <c>&lt;|think|&gt;</c> starts it.</summary>
+    /// <summary>Marker prepended to the system text while thinking is enabled (such as Gemma 4's <c>&lt;|think|&gt;</c>).</summary>
     public string SystemMark { get; init; } = string.Empty;
 
-    /// <summary>
-    /// On, a reply with thinking on is opened inside its thought — the prompt ends with <see cref="Prefix"/>, as Qwen's template does —
-    /// so the model thinks every time rather than when it chooses to.
-    /// </summary>
+    /// <summary>Whether an enabled thought opens the reply prompt with <see cref="Prefix"/> so the model thinks on every turn.</summary>
     public bool OpensReply { get; init; }
 
     /// <summary>Whether the reply starts inside the thought: the format marks one, thinking is on, and the prompt opens it.</summary>
     [JsonIgnore]
     public bool OpenedByPrompt => IsDefined && Enabled && OpensReply;
 
-    /// <summary>Whether the format marks thoughts at all.</summary>
+    /// <summary>Whether the format defines non-whitespace opening and closing thought markers.</summary>
     [JsonIgnore]
-    public bool IsDefined => Prefix.Length > 0 && Suffix.Length > 0;
+    public bool IsDefined => !string.IsNullOrWhiteSpace(Prefix) && !string.IsNullOrWhiteSpace(Suffix);
 }
 
 /// <summary>A model's turn markers — what opens and closes each speaker's turn — its stop sequences, and its thought's markers.</summary>
@@ -115,10 +112,7 @@ public sealed record ModelFormat : NamedDocument
         return stops;
     }
 
-    /// <summary>
-    /// The whole prompt of a system text and turns, in this format: what the prompt builder does with its blocks, for a format
-    /// looked at on its own.
-    /// </summary>
+    /// <summary>Renders <paramref name="system"/> and <paramref name="turns"/> into a standalone prompt string using this format.</summary>
     public string Render(string system, IEnumerable<(bool FromUser, string Text)> turns)
     {
         ArgumentNullException.ThrowIfNull(system);
@@ -145,11 +139,7 @@ public sealed record ModelFormat : NamedDocument
     public string SystemText(string system)
         => Thought.Enabled && Thought.SystemMark.Length > 0 ? Thought.SystemMark + system : system;
 
-    /// <summary>
-    /// One turn between its role's markers — a system turn in a user's where the model has no system role, the model's first turn
-    /// in <see cref="FirstModelPrefix"/> when there is one; under <see cref="Wrap"/> the opening marker stands on a line of its own.
-    /// </summary>
-    /// <remarks>SillyTavern's wrap puts the break after the opening marker only: the suffix carries its own line breaks.</remarks>
+    /// <summary>Wraps one turn in its role's opening and closing markers.</summary>
     public string Turn(PromptRole role, string text, bool firstOfModel = false)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -161,14 +151,11 @@ public sealed record ModelFormat : NamedDocument
             _ => SystemSameAsUser ? (UserPrefix, UserSuffix) : (SystemPrefix, SystemSuffix)
         };
 
+        // SillyTavern's wrap puts the break after the opening marker only; the suffix carries its own line breaks.
         return string.Concat(prefix, Wrap && prefix.Length > 0 ? "\n" : string.Empty, text, suffix);
     }
 
-    /// <summary>
-    /// The opening of the model's turn the reply continues: its marker, an empty thought after it when thinking is off, so the model
-    /// answers at once, or the thought's opening when the format opens it; then the speaker's name where the format writes names —
-    /// unless the thought is open, where the name would be part of it.
-    /// </summary>
+    /// <summary>Formats the opening of the generated model turn, including empty or prompt-opened thought markers and optional speaker prefix.</summary>
     public string Opening(string? name)
     {
         StringBuilder opening = OpenTurn();
@@ -178,13 +165,13 @@ public sealed record ModelFormat : NamedDocument
         else if (Thought.OpenedByPrompt)
             _ = opening.Append(Thought.Prefix);
 
+        // Omit speaker prefix while the prompt is open inside a thought block, or the name becomes part of the thought.
         if (NamesBehavior == NamesBehavior.Always && !string.IsNullOrEmpty(name) && (!Thought.IsDefined || !Thought.Enabled))
             _ = opening.Append(name).Append(':');
 
         return opening.ToString();
     }
 
-    /// <summary>The model's turn opened for the reply: its marker, and the break after it where the format wraps.</summary>
     private StringBuilder OpenTurn()
     {
         var marker = LastModelPrefix ?? ModelPrefix;
@@ -193,10 +180,7 @@ public sealed record ModelFormat : NamedDocument
         return Wrap && marker.Length > 0 ? opening.Append('\n') : opening;
     }
 
-    /// <summary>
-    /// The opening of a reply being continued: the turn's marker, an empty thought where the format marks thoughts — the model
-    /// thought already, and goes on writing — the name where the format writes names, and <paramref name="words"/>, the reply so far.
-    /// </summary>
+    /// <summary>Formats the opening of a reply continuation starting from <paramref name="words"/>.</summary>
     public string Continuing(string? name, string words)
     {
         ArgumentNullException.ThrowIfNull(words);
@@ -207,7 +191,7 @@ public sealed record ModelFormat : NamedDocument
             _ = opening.Append(Thought.Prefix).Append(Thought.Suffix);
 
         if (NamesBehavior == NamesBehavior.Always && !string.IsNullOrEmpty(name))
-            _ = opening.Append(name).Append(": ");
+            _ = opening.Append(name).Append(words.Length > 0 ? ": " : ":");
 
         return opening.Append(words).ToString();
     }

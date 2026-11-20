@@ -30,11 +30,7 @@ public static class WorldInfo
     public static IReadOnlyList<WorldArticle> ArticlesOf(World? world)
         => ArticlesOf(world, [], null);
 
-    /// <summary>
-    /// What a world puts into the prompt for <paramref name="history"/>: its overview after the story, then each enabled article in list
-    /// order — constant ones (no triggers) always, and triggered ones when matched in the last <see cref="World.ScanDepth"/> messages or
-    /// cascading from another triggered article.
-    /// </summary>
+    /// <summary>Resolves the world's overview, constant articles, and articles triggered across the recent <see cref="World.ScanDepth"/> messages or cascading waves.</summary>
     public static IReadOnlyList<WorldArticle> ArticlesOf(World? world, IReadOnlyList<PromptMessage> history, string? continuation = null)
     {
         ArgumentNullException.ThrowIfNull(history);
@@ -80,28 +76,6 @@ public static class WorldInfo
         }
 
         return articles;
-    }
-
-    /// <summary>
-    /// Whether <paramref name="triggers"/> (comma-separated <c>word</c>, <c>stem*</c> and <c>-exclusion</c> patterns, as on a world article)
-    /// match across <paramref name="texts"/>: at least one positive trigger when any are given, and no negative exclusion.
-    /// </summary>
-    public static bool Matches(IReadOnlyList<string> triggers, IReadOnlyList<string> texts)
-    {
-        ArgumentNullException.ThrowIfNull(triggers);
-        ArgumentNullException.ThrowIfNull(texts);
-
-        ParsedTriggers parsed = ParseTriggers(triggers);
-
-        if (parsed.IsConstant)
-            return false;
-
-        var window = texts as string[] ?? [.. texts];
-
-        if (MatchesAny(parsed.Negative, window))
-            return false;
-
-        return parsed.Positive.Length == 0 || MatchesAny(parsed.Positive, window);
     }
 
     private static ParsedTriggers ParseTriggers(IReadOnlyList<string> rawTriggers)
@@ -252,10 +226,6 @@ public static class WorldInfo
         return false;
     }
 
-    /// <summary>
-    /// Matches a trigger phrase in <paramref name="text"/>: case-insensitive, every word starting at a left word boundary, and ending at
-    /// a right word boundary unless the pattern word ends with <c>*</c> (prefix match for inflected forms).
-    /// </summary>
     private static bool MatchesTrigger(ReadOnlySpan<char> text, ReadOnlySpan<char> pattern)
     {
         ReadOnlySpan<char> patternRest = pattern;
@@ -355,6 +325,25 @@ public static class WorldInfo
         }
 
         return true;
+    }
+
+    /// <summary>Whether comma-separated <c>word</c>, <c>stem*</c> and <c>-exclusion</c> <paramref name="triggers"/> match across <paramref name="texts"/>.</summary>
+    public static bool Matches(IReadOnlyList<string> triggers, IReadOnlyList<string> texts)
+    {
+        ArgumentNullException.ThrowIfNull(triggers);
+        ArgumentNullException.ThrowIfNull(texts);
+
+        ParsedTriggers parsed = ParseTriggers(triggers);
+
+        if (parsed.IsConstant)
+            return false;
+
+        var window = texts as string[] ?? [.. texts];
+
+        if (MatchesAny(parsed.Negative, window))
+            return false;
+
+        return parsed.Positive.Length == 0 || MatchesAny(parsed.Positive, window);
     }
 
     private readonly record struct ParsedTriggers(string[] Positive, string[] Negative)

@@ -22,7 +22,7 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>A message in the feed: who wrote it, their picture or mark, the model's thought folded over it, and its words in Markdown.</summary>
+/// <summary>One message row in the chat feed: author, avatar, folded thought, Markdown text, inline editor, variants, and records.</summary>
 internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableItem, IContentItem
 {
     private bool _thinking;
@@ -30,7 +30,6 @@ internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableIt
     [RecursiveMember(false)]
     public required string Id { get; init; }
 
-    /// <summary>A name and words are the chat's own, never a key.</summary>
     public bool IsContent => true;
 
     public MessageRole Role { get; init; }
@@ -38,11 +37,9 @@ internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableIt
     [RecursiveMember]
     public partial string Author { get; set; } = string.Empty;
 
-    /// <summary>The author's picture; with none, the row shows the person's glyph.</summary>
     [RecursiveMember]
     public partial string? Avatar { get; set; }
 
-    /// <summary>Whether pressing the author's avatar opens their character or persona editor dialog.</summary>
     [RecursiveMember]
     public partial bool CanOpenAuthor { get; set; }
 
@@ -55,51 +52,27 @@ internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableIt
     [RecursiveMember]
     public partial UIVisibility TextVisibility { get; set; } = UIVisibility.Visible;
 
-    /// <summary>The words being edited in the message's place, while it is edited.</summary>
     [RecursiveMember]
     public partial string EditDraft { get; set; } = string.Empty;
 
     [RecursiveMember]
     public partial UIVisibility EditorVisibility { get; set; } = UIVisibility.Collapsed;
 
-    /// <summary>Whether Edit and the menu stand beside the author: while the message is not edited, its editor's buttons standing there then.</summary>
     [RecursiveMember]
     public partial UIVisibility ToolsVisibility { get; set; } = UIVisibility.Visible;
 
-    /// <summary>The message's menu: made again and a new variant on a character's reply, a new variant by hand on a greeting, and the delete from here.</summary>
     [RecursiveMember(false)]
     public RecursiveCollection<MenuItem> Actions { get; } = [];
 
-    /// <summary>Three dots in the words' place while the model reads the prompt before any words arrive.</summary>
-    public void ShowLoading(bool loading)
-    {
-        LoadingVisibility = loading ? UIVisibility.Visible : UIVisibility.Collapsed;
-        TextVisibility = loading || EditorVisibility == UIVisibility.Visible ? UIVisibility.Collapsed : UIVisibility.Visible;
-    }
-
-    /// <summary>The editor in the words' place, opened on <paramref name="draft"/>; or the words again.</summary>
-    public void ShowEditor(string? draft)
-    {
-        EditDraft = draft ?? string.Empty;
-        LoadingVisibility = UIVisibility.Collapsed;
-        TextVisibility = draft is null ? UIVisibility.Visible : UIVisibility.Collapsed;
-        EditorVisibility = draft is null ? UIVisibility.Collapsed : UIVisibility.Visible;
-        ToolsVisibility = TextVisibility;
-    }
-
-    /// <summary>What the model thought before the words; none for a message without one.</summary>
     [RecursiveMember]
     public partial string? Thought { get; set; }
 
-    /// <summary>Whether the thought's fold stands over the words: there is a thought, and the prompt does not hide them.</summary>
     [RecursiveMember]
     public partial UIVisibility ThoughtVisibility { get; set; } = UIVisibility.Collapsed;
 
-    /// <summary>The fold's title: thinking while the thought is still being written, then the thought.</summary>
     [RecursiveMember]
     public partial UIPhrase ThoughtTitle { get; set; } = new("chatai.chat.thought");
 
-    /// <summary>The shown variant's token count under the avatar.</summary>
     [RecursiveMember]
     public partial string TokenCount { get; set; } = string.Empty;
 
@@ -109,27 +82,36 @@ internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableIt
     [RecursiveMember]
     public partial UIVisibility TokenCountVisibility { get; set; } = UIVisibility.Collapsed;
 
-    /// <summary>Which variant is shown of how many, as the swipe between them says it: <c>2/3</c>.</summary>
     [RecursiveMember]
     public partial string VariantLabel { get; set; } = string.Empty;
 
-    /// <summary>Whether the swipe stands beside the words: there is more than one variant to go between.</summary>
     [RecursiveMember]
     public partial UIVisibility SwipeVisibility { get; set; } = UIVisibility.Collapsed;
 
-    /// <summary>Whether there is a variant before the one shown, to go back to.</summary>
     [RecursiveMember]
     public partial bool HasPrevious { get; set; }
 
-    /// <summary>Whether there is a variant after the one shown; a new one is the menu's, never the swipe's.</summary>
     [RecursiveMember]
     public partial bool HasNext { get; set; }
 
-    /// <summary>Scenario records anchored under this message, each shown as a quiet fold.</summary>
     [RecursiveMember(false)]
     public RecursiveCollection<ChatRecordItem> Records { get; } = [];
 
-    /// <summary>The thought as it stands, shown folded unless <paramref name="hidden"/>; <paramref name="thinking"/> while it is written.</summary>
+    public void ShowLoading(bool loading)
+    {
+        LoadingVisibility = loading ? UIVisibility.Visible : UIVisibility.Collapsed;
+        TextVisibility = loading || EditorVisibility == UIVisibility.Visible ? UIVisibility.Collapsed : UIVisibility.Visible;
+    }
+
+    public void ShowEditor(string? draft)
+    {
+        EditDraft = draft ?? string.Empty;
+        LoadingVisibility = UIVisibility.Collapsed;
+        TextVisibility = draft is null ? UIVisibility.Visible : UIVisibility.Collapsed;
+        EditorVisibility = draft is null ? UIVisibility.Collapsed : UIVisibility.Visible;
+        ToolsVisibility = TextVisibility;
+    }
+
     public void ShowThought(string? thought, bool hidden, bool thinking)
     {
         Thought = string.IsNullOrEmpty(thought) ? null : thought;
@@ -146,11 +128,7 @@ internal sealed partial class ChatMessageItem : RecursiveObservable, IBindableIt
         => ShowThought(Thought, hidden, _thinking);
 }
 
-/// <summary>
-/// The chat open on the page — the one the address names, else the one last open — with its character: its messages kept in the
-/// chat's file as they are written, and each reply generated with the active connection and streamed into the feed — a new message,
-/// another variant of the last one, or the last one continued.
-/// </summary>
+/// <summary>Home chat controller (<c>/</c>): manages the open chat, streams model replies, and coordinates triggered scenarios.</summary>
 internal sealed partial class ChatController : ShellController
 {
     public const string FeedId = "chatai-feed";
@@ -158,18 +136,12 @@ internal sealed partial class ChatController : ShellController
     public const string ComposerFormId = "chatai-composer-form";
     public const string StageSplitId = "chatai-stage-split";
     public const string StageSplitterId = "chatai-stage-splitter";
+    public const int WindowSize = 30;
 
     public static readonly UIResponsive<UIGridPlacement> FullChatPlacement = UIResponsive<UIGridPlacement>.Create(new UIGridPlacement(1, 1, 24, 3), xl: new UIGridPlacement(1, 1, 24, 1));
     public static readonly UIResponsive<UIGridPlacement> SplitChatPlacement = UIResponsive<UIGridPlacement>.Create(new UIGridPlacement(1, 3, 24, 1), xl: new UIGridPlacement(12, 1, 13, 1));
 
-    /// <summary>The reader's name in a chat with no persona, as SillyTavern names them.</summary>
     private const string DefaultUserName = "User";
-
-    /// <summary>How long a finished reply waits for the server to count it before it is estimated instead.</summary>
-    private static readonly TimeSpan ReplyCountPatience = TimeSpan.FromSeconds(10);
-
-    /// <summary>How many messages the feed reads at a time, from the end back.</summary>
-    public const int WindowSize = 30;
 
     private readonly ActiveGenerations _activeGenerations = new();
     private bool _generating;
@@ -179,8 +151,6 @@ internal sealed partial class ChatController : ShellController
     private Chat? _chat;
     private Character? _character;
     private IReadOnlyDictionary<string, string>? _globalImageTags;
-
-    /// <summary>The persona the chat is written as: its own, else the default one; none, and the reader is "User".</summary>
     private Persona? _persona;
     private string? _personaId;
     private bool _hideThoughts;
@@ -190,10 +160,6 @@ internal sealed partial class ChatController : ShellController
     [RecursiveMember(false)]
     public MessageSource Messages { get; } = new();
 
-    /// <summary>
-    /// The composer's extras: the last reply made again, a new variant of it or more of its words; the chat's own author's note, its
-    /// persona, the quick phrases and impersonation.
-    /// </summary>
     [RecursiveMember(false)]
     public RecursiveCollection<MenuItem> Extras { get; } =
     [
@@ -213,45 +179,36 @@ internal sealed partial class ChatController : ShellController
         Entry(PhrasesAction, AppIcons.Phrases, "chatai.chat.extras.phrases")
     ];
 
-    /// <summary>A menu's entry; its id says what it does.</summary>
     private static MenuItem Entry(string id, string icon, string title)
         => new() { Id = id, Title = title, Icon = AppIcons.Outline(icon) };
 
     [RecursiveMember]
     public partial string Draft { get; set; } = string.Empty;
 
-    /// <summary>The composer's one button in the field: Send, or Stop while a reply is written.</summary>
     [RecursiveMember]
     public partial string SendIcon { get; set; } = UIStandardAction.Send.Icon;
 
     [RecursiveMember]
     public partial UIPhrase SendTooltip { get; set; } = new(UIStandardAction.Send.Title);
 
-    /// <summary>What the feed says while it has no message: to pick a chat, or to write the first message.</summary>
     [RecursiveMember]
     public partial UIPhrase? EmptyFeed { get; set; } = new UIPhrase("chatai.chat.none");
 
-    /// <summary>The picture behind the chat: its character's, else the application's; none, and it stands on the theme.</summary>
     [RecursiveMember]
     public partial string? Background { get; set; }
 
-    /// <summary>The active stage visual's served picture address when stage mode is open.</summary>
     [RecursiveMember]
     public partial string? StageImage { get; set; }
 
-    /// <summary>Whether the adaptive stage pane is shown alongside or above the chat column.</summary>
     [RecursiveMember]
     public partial UIVisibility StageVisibility { get; set; } = UIVisibility.Collapsed;
 
-    /// <summary>The chat column's responsive grid placement: full page at rest, or bottom/right split when the stage pane is shown.</summary>
     [RecursiveMember]
     public partial UIResponsive<UIGridPlacement> ChatPlacement { get; set; } = FullChatPlacement;
 
-    /// <summary>The fill behind the central chat column when the message background setting is on.</summary>
     [RecursiveMember]
     public partial UIThemeColor? MessageBackground { get; set; }
 
-    /// <summary>The open chat's own seed, which One per chat generates with; none before its first reply, and none picks a new one.</summary>
     [RecursiveMember]
     public partial decimal? ChatSeed { get; set; }
 
@@ -261,16 +218,25 @@ internal sealed partial class ChatController : ShellController
 
     private string UserName => string.IsNullOrWhiteSpace(_persona?.Name) ? DefaultUserName : _persona.Name;
 
-    /// <summary>The prompt preset says whether thoughts are shown; one switched in the panel shows or hides them at once.</summary>
-    protected override void OnProfileLoaded(ActiveProfile? profile)
+    protected override async Task OnProfileLoadedAsync(ActiveProfile? profile, bool runtimeActive, CancellationToken cancellationToken)
     {
-        _hideThoughts = profile?.Prompt.Thoughts.Show == ThoughtDisplay.Hidden;
+        var hide = profile?.Prompt.Thoughts.Show == ThoughtDisplay.Hidden;
 
-        foreach (ChatMessageItem item in Messages.Items)
-            item.RefreshThought(_hideThoughts);
+        if (!runtimeActive)
+        {
+            _hideThoughts = hide;
+            return;
+        }
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            _hideThoughts = hide;
+
+            foreach (ChatMessageItem item in Messages.Items)
+                item.RefreshThought(_hideThoughts);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>The chat the address names, else the one last open; a reply being written keeps its chat until it ends.</summary>
     protected override async Task OnNavigatedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(navigation);
@@ -334,10 +300,6 @@ internal sealed partial class ChatController : ShellController
         item.Checked = _hasActiveStage && !_stageHiddenByUser;
     }
 
-    /// <summary>
-    /// The chat opened where the page stands and its address written as a new entry, which Back leaves through <see cref="OnNavigatedAsync"/>:
-    /// a page load would put the chats panel away, which a character picked keeps open.
-    /// </summary>
     protected override async Task<UICommandResult> ShowChatAsync(string chatId, CancellationToken cancellationToken)
     {
         if (chatId == OpenChatId)
@@ -357,44 +319,80 @@ internal sealed partial class ChatController : ShellController
         await ShowChatListsAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Refreshes the open chat's character, persona, active world, background and message authors/avatars when a card or setting changes.</summary>
     private async Task RefreshOpenChatPresentationAsync(CancellationToken cancellationToken)
     {
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        _globalImageTags = settings.ImageTags;
-        ApplyChatSurface(settings.MessageBackground);
-        BackgroundDim = Math.Clamp(settings.BackgroundDim, 0, 1);
+        Chat? snapshotChat = null;
+        string? snapshotChatId = null;
+        var generating = false;
 
-        if (_chat is not null && OpenChatId is string openChatId && !Data.Chats.Exists(openChatId) && !_generating)
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            snapshotChat = _chat;
+            snapshotChatId = OpenChatId;
+            generating = _generating;
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (snapshotChat is not null && snapshotChatId is not null && !Data.Chats.Exists(snapshotChatId) && !generating)
         {
             await ClearOpenChatAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        if (_chat is null)
+        Chat? persisted = !generating && snapshotChat is not null && snapshotChatId is not null
+            ? await Chats.ReadAsync(snapshotChatId, cancellationToken).ConfigureAwait(false)
+            : null;
+        Chat? effectiveChat = persisted ?? snapshotChat;
+        Character? character = effectiveChat?.Character is string characterId ? await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
+        var personaId = effectiveChat is null
+            ? null
+            : effectiveChat.Persona is string own && Slug.IsValidId(own) && Data.Personas.Exists(own) ? own : DefaultPersonaId;
+        Persona? persona = personaId is null ? null : await Data.Personas.ReadAsync(personaId, cancellationToken).ConfigureAwait(false);
+        var needsWindow = false;
+
+        await Context.Runtime.InvokeAsync(() =>
         {
-            OpenCharacterId = null;
-            ActivePersonaId = null;
-            ActiveWorldId = null;
+            _globalImageTags = settings.ImageTags;
+            ApplyChatSurface(settings.MessageBackground);
+            BackgroundDim = Math.Clamp(settings.BackgroundDim, 0, 1);
+
+            if (_chat is null)
+            {
+                OpenCharacterId = null;
+                ActivePersonaId = null;
+                ActiveWorldId = null;
+                RefreshVisuals();
+                ShowCards();
+                return;
+            }
+
+            if (!_generating && persisted is not null && OpenChatId == snapshotChatId)
+                _chat = persisted;
+
+            OpenCharacterId = _chat.Character;
+            _character = character;
+            _personaId = _chat.Persona is string ownPersona && Slug.IsValidId(ownPersona) && Data.Personas.Exists(ownPersona) ? ownPersona : DefaultPersonaId;
+            _persona = _personaId == personaId ? persona : _persona;
+            ActivePersonaId = _personaId;
+            ActiveWorldId = ResolveActiveWorldId();
             RefreshVisuals();
             ShowCards();
-            return;
-        }
 
-        if (!_generating && OpenChatId is string currentChatId && await Chats.ReadAsync(currentChatId, cancellationToken).ConfigureAwait(false) is Chat persisted)
-            _chat = persisted;
+            needsWindow = !_generating && Messages.Items.Count == 0 && (_chat.Messages.Count > 0 || Messages.Live is not null);
+            RefreshMessageAuthors();
+        }, cancellationToken).ConfigureAwait(false);
 
-        OpenCharacterId = _chat.Character;
-        _character = _chat.Character is string characterId ? await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
-        _personaId = _chat.Persona is string own && Slug.IsValidId(own) && Data.Personas.Exists(own) ? own : DefaultPersonaId;
-        _persona = _personaId is null ? null : await Data.Personas.ReadAsync(_personaId, cancellationToken).ConfigureAwait(false);
-        ActivePersonaId = _personaId;
-        ActiveWorldId = ResolveActiveWorldId();
-        RefreshVisuals();
-        ShowCards();
-
-        if (Messages.Items.Count == 0 && (_chat.Messages.Count > 0 || Messages.Live is not null))
+        if (needsWindow)
+        {
             await Messages.LoadWindowAsync(new UIItemWindowRequest(UIItemAnchor.End, WindowSize), cancellationToken).ConfigureAwait(false);
+            await Context.Runtime.InvokeAsync(RefreshMessageAuthors, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private void RefreshMessageAuthors()
+    {
+        if (_chat is null)
+            return;
 
         var characterAvatar = Pictures.CharacterAvatarOf(_chat.Character);
         var personaAvatar = Pictures.PersonaAvatarOf(_personaId);
@@ -538,10 +536,6 @@ internal sealed partial class ChatController : ShellController
         return item;
     }
 
-    /// <summary>
-    /// A message's row with its menu: a reply made again or given a new variant, a greeting given one by hand — the model never
-    /// writes a greeting — and any message branched into a new chat or deleted from there on.
-    /// </summary>
     private ChatMessageItem RowOf(string id, MessageRole role, bool greeting)
     {
         ChatMessageItem item = new()
@@ -574,11 +568,9 @@ internal sealed partial class ChatController : ShellController
         return item;
     }
 
-    /// <summary>Whether the message is the character's greeting: the chat's first message, a character's.</summary>
     private bool IsGreeting(string messageId)
         => _chat is { Messages.Count: > 0 } chat && chat.Messages[0].Id == messageId && chat.Messages[0].Role == MessageRole.Character;
 
-    /// <summary>A message's shown variant in its row: its words, its thought, its token count, and which of its variants it is.</summary>
     private void Show(ChatMessageItem item, ChatMessage message)
     {
         var chosen = Math.Clamp(message.Chosen, 0, Math.Max(0, message.Variants.Count - 1));
@@ -587,9 +579,21 @@ internal sealed partial class ChatController : ShellController
         TokenCounts counts = generation is { ReplyTokens: > 0 } ? generation.Counts : TokenCounts.Approximate;
 
         item.Text = message.Current.Text;
-        item.ShowLoading(false);
         item.CanOpenAuthor = !_generating && HasAuthorCard(message.Role);
-        item.ToolsVisibility = !_generating && _editingId != message.Id ? UIVisibility.Visible : UIVisibility.Collapsed;
+
+        if (!_generating && _editingId == message.Id)
+        {
+            item.ShowEditor(item.EditorVisibility == UIVisibility.Visible ? item.EditDraft : (_editingNew ? string.Empty : message.Current.Text));
+        }
+        else
+        {
+            if (item.EditorVisibility == UIVisibility.Visible)
+                item.ShowEditor(null);
+
+            item.ShowLoading(false);
+            item.ToolsVisibility = !_generating ? UIVisibility.Visible : UIVisibility.Collapsed;
+        }
+
         item.ShowThought(message.Current.Thought, _hideThoughts, thinking: false);
         item.TokenCount = tokens > 0 ? tokens.ToString(CultureInfo.InvariantCulture) : string.Empty;
         item.TokenCountTooltip = tokens > 0 ? UIPhrase.Of("chatai.chat.tokens.tooltip", ("tokens", tokens), ("counts", ShortCountsPhrase(counts))) : null;
@@ -614,10 +618,6 @@ internal sealed partial class ChatController : ShellController
         SyncRecords(item);
     }
 
-    /// <summary>
-    /// The composer's extras as the last message allows them, none while a reply is written: a character's reply made again, given a
-    /// new variant or continued; a greeting given a variant by hand; nothing on the reader's own words.
-    /// </summary>
     private void ShowLastActions()
     {
         ChatMessage? last = _generating || _chat is null || _chat.Messages.Count == 0 ? null : _chat.Messages[^1];
@@ -644,7 +644,6 @@ internal sealed partial class ChatController : ShellController
         RefreshScenarioMenuEnabled();
     }
 
-    /// <summary>The composer's button: stops the reply being written, or sends the draft. Enter only sends, so a draft typed meanwhile never stops it.</summary>
     [UICommand]
     public async Task<UICommandResult> SendOrStopAsync(CancellationToken cancellationToken)
     {
@@ -659,10 +658,6 @@ internal sealed partial class ChatController : ShellController
         return UICommandResult.Ok();
     }
 
-    /// <summary>
-    /// Sends the draft — or, with none, asks for the reply to the reader's last message — and starts the reply in a message of its own. The reply is a job the runtime owns, not the command's work: a
-    /// command is cancelled when its connection goes, and a tablet's browser drops the connection whenever its screen sleeps.
-    /// </summary>
     [UICommand]
     public async Task<UICommandResult> SendAsync(CancellationToken cancellationToken)
     {
@@ -685,7 +680,7 @@ internal sealed partial class ChatController : ShellController
 
             var text = Draft.Trim();
 
-            // Nothing to send under a message of the reader's — its reply deleted, say — asks for the reply, as SillyTavern does.
+            // Sending an empty draft when the last turn is already the user's asks the character to answer it.
             if (text.Length == 0 && (_chat.Messages.Count == 0 || _chat.Messages[^1].Role != MessageRole.User))
                 return;
 
@@ -716,7 +711,6 @@ internal sealed partial class ChatController : ShellController
         return UICommandResult.Ok();
     }
 
-    /// <summary>The active profile a reply is made with, or what to tell the reader when there is none — or no chat to reply in.</summary>
     private async Task<(ActiveProfile? Profile, UICommandResult? Refusal)> ReplyProfileAsync(CancellationToken cancellationToken)
     {
         if (OpenChatId is null)
@@ -730,15 +724,20 @@ internal sealed partial class ChatController : ShellController
 
     private BeforeSendJob BeginBeforeSend(ActiveProfile profile, string chatId, IReadOnlyList<StoredDocument<Scenario>> scenarios)
     {
+        EnterGeneratingState(_chat!);
+
+        return new BeforeSendJob(profile, chatId, scenarios);
+    }
+
+    private void EnterGeneratingState(Chat baselineChat)
+    {
         _generating = true;
-        CaptureHiddenBackupRecords(_chat!);
+        CaptureHiddenBackupRecords(baselineChat);
         CloseOpenEditors();
         RefreshRealizedMessages();
         RefreshRealizedRecords();
         ShowSendButton(stops: true);
         ShowLastActions();
-
-        return new BeforeSendJob(profile, chatId, scenarios);
     }
 
     private void CloseOpenEditors()
@@ -801,10 +800,11 @@ internal sealed partial class ChatController : ShellController
         SendTooltip = new UIPhrase(action.Title);
     }
 
-    private ReplyJob AppendUserMessageAndBeginReply(ActiveProfile profile, string chatId, string text)
+    private ReplyJob AppendUserMessageAndBeginReply(ActiveProfile profile, string chatId, string text, int? beforeSendGenerationStart = null)
     {
         Chat preTurnChat = _chat!;
         ChatMessageItem reply = RowOf(ChatLibrary.NewMessageId(), MessageRole.Character, greeting: false);
+        var scrolledUp = Messages.HasMoreAfter;
 
         if (text.Length > 0)
         {
@@ -818,33 +818,45 @@ internal sealed partial class ChatController : ShellController
                 At = DateTimeOffset.UtcNow
             };
 
-            _chat = ChatEditing.Append(_chat!, message, null, _chat!.Seed);
+            Chat updated = ChatEditing.Append(_chat!, message, null, _chat!.Seed);
+
+            if (beforeSendGenerationStart is int genStart && genStart < updated.Generations.Count)
+                updated = StampAnchorOnNewGenerations(updated, genStart, message.Id);
+
+            _chat = updated;
             Draft = string.Empty;
             _draftGenerationId = null;
             _draftContinuations.Clear();
 
             Messages.Add(ItemOf(message));
-            ShowLastWords(chatId, text);
+            ShowLastWords(chatId, text, bumpToTop: true);
         }
 
         Messages.Add(reply);
+        ReplyJob job = BeginReply(profile, chatId, preTurnChat, ReplyKind.Message, reply, _chat!.Messages, null);
 
-        return BeginReply(profile, chatId, preTurnChat, ReplyKind.Message, reply, _chat!.Messages, null);
+        if (scrolledUp)
+            Messages.Reread();
+
+        return job;
     }
 
-    /// <summary>A reply about to be written, under the runtime's lock: the composer turns to Stop, its extras go.</summary>
+    private static Chat StampAnchorOnNewGenerations(Chat chat, int startIndex, string anchorMessageId)
+    {
+        List<GenerationRecord> generations = [.. chat.Generations];
+
+        for (var i = Math.Max(0, startIndex); i < generations.Count; i++)
+            generations[i] = generations[i] with { AnchorMessage = anchorMessageId };
+
+        return chat with { Generations = generations };
+    }
+
     private ReplyJob BeginReply(ActiveProfile profile, string chatId, Chat preTurnChat, ReplyKind kind, ChatMessageItem item, IReadOnlyList<ChatMessage> history, string? continued)
     {
-        _generating = true;
         _liveKind = kind;
         Messages.Live = item;
-        CaptureHiddenBackupRecords(preTurnChat);
-        CloseOpenEditors();
         item.ShowLoading(kind != ReplyKind.Continuation);
-        RefreshRealizedMessages();
-        RefreshRealizedRecords();
-        ShowSendButton(stops: true);
-        ShowLastActions();
+        EnterGeneratingState(preTurnChat);
 
         return new ReplyJob(profile, chatId, _chat!, preTurnChat, kind, item, history, continued);
     }
@@ -853,8 +865,9 @@ internal sealed partial class ChatController : ShellController
     {
         ReplyJob? replyJob = null;
 
-        using (CancellationTokenSource generation = CancellationTokenSource.CreateLinkedTokenSource(lifetime))
+        try
         {
+            using CancellationTokenSource generation = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
             Chat? startChat = null;
 
             await Context.Runtime.InvokeAsync(() =>
@@ -871,15 +884,17 @@ internal sealed partial class ChatController : ShellController
                 return;
             }
 
-            var succeeded = await RunBeforeSendBatchAsync(beforeJob.ChatId, startChat, beforeJob.Scenarios, generation.Token).ConfigureAwait(false);
+            ScenarioBatchResult batch = await RunBeforeSendBatchAsync(beforeJob.ChatId, startChat, beforeJob.Scenarios, generation.Token).ConfigureAwait(false);
 
-            if (!succeeded || generation.IsCancellationRequested)
+            if (!batch.AllSucceeded || generation.IsCancellationRequested)
             {
                 if (!lifetime.IsCancellationRequested)
                     await ReleaseGenerationAsync().ConfigureAwait(false);
 
                 return;
             }
+
+            var startGenerations = startChat.Generations.Count;
 
             await Context.Runtime.InvokeAsync(() =>
             {
@@ -888,13 +903,23 @@ internal sealed partial class ChatController : ShellController
                 if (_chat is null || OpenChatId != beforeJob.ChatId)
                     return;
 
+                ApplyCommittedBeforeSendBatch(batch);
+
                 var text = Draft.Trim();
 
                 if (text.Length == 0)
                     return;
 
-                replyJob = AppendUserMessageAndBeginReply(beforeJob.Profile, beforeJob.ChatId, text);
+                replyJob = AppendUserMessageAndBeginReply(beforeJob.Profile, beforeJob.ChatId, text, startGenerations);
+                RefreshVisuals();
+                RefreshRealizedRecords();
+                RefreshLoadedStatistics();
             }, lifetime).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (lifetime.IsCancellationRequested)
+                await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), CancellationToken.None).ConfigureAwait(false);
         }
 
         if (replyJob is null)
@@ -909,21 +934,14 @@ internal sealed partial class ChatController : ShellController
         await GenerateAsync(replyJob, lifetime).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Streams the reply into the job's row, every write under the runtime's lock, until it ends, Stop, or the runtime goes
-    /// (<paramref name="lifetime"/>); then keeps it in the chat with its seed and the record of how it was made.
-    /// </summary>
     private async Task GenerateAsync(ReplyJob job, CancellationToken lifetime)
     {
-        // Let go under the runtime's lock before it is disposed, and Stop cancels it under the same lock: a Stop arriving as the reply
-        // ends finds it alive or finds nothing.
         using CancellationTokenSource generation = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
         ActiveProfile profile = job.Profile;
         KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
         Uri address = profile.Connection.Address!;
         KoboldCppClient kobold = clients.For(address);
         var genKey = "chatai-" + ChatLibrary.NewMessageId();
-        // A continuation goes on from words the model wrote after its thought: what comes is words, with no thought to open.
         ReplyReader reader = new(job.Kind == ReplyKind.Continuation ? new ThoughtFormat() : profile.Format.Thought, job.Kind == ReplyKind.Continuation ? null : CharacterName);
         var before = job.Continued ?? string.Empty;
         DateTimeOffset started = DateTimeOffset.UtcNow;
@@ -936,7 +954,6 @@ internal sealed partial class ChatController : ShellController
         BuiltPrompt? prompt = null;
         string? model = null;
         var contextLength = 0;
-        // What the model sent as it sent it, markers and all: what its tokenizer counts for the record.
         StringBuilder sent = new();
         IDisposable? serverSlot = null;
 
@@ -950,29 +967,27 @@ internal sealed partial class ChatController : ShellController
 
                 if (beforeReply.Count > 0)
                 {
-                    (Chat afterBeforeReply, var beforeSucceeded) = await RunScenarioBatchOnOpenChatAsync(job.ChatId, job.Chat, beforeReply, bypassGates: false, job.PreTurnChat, generation.Token).ConfigureAwait(false);
+                    ScenarioBatchResult beforeResult = await RunScenarioBatchOnOpenChatAsync(job.ChatId, job.Chat, beforeReply, bypassGates: false, commitImmediately: true, job.PreTurnChat, generation.Token).ConfigureAwait(false);
                     generation.Token.ThrowIfCancellationRequested();
 
-                    if (!beforeSucceeded)
+                    if (!beforeResult.AllSucceeded)
                     {
                         backendFailed = true;
                         return;
                     }
 
-                    job = job with { Chat = afterBeforeReply, History = afterBeforeReply.Messages };
+                    job = job with { Chat = beforeResult.Chat, History = beforeResult.Chat.Messages };
                 }
             }
 
             serverSlot = await clients.AcquireSlotAsync(address, generation.Token).ConfigureAwait(false);
-
             ResolvedContext context = await ContextLengths.ResolveAsync(profile.Connection, kobold, generation.Token).ConfigureAwait(false);
 
-            // Asked once and silent: the reply would only wait for it again, twice over.
             if (context.ServerAway)
                 throw new HttpRequestException("The model server did not answer for its context.");
 
             contextLength = context.Length;
-            model = await TryGetModelAsync(kobold, generation.Token).ConfigureAwait(false);
+            model = await KoboldCppClients.TryGetModelNameAsync(kobold, generation.Token).ConfigureAwait(false);
             prompt = await BuildPromptAsync(job, context.Length, kobold, model, generation.Token).ConfigureAwait(false);
             Context.Logger.LogPrompt(prompt.Tokens, prompt.Counts, context.Length, prompt.MessagesSent, job.History.Count);
             KoboldGenerateRequest request = KoboldGenerateRequest.From(prompt.Text, profile.Samplers, context.Length, seed.Seed, profile.Format.AllStopSequences(), genKey);
@@ -1008,7 +1023,6 @@ internal sealed partial class ChatController : ShellController
         }
         catch (OperationCanceledException) when (generation.IsCancellationRequested)
         {
-            // Stop was pressed, or the runtime went: what came so far stays as the reply.
             stopped = true;
         }
         catch (HttpRequestException exception)
@@ -1022,12 +1036,15 @@ internal sealed partial class ChatController : ShellController
             _ = reader.Complete();
             clock.Stop();
 
+            if (lifetime.IsCancellationRequested)
+                await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), CancellationToken.None).ConfigureAwait(false);
+
             (int Tokens, TokenCounts Counts) replyCount = (0, TokenCounts.Exact);
 
             try
             {
                 if (!lifetime.IsCancellationRequested && streaming)
-                    replyCount = await CountReplyAsync(kobold, sent.ToString(), prompt).ConfigureAwait(false);
+                    replyCount = await KoboldCppClients.CountReplyAsync(kobold, sent.ToString(), prompt, exception => Context.Logger.LogBackendFailure(exception)).ConfigureAwait(false);
             }
             finally
             {
@@ -1039,96 +1056,47 @@ internal sealed partial class ChatController : ShellController
         }
     }
 
-    private static async Task<string?> TryGetModelAsync(KoboldCppClient kobold, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var model = (await kobold.GetModelAsync(cancellationToken).ConfigureAwait(false)).Trim();
-
-            return model.Length == 0 ? null : model;
-        }
-        catch (HttpRequestException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// The prompt for the job's history, counted by the model's own tokenizer; a server that will not count is no reason not to answer,
-    /// so the prompt is then counted by an estimate and says so.
-    /// </summary>
     private Task<BuiltPrompt> BuildPromptAsync(ReplyJob job, int contextLength, KoboldCppClient kobold, string? model, CancellationToken cancellationToken)
         => BuildPromptAsync(job.Profile, job.Chat, job.History, job.Continued, contextLength, kobold, model, cancellationToken);
 
     private async Task<BuiltPrompt> BuildPromptAsync(ActiveProfile profile, Chat chat, IReadOnlyList<ChatMessage> history, string? continued, int contextLength, KoboldCppClient? kobold, string? model, CancellationToken cancellationToken)
     {
+        Character? character = null;
+        Persona? persona = null;
+        var characterName = AppName;
+        var userName = DefaultUserName;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            character = _character;
+            persona = _persona;
+            characterName = CharacterName;
+            userName = UserName;
+        }, cancellationToken).ConfigureAwait(false);
+
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        World? world = await WorldInfo.OfAsync(Data, _character, _persona, cancellationToken).ConfigureAwait(false);
+        World? world = await WorldInfo.OfAsync(Data, character, persona, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<PromptMessage> projectedHistory = ChatRecords.ProjectHistory(history, chat.Records);
         PromptSpec spec = new()
         {
             SystemPrompt = profile.SystemPrompt.Content,
             Prompt = profile.Prompt,
-            Character = _character,
-            CharacterName = CharacterName,
-            UserName = UserName,
-            Persona = _persona,
+            Character = character,
+            CharacterName = characterName,
+            UserName = userName,
+            Persona = persona,
             Lore = WorldInfo.ArticlesOf(world, projectedHistory, continued),
-            AuthorsNotes = [settings.AuthorsNote, _character?.AuthorsNote, chat.AuthorsNote],
+            AuthorsNotes = [settings.AuthorsNote, character?.AuthorsNote, chat.AuthorsNote],
             NotePlacement = settings.AuthorsNotePlacement,
             History = projectedHistory,
             Continuation = continued
         };
 
-        if (kobold is not null && profile.Connection.Address is Uri address)
-        {
-            try
-            {
-                ITokenCounter counter = Context.Services.GetRequiredService<KoboldCppClients>().CounterFor(address, kobold, model);
+        KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
 
-                return await PromptBuilder.BuildAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, counter, cancellationToken).ConfigureAwait(false);
-            }
-            catch (HttpRequestException exception)
-            {
-                Context.Logger.LogBackendFailure(exception);
-            }
-        }
-
-        return await PromptBuilder.BuildAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, ApproximateTokenCounter.Instance, cancellationToken).ConfigureAwait(false);
+        return await clients.BuildPromptWithFallbackAsync(spec, profile.Format, contextLength, profile.Samplers.ReplyLength, profile.Connection.Address, kobold, model, cancellationToken, exception => Context.Logger.LogBackendFailure(exception)).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// The reply's tokens, by the model's own tokenizer when the prompt was counted by it; an estimate, and said to be one, when the
-    /// prompt was estimated or the server will not count now.
-    /// </summary>
-    private async Task<(int Tokens, TokenCounts Counts)> CountReplyAsync(KoboldCppClient kobold, string reply, BuiltPrompt? prompt)
-    {
-        if (prompt?.Counts == TokenCounts.Exact)
-        {
-            // The reply is kept whatever the count does: a server gone quiet is not waited on.
-            using CancellationTokenSource patience = new(ReplyCountPatience);
-
-            try
-            {
-                return (reply.Length == 0 ? 0 : await kobold.CountTokensAsync(reply, patience.Token).ConfigureAwait(false), TokenCounts.Exact);
-            }
-            catch (HttpRequestException exception)
-            {
-                Context.Logger.LogBackendFailure(exception);
-            }
-            catch (OperationCanceledException) when (patience.IsCancellationRequested)
-            {
-            }
-        }
-
-        return (ApproximateTokenCounter.Estimate(reply), TokenCounts.Approximate);
-    }
-
-    /// <summary>
-    /// The reply as it ended, kept in the chat with its seed and its generation record — a thought cut short too, to be read. One that
-    /// never began leaves nothing: a new message goes from the feed, where it would go into the next prompt as an empty turn, and a
-    /// variant or a continuation leaves the message as it was.
-    /// </summary>
     private async Task EndAsync(ReplyJob job, ReplyReader reader, SeedChoice seed, BuiltPrompt? prompt, string? model, int contextLength, DateTimeOffset started, double? promptSeconds, TimeSpan elapsed, (int Tokens, TokenCounts Counts) reply, CancellationTokenSource generation, bool canTrigger)
     {
         bool? thinking = job.Profile.Format.Thought.IsDefined ? job.Kind != ReplyKind.Continuation && job.Profile.Format.Thought.Enabled : null;
@@ -1142,7 +1110,6 @@ internal sealed partial class ChatController : ShellController
             Samplers = GenerationSamplers.From(job.Profile.Samplers, seed.Seed, thinking),
             PromptTokens = prompt.Blocks,
             ReplyTokens = reply.Tokens,
-            // One label for the record: exact only when the prompt and the reply both are.
             Counts = reply.Counts == TokenCounts.Exact ? prompt.Counts : TokenCounts.Approximate,
             Started = started,
             PromptSeconds = promptSeconds,
@@ -1159,7 +1126,6 @@ internal sealed partial class ChatController : ShellController
             Messages.Live = null;
             _liveKind = null;
 
-            // A chat is not left while its reply is written (OnNavigatedAsync waits for it), so the chat open is the job's.
             if (_chat is not null)
             {
                 kept = Ended(job, reader, seed, record);
@@ -1178,14 +1144,13 @@ internal sealed partial class ChatController : ShellController
 
             if (_chat is not null)
             {
-                ShowEnded(job);
+                ShowEnded(job, addedMessage: kept is not null && job.Kind == ReplyKind.Message);
                 RefreshVisuals();
                 RefreshRealizedMessages();
                 RefreshRealizedRecords();
                 RefreshLoadedStatistics();
             }
 
-            // Made in the middle of the chat: what followed it is gone, or back when nothing was kept.
             if (cut)
                 Messages.Reread();
 
@@ -1196,7 +1161,6 @@ internal sealed partial class ChatController : ShellController
             }
         }, CancellationToken.None).ConfigureAwait(false);
 
-        // A finished reply asked to go on often ends at once: the model had nothing to add, which the page would not show otherwise.
         if (kept is not null && Data.Chats.Exists(job.ChatId))
             await Chats.WriteAsync(job.ChatId, kept, CancellationToken.None).ConfigureAwait(false);
         else if (job.Kind == ReplyKind.Continuation && prompt is not null)
@@ -1215,7 +1179,6 @@ internal sealed partial class ChatController : ShellController
         }
     }
 
-    /// <summary>The chat with the reply in it, by what the job was; none when nothing came to keep.</summary>
     private Chat? Ended(ReplyJob job, ReplyReader reader, SeedChoice seed, GenerationRecord? record)
     {
         var said = reader.Text.Length > 0 || reader.Thought.Length > 0;
@@ -1231,18 +1194,16 @@ internal sealed partial class ChatController : ShellController
         };
     }
 
-    /// <summary>The job's row as the chat now holds its message, or gone when the chat has none; the chat's last words in the list.</summary>
-    private void ShowEnded(ReplyJob job)
+    private void ShowEnded(ReplyJob job, bool addedMessage)
     {
         if (_chat!.Messages.FirstOrDefault(message => message.Id == job.Item.Id) is ChatMessage message)
             Show(job.Item, message);
         else
             _ = Messages.Drop(job.Item.Id);
 
-        ShowLastWords(job.ChatId, _chat.Messages.Count == 0 ? string.Empty : _chat.Messages[^1].Current.Text);
+        ShowLastWords(job.ChatId, _chat.Messages.Count == 0 ? string.Empty : _chat.Messages[^1].Current.Text, bumpToTop: addedMessage);
     }
 
-    /// <summary>Stops the reply or scenarios being written: every active server call aborts, and streams end where they stood.</summary>
     [UICommand]
     public async Task StopAsync(CancellationToken cancellationToken)
     {
@@ -1250,7 +1211,6 @@ internal sealed partial class ChatController : ShellController
         await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Writes the chat's own seed as the panel sets it; while a reply is written the chat is the reply's, so the field goes back.</summary>
     [UICommand]
     public async Task SaveChatSeedAsync(CancellationToken cancellationToken)
     {
@@ -1276,7 +1236,6 @@ internal sealed partial class ChatController : ShellController
             await Chats.WriteAsync(chatId, changed, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>What a reply makes: a message of its own, another variant of a reply, the shown one made again, or more of the last one's words.</summary>
     private enum ReplyKind
     {
         Message,
@@ -1285,7 +1244,6 @@ internal sealed partial class ChatController : ShellController
         Continuation
     }
 
-    /// <summary>A reply to write: what it is made with and for, the chat before the turn started, the row it streams into, the history the prompt holds, and the words it goes on from.</summary>
     private sealed record ReplyJob(ActiveProfile Profile, string ChatId, Chat Chat, Chat PreTurnChat, ReplyKind Kind, ChatMessageItem Item, IReadOnlyList<ChatMessage> History, string? Continued);
 
     private sealed record BeforeSendJob(ActiveProfile Profile, string ChatId, IReadOnlyList<StoredDocument<Scenario>> Scenarios);

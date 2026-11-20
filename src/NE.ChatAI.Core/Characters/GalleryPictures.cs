@@ -21,11 +21,7 @@ public sealed record GalleryImage(string Id, string Key, string FileName, string
 /// <summary>Outcome of assigning or clearing a gallery image's alias tag.</summary>
 public sealed record GalleryTagResult(string? Tag, bool Conflict, bool Invalid = false);
 
-/// <summary>
-/// Manages named gallery images under <c>images/&lt;id&gt;.*</c> (<c>global.&lt;id&gt;</c>),
-/// <c>characters/&lt;char-id&gt;/images/&lt;id&gt;.*</c> (<c>&lt;char-id&gt;.&lt;id&gt;</c>), and scenario-generated chat media under
-/// <c>chats/&lt;chat-id&gt;/images/&lt;id&gt;.*</c> (<c>chat/&lt;chat-id&gt;/&lt;id&gt;</c>).
-/// </summary>
+/// <summary>Manages global gallery images, per-character gallery images and scenario-generated chat media.</summary>
 public static class GalleryPictures
 {
     public const string GlobalScope = "global";
@@ -40,16 +36,6 @@ public static class GalleryPictures
         ArgumentNullException.ThrowIfNull(data);
 
         return ListFolder(GlobalFolderOf(data), GlobalScope, imageTags);
-    }
-
-    /// <summary>Lists every image in the global gallery together with its persisted alias tags.</summary>
-    public static async Task<IReadOnlyList<GalleryImage>> ListGlobalAsync(DataFolder data, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-
-        AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-
-        return ListGlobal(data, settings.ImageTags);
     }
 
     private static List<GalleryImage> ListFolder(string folder, string scope, IReadOnlyDictionary<string, string>? imageTags)
@@ -80,30 +66,33 @@ public static class GalleryPictures
             var id = ordered[i];
 
             if (PictureFiles.Find(folder, id) is string chosen)
-            {
-                var tag = imageTags is not null
-                    && imageTags.TryGetValue(id, out var assigned)
-                    && Slug.IsValidId(assigned)
-                    && !string.Equals(assigned, GlobalScope, StringComparison.OrdinalIgnoreCase)
-                    ? assigned
-                    : null;
-                items.Add(new GalleryImage(id, $"{scope}.{id}", Path.GetFileName(chosen), tag));
-            }
+                items.Add(new GalleryImage(id, $"{scope}.{id}", Path.GetFileName(chosen), AssignedTagOf(imageTags, id)));
         }
 
         return items;
     }
 
+    private static string? AssignedTagOf(IReadOnlyDictionary<string, string>? imageTags, string id)
+        => imageTags is not null
+            && imageTags.TryGetValue(id, out var assigned)
+            && Slug.IsValidId(assigned)
+            && !string.Equals(assigned, GlobalScope, StringComparison.OrdinalIgnoreCase)
+            ? assigned
+            : null;
+
+    /// <summary>Lists every image in the global gallery together with its persisted alias tags.</summary>
+    public static async Task<IReadOnlyList<GalleryImage>> ListGlobalAsync(DataFolder data, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+
+        return ListGlobal(data, settings.ImageTags);
+    }
+
     /// <summary>Whether <paramref name="extension"/> is one of the supported picture file extensions.</summary>
     public static bool IsImageExtension(string extension)
-    {
-        ArgumentNullException.ThrowIfNull(extension);
-
-        return extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
-    }
+        => PictureFiles.IsExtension(extension);
 
     /// <summary>The global gallery directory (<c>data/images</c>).</summary>
     public static string GlobalFolderOf(DataFolder data)
@@ -238,6 +227,12 @@ public static class GalleryPictures
         if (ext.Length > 0 && IsImageExtension(ext))
             candidate = Path.GetFileNameWithoutExtension(candidate);
 
+        return StripScopeAndSlug(candidate, scope) ?? "image";
+    }
+
+    private static string? StripScopeAndSlug(string rawCandidate, string scope)
+    {
+        var candidate = rawCandidate.Trim();
         var prefix = scope + ".";
 
         if (candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -245,7 +240,7 @@ public static class GalleryPictures
 
         var slug = Slug.Of(candidate);
 
-        return slug.Length == 0 || string.Equals(slug, GlobalScope, StringComparison.OrdinalIgnoreCase) ? "image" : slug;
+        return slug.Length == 0 || string.Equals(slug, GlobalScope, StringComparison.OrdinalIgnoreCase) ? null : slug;
     }
 
     private static string NextAvailableId(string folder, string baseId, HashSet<string> reserved)
@@ -316,14 +311,7 @@ public static class GalleryPictures
         if (updatedTicks <= previousTicks)
             File.SetLastWriteTimeUtc(replacedPath, new DateTime(previousTicks + 1, DateTimeKind.Utc));
 
-        var tag = imageTags is not null
-            && imageTags.TryGetValue(imageId, out var assigned)
-            && Slug.IsValidId(assigned)
-            && !string.Equals(assigned, GlobalScope, StringComparison.OrdinalIgnoreCase)
-            ? assigned
-            : null;
-
-        return new GalleryImage(imageId, $"{scope}.{imageId}", Path.GetFileName(replacedPath), tag);
+        return new GalleryImage(imageId, $"{scope}.{imageId}", Path.GetFileName(replacedPath), AssignedTagOf(imageTags, imageId));
     }
 
     /// <summary>Replaces the file of <paramref name="imageId"/> in <paramref name="characterId"/>'s gallery while keeping its slug id and assigned tag.</summary>
@@ -354,44 +342,44 @@ public static class GalleryPictures
             return new GalleryTagResult(null, Conflict: false);
         }
 
-        if (NormalizeTag(rawTag, GlobalScope) is not string normalized)
+        if (StripScopeAndSlug(rawTag, GlobalScope) is not string normalized)
             return new GalleryTagResult(null, Conflict: false, Invalid: true);
 
-        IReadOnlyList<GalleryImage> globalImages = ListGlobal(data, settings.ImageTags);
-
-        for (var i = 0; i < globalImages.Count; i++)
-        {
-            GalleryImage existing = globalImages[i];
-
-            if (!string.Equals(existing.Id, imageId, StringComparison.Ordinal)
-                && (string.Equals(existing.Id, normalized, StringComparison.Ordinal) || string.Equals(existing.Tag, normalized, StringComparison.Ordinal)))
-            {
-                return new GalleryTagResult(null, Conflict: true);
-            }
-        }
+        if (HasCollision(ListGlobal(data, settings.ImageTags), normalized, excludedImageId: imageId))
+            return new GalleryTagResult(null, Conflict: true);
 
         DocumentListing<Character> characters = await data.Characters.ListAsync(cancellationToken).ConfigureAwait(false);
 
         for (var i = 0; i < characters.Items.Count; i++)
         {
             StoredDocument<Character> stored = characters.Items[i];
-            IReadOnlyList<GalleryImage> charImages = ListCharacter(data, stored.Id, stored.Document.ImageTags);
 
-            for (var j = 0; j < charImages.Count; j++)
-            {
-                GalleryImage charImage = charImages[j];
-
-                if (string.Equals(charImage.Id, normalized, StringComparison.Ordinal)
-                    || string.Equals(charImage.Tag, normalized, StringComparison.Ordinal))
-                {
-                    return new GalleryTagResult(null, Conflict: true);
-                }
-            }
+            if (HasCollision(ListCharacter(data, stored.Id, stored.Document.ImageTags), normalized, excludedImageId: null))
+                return new GalleryTagResult(null, Conflict: true);
         }
 
         await data.WriteSettingsAsync(settings with { ImageTags = BuildUpdatedTags(folder, settings.ImageTags, imageId, normalized) }, cancellationToken).ConfigureAwait(false);
 
         return new GalleryTagResult(normalized, Conflict: false);
+    }
+
+    private static bool HasCollision(IReadOnlyList<GalleryImage> images, string candidate, string? excludedImageId)
+    {
+        for (var i = 0; i < images.Count; i++)
+        {
+            GalleryImage existing = images[i];
+
+            if (excludedImageId is not null && string.Equals(existing.Id, excludedImageId, StringComparison.Ordinal))
+                continue;
+
+            if (string.Equals(existing.Id, candidate, StringComparison.Ordinal)
+                || string.Equals(existing.Tag, candidate, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static IReadOnlyDictionary<string, string> BuildUpdatedTags(string folder, IReadOnlyDictionary<string, string> current, string targetImageId, string? newTag)
@@ -416,19 +404,6 @@ public static class GalleryPictures
         return updated.Count == 0 ? FrozenDictionary<string, string>.Empty : updated;
     }
 
-    private static string? NormalizeTag(string rawTag, string scope)
-    {
-        var candidate = rawTag.Trim();
-        var prefix = scope + ".";
-
-        if (candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            candidate = candidate[prefix.Length..];
-
-        var slug = Slug.Of(candidate);
-
-        return slug.Length == 0 || string.Equals(slug, GlobalScope, StringComparison.OrdinalIgnoreCase) ? null : slug;
-    }
-
     /// <summary>Assigns or clears an alias tag on <paramref name="imageId"/> in <paramref name="characterId"/>'s gallery, enforcing uniqueness across that character and the global gallery.</summary>
     public static async Task<GalleryTagResult> SetCharacterTagAsync(DataFolder data, string characterId, string imageId, string? rawTag, CancellationToken cancellationToken)
     {
@@ -450,34 +425,15 @@ public static class GalleryPictures
             return new GalleryTagResult(null, Conflict: false);
         }
 
-        if (NormalizeTag(rawTag, characterId) is not string normalized)
+        if (StripScopeAndSlug(rawTag, characterId) is not string normalized)
             return new GalleryTagResult(null, Conflict: false, Invalid: true);
 
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<GalleryImage> globalImages = ListGlobal(data, settings.ImageTags);
 
-        for (var i = 0; i < globalImages.Count; i++)
+        if (HasCollision(ListGlobal(data, settings.ImageTags), normalized, excludedImageId: null)
+            || HasCollision(ListCharacter(data, characterId, character.ImageTags), normalized, excludedImageId: imageId))
         {
-            GalleryImage globalImage = globalImages[i];
-
-            if (string.Equals(globalImage.Id, normalized, StringComparison.Ordinal)
-                || string.Equals(globalImage.Tag, normalized, StringComparison.Ordinal))
-            {
-                return new GalleryTagResult(null, Conflict: true);
-            }
-        }
-
-        IReadOnlyList<GalleryImage> charImages = ListCharacter(data, characterId, character.ImageTags);
-
-        for (var i = 0; i < charImages.Count; i++)
-        {
-            GalleryImage existing = charImages[i];
-
-            if (!string.Equals(existing.Id, imageId, StringComparison.Ordinal)
-                && (string.Equals(existing.Id, normalized, StringComparison.Ordinal) || string.Equals(existing.Tag, normalized, StringComparison.Ordinal)))
-            {
-                return new GalleryTagResult(null, Conflict: true);
-            }
+            return new GalleryTagResult(null, Conflict: true);
         }
 
         await data.Characters.WriteAsync(characterId, character with { ImageTags = BuildUpdatedTags(folder, character.ImageTags, imageId, normalized) }, cancellationToken).ConfigureAwait(false);
@@ -573,14 +529,14 @@ public static class GalleryPictures
                 continue;
             }
 
-            updated ??= CopyVisualPrefix(visuals, i);
+            updated ??= ChatEditing.CopyPrefix(visuals, i);
 
             if (ChatMediaPathOf(data, sourceChatId, imageId) is string sourcePath)
             {
                 var targetFolder = ChatFolderOf(data, targetChatId);
                 _ = Directory.CreateDirectory(targetFolder);
                 PictureFiles.Delete(targetFolder, imageId);
-                File.Copy(sourcePath, Path.Combine(targetFolder, imageId + Path.GetExtension(sourcePath).ToLowerInvariant()), overwrite: true);
+                AtomicFile.Copy(sourcePath, Path.Combine(targetFolder, imageId + Path.GetExtension(sourcePath).ToLowerInvariant()));
                 updated.Add(visual with { Image = $"{ChatPrefix}{targetChatId}/{imageId}" });
             }
             else
@@ -617,16 +573,6 @@ public static class GalleryPictures
         return true;
     }
 
-    private static List<ChatVisual> CopyVisualPrefix(IReadOnlyList<ChatVisual> visuals, int count)
-    {
-        List<ChatVisual> copy = [with(visuals.Count)];
-
-        for (var i = 0; i < count; i++)
-            copy.Add(visuals[i]);
-
-        return copy;
-    }
-
     /// <summary>Deletes <paramref name="chatId"/>'s media folder when the chat is removed.</summary>
     public static void DeleteChatMedia(DataFolder data, string chatId)
     {
@@ -654,10 +600,7 @@ public static class GalleryPictures
         return Resolve(data, rawKey, characterId, character?.ImageTags, settings.ImageTags);
     }
 
-    /// <summary>
-    /// Resolves <paramref name="rawKey"/> (<c>global.&lt;id|tag&gt;</c>, <c>&lt;char-id&gt;.&lt;id|tag&gt;</c>, <c>chat/&lt;chat-id&gt;/&lt;id&gt;</c>,
-    /// or bare <c>&lt;id|tag&gt;</c> checking <paramref name="characterId"/> first then <c>global</c>) to its canonical key and file path.
-    /// </summary>
+    /// <summary>Resolves a scoped, chat-media or bare gallery key/tag to its canonical key and file path.</summary>
     public static (string Key, string Path)? Resolve(DataFolder data, string? rawKey, string? characterId, IReadOnlyDictionary<string, string>? characterTags = null, IReadOnlyDictionary<string, string>? globalTags = null)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -679,7 +622,7 @@ public static class GalleryPictures
         {
             var rawScope = cleaned[..dot].Trim();
             var rawName = cleaned[(dot + 1)..].Trim();
-            var candidate = Slug.IsValidId(rawName) ? rawName : Slug.Of(rawName);
+            var candidate = NormalizeLookupId(rawName);
 
             if (!Slug.IsValidId(candidate))
                 return null;
@@ -694,7 +637,7 @@ public static class GalleryPictures
                     : null;
             }
 
-            var resolvedCharId = Slug.IsValidId(rawScope) ? rawScope : Slug.Of(rawScope);
+            var resolvedCharId = NormalizeLookupId(rawScope);
 
             if (CharacterPathOf(data, resolvedCharId, candidate) is string charPath)
                 return ($"{resolvedCharId}.{candidate}", charPath);
@@ -706,7 +649,7 @@ public static class GalleryPictures
                 : null;
         }
 
-        var bareId = Slug.IsValidId(cleaned) ? cleaned : Slug.Of(cleaned);
+        var bareId = NormalizeLookupId(cleaned);
 
         if (!Slug.IsValidId(bareId))
             return null;
@@ -727,6 +670,13 @@ public static class GalleryPictures
         return FindImageIdByTag(globalTags, bareId) is string globalTaggedId && GlobalPathOf(data, globalTaggedId) is string globalTaggedPath
             ? ($"{GlobalScope}.{globalTaggedId}", globalTaggedPath)
             : null;
+    }
+
+    private static string NormalizeLookupId(string raw)
+    {
+        var lower = raw.ToLowerInvariant();
+
+        return Slug.IsValidId(lower) ? lower : Slug.Of(raw);
     }
 
     private static string? FindImageIdByTag(IReadOnlyDictionary<string, string>? tags, string candidate)

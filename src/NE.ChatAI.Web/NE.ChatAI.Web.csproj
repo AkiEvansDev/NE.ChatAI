@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <!-- The web platform alone: the ASP.NET Core host, the renderers and the web halves of the icons and the code input. -->
   <ItemGroup>
     <PackageReference Include="NE.Standard.UI.Web" />
     <PackageReference Include="NE.Standard.UI.Web.Renderers" />

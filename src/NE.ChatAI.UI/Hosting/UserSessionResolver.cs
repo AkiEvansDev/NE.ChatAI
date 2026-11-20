@@ -10,10 +10,7 @@ using NE.Standard.UI.Shell.Localization;
 
 namespace NE.ChatAI.Hosting;
 
-/// <summary>
-/// Resolves one deterministic session per user (or <see cref="DefaultUserKey"/> when anonymous) so that every browser and device of
-/// the same user shares one session and one controller per route.
-/// </summary>
+/// <summary>Resolves one deterministic session per user so every browser and device of the same user shares one session.</summary>
 internal sealed class UserSessionResolver : IUserSessionResolver
 {
     public const string CookieName = "ne.chatai.session";
@@ -36,6 +33,25 @@ internal sealed class UserSessionResolver : IUserSessionResolver
 
     public string SecretFor(ClaimsPrincipal? principal)
         => SecretForUser(ResolveUserKey(principal));
+
+    public static string SecretForUser(string userKey)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes("NE.ChatAI.Session:" + userKey));
+
+        return Convert.ToHexStringLower(bytes);
+    }
+
+    private string ResolveUserKey(ClaimsPrincipal? principal)
+    {
+        if (principal is null)
+            return DefaultUserKey;
+
+        UserClaimsIdentity identity = _claims.Map(principal);
+
+        return identity.IsAuthenticated && !string.IsNullOrWhiteSpace(identity.UserId)
+            ? identity.UserId
+            : DefaultUserKey;
+    }
 
     public async Task<IUserSessionContext> ResolveAsync(UserSessionInitData initData, CancellationToken cancellationToken = default)
     {
@@ -67,25 +83,6 @@ internal sealed class UserSessionResolver : IUserSessionResolver
             await _store.SaveAsync(session, cancellationToken).ConfigureAwait(false);
 
         return session;
-    }
-
-    private string ResolveUserKey(ClaimsPrincipal? principal)
-    {
-        if (principal is null)
-            return DefaultUserKey;
-
-        UserClaimsIdentity identity = _claims.Map(principal);
-
-        return identity.IsAuthenticated && !string.IsNullOrWhiteSpace(identity.UserId)
-            ? identity.UserId
-            : DefaultUserKey;
-    }
-
-    public static string SecretForUser(string userKey)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes("NE.ChatAI.Session:" + userKey));
-
-        return Convert.ToHexStringLower(bytes);
     }
 
     private string NegotiateLanguage(IReadOnlyList<string> wanted)

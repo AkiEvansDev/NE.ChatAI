@@ -6,10 +6,6 @@ using NE.ChatAI.Scenarios;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>
-/// The scenarios page (<c>/scenarios</c>): a left drawer (pinnable to a column from <c>xl</c>) with the scenario selector,
-/// Rename/Duplicate/Delete menu and trigger controls beside the full-bleed node canvas (<see cref="NodesComponent"/>).
-/// </summary>
 internal sealed class ScenarioView : ShellView, IUIViewDefinition
 {
     private static readonly OptionItem[] TriggerKinds =
@@ -134,12 +130,17 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
         =>
         [
-            UIDialogs.Form(ScenarioController.RenameDialogKey, "chatai.settings.rename.title", null,
+            UIDialogs.BoundForm<ScenarioController>(
+                ScenarioController.RenameDialogKey,
+                static x => x.RenameDialogTitle,
+                null,
                 new TextInputComponent()
                     .SetTitle("chatai.settings.name")
-                    .BindValue<ScenarioController>(static x => x.RenameName),
-                UIButtons.Primary("chatai.settings.rename").OnClick(nameof(ScenarioController.RenameAsync))
+                    .BindValue<ScenarioController>(static x => x.RenameName, mode: UIBindingMode.OnSubmit),
+                UIButtons.Primary("chatai.settings.rename")
+                    .BindTitle<ScenarioController>(static x => x.RenameDialogAction)
+                    .OnClick(nameof(ScenarioController.RenameAsync))
             ),
-            UIDialogs.BoundConfirm<ScenarioController>(ScenarioController.DeleteDialogKey, "chatai.scenarios.delete.title", static x => x.DeleteQuestion, "chatai.settings.delete", nameof(ScenarioController.DeleteAsync))
+            BoundConfirmDialog<ScenarioController>(ScenarioController.DeleteDialogKey, "chatai.scenarios.delete.title", static x => x.DeleteQuestion, UIStandardAction.Delete.Title, nameof(ScenarioController.DeleteAsync))
         ];
 }

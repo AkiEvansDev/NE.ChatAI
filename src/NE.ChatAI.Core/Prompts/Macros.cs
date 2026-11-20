@@ -4,21 +4,14 @@ using System.Text;
 
 namespace NE.ChatAI.Prompts;
 
-/// <summary>
-/// SillyTavern's macros: <c>{{name}}</c> by its value, <c>{{#if name}}…{{else}}…{{/if}}</c> on whether the value has words,
-/// <c>{{newline}}</c>, <c>{{noop}}</c> and <c>{{trim}}</c>. Names are matched case aside; a name with no value is left as it was
-/// written, so a macro this application does not know still reads in the prompt.
-/// </summary>
+/// <summary>Expands SillyTavern <c>{{name}}</c> values, <c>{{#if name}}…{{else}}…{{/if}}</c> conditionals, and <c>{{newline}}</c>/<c>{{noop}}</c>/<c>{{trim}}</c> directives.</summary>
 public static class Macros
 {
     private const string Open = "{{";
     private const string Close = "}}";
     private const string TrimMarker = "\u0001trim\u0001";
 
-    /// <summary>
-    /// The template with every macro it names put in from <paramref name="values"/> (by name, case aside); <paramref name="used"/>,
-    /// when given, hears every value put in — what the prompt's blocks are counted by.
-    /// </summary>
+    /// <summary>Renders <paramref name="template"/> against case-insensitive <paramref name="values"/>, leaving unknown macros literal.</summary>
     public static string Render(string template, IReadOnlyDictionary<string, string> values, Action<string, string>? used = null)
     {
         ArgumentNullException.ThrowIfNull(template);
@@ -28,7 +21,6 @@ public static class Macros
             return template;
 
         StringBuilder output = new(template.Length);
-        // Each open #if: whether its branch is being written, and whether the one around it was.
         Stack<(bool Writing, bool Outer)> conditions = new();
         var writing = true;
         var position = 0;
@@ -46,15 +38,26 @@ public static class Macros
                 break;
             }
 
+            // Advance past any lone '{{' so an unclosed brace does not swallow a later valid '{{macro}}'.
+            while (true)
+            {
+                var nestedOpen = template.IndexOf(Open, open + Open.Length, StringComparison.Ordinal);
+
+                if (nestedOpen < 0 || nestedOpen >= close)
+                    break;
+
+                open = nestedOpen;
+            }
+
             if (writing)
                 _ = output.Append(template, position, open - position);
 
             var macro = template[(open + Open.Length)..close].Trim();
             position = close + Close.Length;
 
-            if (macro.StartsWith("#if ", StringComparison.OrdinalIgnoreCase))
+            if (IsIfDirective(macro, out var conditionName))
             {
-                var holds = Lookup(values, macro[4..].Trim()) is { } value && !string.IsNullOrWhiteSpace(value);
+                var holds = Lookup(values, conditionName) is { } value && !string.IsNullOrWhiteSpace(value);
 
                 conditions.Push((writing && holds, writing));
                 writing = writing && holds;
@@ -83,6 +86,18 @@ public static class Macros
         var rendered = output.ToString();
 
         return rendered.Contains(TrimMarker, StringComparison.Ordinal) ? ApplyTrim(rendered) : rendered;
+    }
+
+    private static bool IsIfDirective(string macro, out string name)
+    {
+        if (macro.Length > 3 && macro.StartsWith("#if", StringComparison.OrdinalIgnoreCase) && char.IsWhiteSpace(macro[3]))
+        {
+            name = macro[3..].Trim();
+            return name.Length > 0;
+        }
+
+        name = string.Empty;
+        return false;
     }
 
     private static string? Lookup(IReadOnlyDictionary<string, string> values, string name)
@@ -118,7 +133,6 @@ public static class Macros
         return value;
     }
 
-    /// <summary><c>{{trim}}</c> takes away the whitespace on either side of it, line breaks included.</summary>
     private static string ApplyTrim(string rendered)
     {
         StringBuilder output = new(rendered.Length);

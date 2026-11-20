@@ -10,10 +10,10 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Secrets;
 
-/// <summary>What the settings may know of a secret: whether it is set, whether the environment sets it, and whether <c>secrets.json</c> holds an encrypted value — never its value.</summary>
+/// <summary>Metadata about a secret without exposing its value.</summary>
 public sealed record SecretInfo(string Name, bool IsSet, bool FromEnvironment, bool Stored = false);
 
-/// <summary>A secret kept in the file but no longer readable: encrypted with keys this machine or user does not have.</summary>
+/// <summary>A secret kept in <c>secrets.json</c> whose Data Protection keys are unavailable on this machine.</summary>
 public sealed class SecretUnreadableException : Exception
 {
     public SecretUnreadableException()
@@ -29,10 +29,7 @@ public sealed class SecretUnreadableException : Exception
     }
 }
 
-/// <summary>
-/// The application's secrets — API keys — in <c>secrets.json</c>, each encrypted with Data Protection, whose keys live in the user's
-/// profile rather than in the data folder; an environment variable (<c>ChatAI__Secrets__&lt;name&gt;</c>) overrides the file.
-/// </summary>
+/// <summary>Encrypted API key store in <c>secrets.json</c> backed by Data Protection, with <c>ChatAI__Secrets__&lt;name&gt;</c> overrides.</summary>
 public sealed class SecretStore : IDisposable
 {
     private const string Purpose = "NE.ChatAI.Secrets.v1";
@@ -43,10 +40,7 @@ public sealed class SecretStore : IDisposable
     private readonly Func<IEnumerable<string>>? _environmentNames;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    /// <param name="path">The secrets file.</param>
-    /// <param name="protection">The Data Protection the values are encrypted with.</param>
-    /// <param name="environment">A secret's value from outside the file by its name, or <c>null</c>.</param>
-    /// <param name="environmentNames">Optional enumeration of secret names currently provided by the environment.</param>
+    /// <summary>Creates a secret store backed by <paramref name="path"/> and <paramref name="protection"/>.</summary>
     public SecretStore(string path, IDataProtectionProvider protection, Func<string, string?> environment, Func<IEnumerable<string>>? environmentNames = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -88,22 +82,19 @@ public sealed class SecretStore : IDisposable
         if (!File.Exists(_path))
             return new SecretsFile();
 
-        var content = await File.ReadAllBytesAsync(_path, cancellationToken).ConfigureAwait(false);
-
         try
         {
-            SecretsFile file = JsonSerializer.Deserialize<SecretsFile>(content, DocumentJson.Options) ?? new SecretsFile();
+            var content = await AtomicFile.ReadBytesAsync(_path, cancellationToken).ConfigureAwait(false);
 
-            return file.Format > Document.CurrentFormat
-                ? throw new DocumentFormatException(_path, $"format {file.Format} is newer than this version writes ({Document.CurrentFormat}).")
-                : file;
+            return DocumentJson.Read<SecretsFile>(content, _path);
         }
-        catch (JsonException exception)
+        catch (FileNotFoundException)
         {
-            throw new DocumentFormatException(_path, exception.Message, exception);
+            return new SecretsFile();
         }
     }
 
+    /// <summary>Encrypts and saves <paramref name="value"/> under <paramref name="name"/> in <c>secrets.json</c>.</summary>
     public async Task SetAsync(string name, string value, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(value);
@@ -132,6 +123,7 @@ public sealed class SecretStore : IDisposable
         }
     }
 
+    /// <summary>Deletes the stored value under <paramref name="name"/> from <c>secrets.json</c>.</summary>
     public async Task<bool> RemoveAsync(string name, CancellationToken cancellationToken)
     {
         var removed = false;

@@ -3,7 +3,6 @@ using NE.ChatAI.Controllers;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>The <c>/plugins</c> page: installing scenario plugins from GitHub releases, checking updates and managing installed plugins.</summary>
 internal sealed class PluginsView : ShellView, IUIViewDefinition
 {
     public static string ViewKey => "chatai.plugins";
@@ -28,7 +27,7 @@ internal sealed class PluginsView : ShellView, IUIViewDefinition
         => UICard.Create("chatai.plugins.install.title", null,
             UILayout.Stack(16,
                 UIText.Note("chatai.plugins.install.description"),
-                new TextInputComponent()
+                new TextInputComponent(PluginsController.RepositoryInputId)
                     .SetTitle("chatai.plugins.repository")
                     .SetPlaceholder("owner/repo or https://github.com/owner/repo")
                     .AsContent(TextInputComponent.PlaceholderProperty)
@@ -38,6 +37,7 @@ internal sealed class PluginsView : ShellView, IUIViewDefinition
                     .AddTrailingAction(UIIconButtons.New()
                         .SetTooltip("chatai.plugins.install")
                         .OnClickShowingLoading(nameof(PluginsController.InstallPluginAsync))
+                        .ShowLoadingDuring(PluginsController.RepositoryInputId, EventNames.Enter)
                     )
             ),
             null,
@@ -81,7 +81,6 @@ internal sealed class PluginsView : ShellView, IUIViewDefinition
                     UIButtons.Accent("chatai.plugins.update", AppIcons.Outline(AppIcons.Connect))
                         .SetSize(UISize.Small)
                         .BindTitle<PluginItem>(static x => x.UpdateTitle, UIBindingScope.Relative)
-                        .AsContent(ButtonComponent.TitleProperty)
                         .BindVisibility<PluginItem>(static x => x.UpdateVisibility, UIBindingScope.Relative)
                         .OnClickShowingLoading(nameof(PluginsController.UpdatePluginAsync), UIAction.ArgCurrentItemKey("pluginId")),
                     new SwitchComponent()
@@ -93,14 +92,13 @@ internal sealed class PluginsView : ShellView, IUIViewDefinition
                 ),
                 UILayout.Stack(2,
                     UIText.Body()
-                        .BindDescription<PluginItem>(static x => x.Description, UIBindingScope.Relative)
-                        .AsContent(TextComponent.DescriptionProperty)
+                        .BindTitle<PluginItem>(static x => x.Description, UIBindingScope.Relative)
+                        .AsContent(TextComponent.TitleProperty)
                         .SetWrapMode(UITextWrapMode.Wrap)
                         .BindVisibility<PluginItem>(static x => x.DescriptionVisibility, UIBindingScope.Relative),
                     UIText.Caption()
                         .Muted()
                         .BindTitle<PluginItem>(static x => x.NodesLine, UIBindingScope.Relative)
-                        .AsContent(TextComponent.TitleProperty)
                         .SetWrapMode(UITextWrapMode.Wrap)
                         .BindVisibility<PluginItem>(static x => x.NodesVisibility, UIBindingScope.Relative)
                 ),
@@ -116,7 +114,7 @@ internal sealed class PluginsView : ShellView, IUIViewDefinition
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
         =>
         [
-            UIDialogs.BoundConfirm<PluginsController>(
+            BoundConfirmDialog<PluginsController>(
                 PluginsController.UninstallDialogKey,
                 "chatai.plugins.uninstall.title",
                 static x => x.UninstallQuestion,

@@ -110,7 +110,7 @@ public static class DocumentRenames
         return newId;
     }
 
-    /// <summary>Saves a character, renaming its folder and updating chat character/gallery references when its name slug changed.</summary>
+    /// <summary>Saves a character, renaming its folder and updating chat and scenario gallery references when its name slug changed.</summary>
     public static async Task<string> SaveCharacterAsync(DataFolder data, string id, Character character, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -119,7 +119,10 @@ public static class DocumentRenames
         var newId = await data.Characters.WriteRenamedAsync(id, character, cancellationToken).ConfigureAwait(false);
 
         if (!string.Equals(newId, id, StringComparison.Ordinal))
+        {
             await UpdateChatsForCharacterAsync(data, id, newId, cancellationToken).ConfigureAwait(false);
+            await UpdateScenarioStringValuesAsync(data, null, id + ".", newId + ".", prefixMatch: true, cancellationToken).ConfigureAwait(false);
+        }
 
         return newId;
     }
@@ -162,107 +165,7 @@ public static class DocumentRenames
         }
     }
 
-    /// <summary>Saves a model format, renaming non-default files and updating connection references when its name slug changed.</summary>
-    public static async Task<string> SaveFormatAsync(DataFolder data, string id, ModelFormat format, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-        ArgumentNullException.ThrowIfNull(format);
-
-        if (DefaultDocuments.IsBuiltIn(id))
-        {
-            await data.ModelFormats.WriteAsync(id, format, cancellationToken).ConfigureAwait(false);
-
-            return id;
-        }
-
-        var newId = await data.ModelFormats.WriteRenamedAsync(id, format, cancellationToken).ConfigureAwait(false);
-
-        if (!string.Equals(newId, id, StringComparison.Ordinal))
-            await UpdateConnectionsAsync(data, c => string.Equals(c.Instruct, id, StringComparison.Ordinal) ? c with { Instruct = newId } : null, cancellationToken).ConfigureAwait(false);
-
-        return newId;
-    }
-
-    private static async Task UpdateConnectionsAsync(DataFolder data, Func<ConnectionProfile, ConnectionProfile?> transform, CancellationToken cancellationToken)
-    {
-        DocumentListing<ConnectionProfile> connections = await data.Connections.ListAsync(cancellationToken).ConfigureAwait(false);
-
-        for (var i = 0; i < connections.Items.Count; i++)
-        {
-            StoredDocument<ConnectionProfile> stored = connections.Items[i];
-
-            if (transform(stored.Document) is ConnectionProfile updated)
-                await data.Connections.WriteAsync(stored.Id, updated, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>Saves a system prompt preset, renaming non-default files and updating connection references when its name slug changed.</summary>
-    public static async Task<string> SaveSystemPromptAsync(DataFolder data, string id, SystemPromptPreset preset, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-        ArgumentNullException.ThrowIfNull(preset);
-
-        if (DefaultDocuments.IsBuiltIn(id))
-        {
-            await data.SystemPrompts.WriteAsync(id, preset, cancellationToken).ConfigureAwait(false);
-
-            return id;
-        }
-
-        var newId = await data.SystemPrompts.WriteRenamedAsync(id, preset, cancellationToken).ConfigureAwait(false);
-
-        if (!string.Equals(newId, id, StringComparison.Ordinal))
-            await UpdateConnectionsAsync(data, c => string.Equals(c.SystemPrompt, id, StringComparison.Ordinal) ? c with { SystemPrompt = newId } : null, cancellationToken).ConfigureAwait(false);
-
-        return newId;
-    }
-
-    /// <summary>Saves a prompt preset, renaming non-default files and updating connection references when its name slug changed.</summary>
-    public static async Task<string> SavePromptAsync(DataFolder data, string id, PromptPreset preset, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-        ArgumentNullException.ThrowIfNull(preset);
-
-        if (DefaultDocuments.IsBuiltIn(id))
-        {
-            await data.Prompts.WriteAsync(id, preset, cancellationToken).ConfigureAwait(false);
-
-            return id;
-        }
-
-        var newId = await data.Prompts.WriteRenamedAsync(id, preset, cancellationToken).ConfigureAwait(false);
-
-        if (!string.Equals(newId, id, StringComparison.Ordinal))
-            await UpdateConnectionsAsync(data, c => string.Equals(c.Prompt, id, StringComparison.Ordinal) ? c with { Prompt = newId } : null, cancellationToken).ConfigureAwait(false);
-
-        return newId;
-    }
-
-    /// <summary>Saves a sampler preset, renaming non-default files and updating connection/scenario references when its name slug changed.</summary>
-    public static async Task<string> SaveSamplersAsync(DataFolder data, string id, SamplerPreset preset, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-        ArgumentNullException.ThrowIfNull(preset);
-
-        if (DefaultDocuments.IsBuiltIn(id))
-        {
-            await data.Samplers.WriteAsync(id, preset, cancellationToken).ConfigureAwait(false);
-
-            return id;
-        }
-
-        var newId = await data.Samplers.WriteRenamedAsync(id, preset, cancellationToken).ConfigureAwait(false);
-
-        if (!string.Equals(newId, id, StringComparison.Ordinal))
-        {
-            await UpdateConnectionsAsync(data, c => string.Equals(c.Samplers, id, StringComparison.Ordinal) ? c with { Samplers = newId } : null, cancellationToken).ConfigureAwait(false);
-            await UpdateScenarioPinValuesAsync(data, "Samplers", id, newId, cancellationToken).ConfigureAwait(false);
-        }
-
-        return newId;
-    }
-
-    private static async Task UpdateScenarioPinValuesAsync(DataFolder data, string pinName, string oldId, string newId, CancellationToken cancellationToken)
+    private static async Task UpdateScenarioStringValuesAsync(DataFolder data, string? pinName, string oldValue, string newValue, bool prefixMatch, CancellationToken cancellationToken)
     {
         DocumentListing<Scenario> scenarios = await data.Scenarios.ListAsync(cancellationToken).ConfigureAwait(false);
 
@@ -282,10 +185,35 @@ public static class DocumentRenames
 
             for (var n = 0; n < nodes.Count; n++)
             {
-                if (nodes[n]?["values"] is JsonObject values && values[pinName]?.GetValueKind() == JsonValueKind.String && string.Equals(values[pinName]!.GetValue<string>(), oldId, StringComparison.Ordinal))
+                if (nodes[n]?["values"] is not JsonObject values)
+                    continue;
+
+                if (pinName is not null)
                 {
-                    values[pinName] = newId;
-                    changed = true;
+                    if (TryReplaceNodeString(values, pinName, oldValue, newValue, prefixMatch))
+                        changed = true;
+
+                    continue;
+                }
+
+                List<string>? keys = null;
+
+                foreach (KeyValuePair<string, JsonNode?> pair in values)
+                {
+                    if (pair.Value?.GetValueKind() == JsonValueKind.String)
+                    {
+                        keys ??= [];
+                        keys.Add(pair.Key);
+                    }
+                }
+
+                if (keys is null)
+                    continue;
+
+                for (var k = 0; k < keys.Count; k++)
+                {
+                    if (TryReplaceNodeString(values, keys[k], oldValue, newValue, prefixMatch))
+                        changed = true;
                 }
             }
 
@@ -297,6 +225,83 @@ public static class DocumentRenames
         }
     }
 
+    private static bool TryReplaceNodeString(JsonObject values, string key, string oldValue, string newValue, bool prefixMatch)
+    {
+        if (values[key]?.GetValueKind() != JsonValueKind.String)
+            return false;
+
+        var current = values[key]!.GetValue<string>();
+
+        if (prefixMatch)
+        {
+            if (!current.StartsWith(oldValue, StringComparison.Ordinal))
+                return false;
+
+            values[key] = string.Concat(newValue, current.AsSpan(oldValue.Length));
+            return true;
+        }
+
+        if (!string.Equals(current, oldValue, StringComparison.Ordinal))
+            return false;
+
+        values[key] = newValue;
+        return true;
+    }
+
+    /// <summary>Saves a model format, renaming non-default files and updating connection references when its name slug changed.</summary>
+    public static Task<string> SaveFormatAsync(DataFolder data, string id, ModelFormat format, CancellationToken cancellationToken)
+        => SavePresetAsync(data, data?.ModelFormats!, id, format, (c, newId) => string.Equals(c.Instruct, id, StringComparison.Ordinal) ? c with { Instruct = newId } : null, scenarioPin: null, cancellationToken);
+
+    private static async Task<string> SavePresetAsync<T>(DataFolder data, DocumentStore<T> store, string id, T preset, Func<ConnectionProfile, string, ConnectionProfile?> updateConnection, string? scenarioPin, CancellationToken cancellationToken)
+        where T : NamedDocument
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(preset);
+
+        if (DefaultDocuments.IsBuiltIn(id))
+        {
+            await store.WriteAsync(id, preset, cancellationToken).ConfigureAwait(false);
+            return id;
+        }
+
+        var newId = await store.WriteRenamedAsync(id, preset, cancellationToken).ConfigureAwait(false);
+
+        if (!string.Equals(newId, id, StringComparison.Ordinal))
+        {
+            await UpdateConnectionsAsync(data, c => updateConnection(c, newId), cancellationToken).ConfigureAwait(false);
+
+            if (scenarioPin is not null)
+                await UpdateScenarioStringValuesAsync(data, scenarioPin, id, newId, prefixMatch: false, cancellationToken).ConfigureAwait(false);
+        }
+
+        return newId;
+    }
+
+    private static async Task UpdateConnectionsAsync(DataFolder data, Func<ConnectionProfile, ConnectionProfile?> transform, CancellationToken cancellationToken)
+    {
+        DocumentListing<ConnectionProfile> connections = await data.Connections.ListAsync(cancellationToken).ConfigureAwait(false);
+
+        for (var i = 0; i < connections.Items.Count; i++)
+        {
+            StoredDocument<ConnectionProfile> stored = connections.Items[i];
+
+            if (transform(stored.Document) is ConnectionProfile updated)
+                await data.Connections.WriteAsync(stored.Id, updated, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Saves a system prompt preset, renaming non-default files and updating connection references when its name slug changed.</summary>
+    public static Task<string> SaveSystemPromptAsync(DataFolder data, string id, SystemPromptPreset preset, CancellationToken cancellationToken)
+        => SavePresetAsync(data, data?.SystemPrompts!, id, preset, (c, newId) => string.Equals(c.SystemPrompt, id, StringComparison.Ordinal) ? c with { SystemPrompt = newId } : null, scenarioPin: null, cancellationToken);
+
+    /// <summary>Saves a prompt preset, renaming non-default files and updating connection references when its name slug changed.</summary>
+    public static Task<string> SavePromptAsync(DataFolder data, string id, PromptPreset preset, CancellationToken cancellationToken)
+        => SavePresetAsync(data, data?.Prompts!, id, preset, (c, newId) => string.Equals(c.Prompt, id, StringComparison.Ordinal) ? c with { Prompt = newId } : null, scenarioPin: null, cancellationToken);
+
+    /// <summary>Saves a sampler preset, renaming non-default files and updating connection/scenario references when its name slug changed.</summary>
+    public static Task<string> SaveSamplersAsync(DataFolder data, string id, SamplerPreset preset, CancellationToken cancellationToken)
+        => SavePresetAsync(data, data?.Samplers!, id, preset, (c, newId) => string.Equals(c.Samplers, id, StringComparison.Ordinal) ? c with { Samplers = newId } : null, scenarioPin: "Samplers", cancellationToken);
+
     /// <summary>Saves a connection profile, renaming non-default files and updating active/chat/scenario references when its name slug changed.</summary>
     public static async Task<string> SaveConnectionAsync(DataFolder data, string id, ConnectionProfile connection, CancellationToken cancellationToken)
     {
@@ -306,7 +311,6 @@ public static class DocumentRenames
         if (DefaultDocuments.IsBuiltIn(id))
         {
             await data.Connections.WriteAsync(id, connection, cancellationToken).ConfigureAwait(false);
-
             return id;
         }
 
@@ -341,7 +345,7 @@ public static class DocumentRenames
                     await data.Chats.WriteAsync(stored.Id, stored.Document with { Generations = updatedGens }, cancellationToken).ConfigureAwait(false);
             }
 
-            await UpdateScenarioPinValuesAsync(data, "Connection", id, newId, cancellationToken).ConfigureAwait(false);
+            await UpdateScenarioStringValuesAsync(data, "Connection", id, newId, prefixMatch: false, cancellationToken).ConfigureAwait(false);
         }
 
         return newId;
@@ -356,7 +360,6 @@ public static class DocumentRenames
         if (DefaultDocuments.IsBuiltIn(id) || scenario.System)
         {
             await data.Scenarios.WriteAsync(id, scenario, cancellationToken).ConfigureAwait(false);
-
             return id;
         }
 

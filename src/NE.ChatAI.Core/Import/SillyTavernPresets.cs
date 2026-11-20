@@ -29,14 +29,29 @@ public sealed record SillyTavernPresets
     public bool IsEmpty => ModelFormat is null && Thought is null && Prompt is null && SystemPrompt is null && Samplers is null;
 }
 
-/// <summary>
-/// Reads SillyTavern's preset files — an instruct, context, system prompt or reasoning template, a text-completion preset, or the
-/// master export holding several — into this application's documents. What has no place in them is kept in the document's
-/// <c>sillyTavern</c> field, so nothing the file said is lost.
-/// </summary>
+/// <summary>Imports SillyTavern instruct, context, system-prompt, reasoning, sampler and master-export JSON files.</summary>
 public static class SillyTavernImport
 {
     private const string KeptKey = "sillyTavern";
+
+    private static readonly string[] SystemPromptRead = ["name", "content"];
+
+    private static readonly string[] InstructRead =
+    [
+        "name", "input_sequence", "input_suffix", "output_sequence", "output_suffix", "system_sequence", "system_suffix",
+        "first_output_sequence", "last_output_sequence", "system_same_as_user", "wrap", "names_behavior", "names", "stop_sequence",
+        "sequences_as_stop_strings"
+    ];
+
+    private static readonly string[] ContextRead = ["name", "story_string", "example_separator", "chat_start"];
+
+    private static readonly string[] SamplersRead =
+    [
+        "name", "genamt", "temp", "top_p", "top_k", "min_p", "typical_p", "tfs", "top_a", "rep_pen", "rep_pen_range", "rep_pen_slope",
+        "presence_pen", "freq_pen", "dry_multiplier", "dry_base", "dry_allowed_length", "dry_penalty_last_n", "dry_sequence_breakers",
+        "xtc_threshold", "xtc_probability", "dynatemp", "min_temp", "max_temp", "dynatemp_exponent", "mirostat_mode", "mirostat_tau",
+        "mirostat_eta", "smoothing_factor", "nsigma", "sampler_order"
+    ];
 
     /// <summary>Reads a SillyTavern preset file; the parts it held, or <see cref="SillyTavernPresets.IsEmpty"/> when it held none.</summary>
     public static SillyTavernPresets ReadPresets(JsonElement root, string fallbackName)
@@ -44,7 +59,6 @@ public static class SillyTavernImport
         if (root.ValueKind != JsonValueKind.Object)
             return new SillyTavernPresets();
 
-        // A master export nests each template under its kind.
         JsonElement? instruct = Nested(root, "instruct") ?? (root.TryGetProperty("input_sequence", out _) ? root : null);
         JsonElement? context = Nested(root, "context") ?? (root.TryGetProperty("story_string", out _) ? root : null);
         JsonElement? systemPrompt = Nested(root, "sysprompt") ?? (IsSystemPrompt(root) ? root : null);
@@ -79,8 +93,6 @@ public static class SillyTavernImport
     private static ThoughtFormat ReadThought(JsonElement reasoning)
         => new() { Prefix = JsonValues.String(reasoning, "prefix") ?? string.Empty, Suffix = JsonValues.String(reasoning, "suffix") ?? string.Empty };
 
-    private static readonly string[] SystemPromptRead = ["name", "content"];
-
     private static SystemPromptPreset ReadSystemPrompt(JsonElement systemPrompt, string fallbackName)
         => new()
         {
@@ -89,7 +101,6 @@ public static class SillyTavernImport
             Extra = Kept(systemPrompt, SystemPromptRead)
         };
 
-    /// <summary>Everything in <paramref name="element"/> but <paramref name="read"/>, under one field, so the document stays readable.</summary>
     private static Dictionary<string, JsonElement>? Kept(JsonElement element, string[] read)
     {
         Dictionary<string, JsonElement> kept = [with(StringComparer.Ordinal)];
@@ -102,13 +113,6 @@ public static class SillyTavernImport
 
         return kept.Count == 0 ? null : new Dictionary<string, JsonElement>(StringComparer.Ordinal) { [KeptKey] = JsonSerializer.SerializeToElement(kept) };
     }
-
-    private static readonly string[] InstructRead =
-    [
-        "name", "input_sequence", "input_suffix", "output_sequence", "output_suffix", "system_sequence", "system_suffix",
-        "first_output_sequence", "last_output_sequence", "system_same_as_user", "wrap", "names_behavior", "names", "stop_sequence",
-        "sequences_as_stop_strings"
-    ];
 
     private static ModelFormat ReadModelFormat(JsonElement instruct, ThoughtFormat? thought, string fallbackName)
     {
@@ -138,7 +142,6 @@ public static class SillyTavernImport
     private static bool? Bool(JsonElement element, string name)
         => element.TryGetProperty(name, out JsonElement value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False ? value.GetBoolean() : null;
 
-    /// <summary>SillyTavern's <c>names_behavior</c>, or the older <c>names</c> switch it replaced.</summary>
     private static NamesBehavior Names(JsonElement instruct)
         => JsonValues.String(instruct, "names_behavior") switch
         {
@@ -147,8 +150,6 @@ public static class SillyTavernImport
             "none" => NamesBehavior.None,
             _ => Bool(instruct, "names") == true ? NamesBehavior.Always : NamesBehavior.None
         };
-
-    private static readonly string[] ContextRead = ["name", "story_string", "example_separator", "chat_start"];
 
     private static PromptPreset ReadPrompt(JsonElement context, string fallbackName)
         => new()
@@ -159,14 +160,6 @@ public static class SillyTavernImport
             ChatStart = JsonValues.String(context, "chat_start") ?? string.Empty,
             Extra = Kept(context, ContextRead)
         };
-
-    private static readonly string[] SamplersRead =
-    [
-        "name", "genamt", "temp", "top_p", "top_k", "min_p", "typical_p", "tfs", "top_a", "rep_pen", "rep_pen_range", "rep_pen_slope",
-        "presence_pen", "freq_pen", "dry_multiplier", "dry_base", "dry_allowed_length", "dry_penalty_last_n", "dry_sequence_breakers",
-        "xtc_threshold", "xtc_probability", "dynatemp", "min_temp", "max_temp", "dynatemp_exponent", "mirostat_mode", "mirostat_tau",
-        "mirostat_eta", "smoothing_factor", "nsigma", "sampler_order"
-    ];
 
     private static SamplerPreset ReadSamplers(JsonElement preset, string fallbackName)
     {
@@ -213,7 +206,6 @@ public static class SillyTavernImport
         };
     }
 
-    /// <summary>A number, or a number written as a string, as older presets did.</summary>
     private static double? Number(JsonElement element, string name)
     {
         if (!element.TryGetProperty(name, out JsonElement value))
@@ -225,7 +217,6 @@ public static class SillyTavernImport
         return value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
     }
 
-    /// <summary>SillyTavern keeps DRY's breakers as a JSON array written into a string; an array is taken as well.</summary>
     private static string[]? SequenceBreakers(JsonElement preset)
     {
         if (!preset.TryGetProperty("dry_sequence_breakers", out JsonElement breakers))
@@ -234,6 +225,7 @@ public static class SillyTavernImport
         if (breakers.ValueKind == JsonValueKind.Array)
             return [.. breakers.EnumerateArray().Where(static item => item.ValueKind == JsonValueKind.String).Select(static item => item.GetString()!)];
 
+        // SillyTavern serializes DRY sequence breakers as a JSON array inside a JSON string.
         if (breakers.ValueKind != JsonValueKind.String)
             return null;
 

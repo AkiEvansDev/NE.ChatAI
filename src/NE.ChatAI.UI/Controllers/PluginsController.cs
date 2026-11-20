@@ -8,7 +8,6 @@ using NE.ChatAI.Plugins;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>One installed plugin row on <c>/plugins</c>.</summary>
 internal sealed partial class PluginItem : RecursiveObservable, IBindableItem
 {
     [RecursiveMember(false)]
@@ -36,7 +35,7 @@ internal sealed partial class PluginItem : RecursiveObservable, IBindableItem
     public partial UIVisibility DescriptionVisibility { get; set; } = UIVisibility.Collapsed;
 
     [RecursiveMember]
-    public partial string NodesLine { get; set; } = string.Empty;
+    public partial UIPhrase? NodesLine { get; set; }
 
     [RecursiveMember]
     public partial UIVisibility NodesVisibility { get; set; } = UIVisibility.Collapsed;
@@ -48,7 +47,7 @@ internal sealed partial class PluginItem : RecursiveObservable, IBindableItem
     public partial UIVisibility ErrorVisibility { get; set; } = UIVisibility.Collapsed;
 
     [RecursiveMember]
-    public partial string UpdateTitle { get; set; } = string.Empty;
+    public partial UIPhrase? UpdateTitle { get; set; }
 
     [RecursiveMember]
     public partial UIVisibility UpdateVisibility { get; set; } = UIVisibility.Collapsed;
@@ -57,9 +56,9 @@ internal sealed partial class PluginItem : RecursiveObservable, IBindableItem
     public partial bool Enabled { get; set; } = true;
 }
 
-/// <summary>The <c>/plugins</c> page: installing scenario plugins from public GitHub releases, checking and applying hot-updates, and toggling or removing plugins.</summary>
 internal sealed partial class PluginsController : ShellController
 {
+    public const string RepositoryInputId = "chatai-plugins-repo";
     public const string UninstallDialogKey = "chatai-plugins-uninstall";
 
     private string? _uninstallingId;
@@ -84,67 +83,78 @@ internal sealed partial class PluginsController : ShellController
     private void RefreshPlugins()
     {
         IReadOnlyList<PluginStatus> snapshot = PluginsManager.List();
-        Plugins.Clear();
+        HashSet<string> keep = new(snapshot.Count, StringComparer.Ordinal);
+
+        for (var i = 0; i < snapshot.Count; i++)
+            _ = keep.Add(snapshot[i].Record.Id);
+
+        for (var i = Plugins.Count - 1; i >= 0; i--)
+        {
+            if (!keep.Contains(Plugins[i].Id))
+                _ = Plugins.Remove(Plugins[i].Id);
+        }
 
         for (var i = 0; i < snapshot.Count; i++)
         {
             PluginStatus status = snapshot[i];
             InstalledPluginRecord record = status.Record;
             var description = record.Description ?? string.Empty;
-            var nodesLine = FormatNodesLine(status.Nodes);
+            UIPhrase? nodesLine = FormatNodesLine(status.Nodes);
             var loadError = status.LoadError ?? string.Empty;
             var hasUpdate = status.HasUpdate;
             var latestVersion = record.LatestVersion ?? record.InstalledVersion;
-
             var versionText = $"v{record.InstalledVersion}";
-            PluginItem row = new()
-            {
-                Id = record.Id,
-                Name = record.Name,
-                VersionText = versionText,
-                Repository = record.Repository,
-                RepositoryUrl = $"https://github.com/{record.Repository}",
-                Description = description,
-                DescriptionVisibility = description.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed,
-                NodesLine = nodesLine,
-                NodesVisibility = nodesLine.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed,
-                LoadError = loadError,
-                ErrorVisibility = loadError.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed,
-                UpdateTitle = hasUpdate ? FormatUpdateTitle(latestVersion) : string.Empty,
-                UpdateVisibility = hasUpdate ? UIVisibility.Visible : UIVisibility.Collapsed,
-                Enabled = record.Enabled
-            };
 
-            row.Badges.Add(new BadgeItem
+            if (Plugins.TryGet(record.Id, out PluginItem? row))
             {
-                Id = "__version",
-                IsContent = true,
-                BadgeTitle = versionText
-            });
+                row.Name = record.Name;
+                row.VersionText = versionText;
+                row.Repository = record.Repository;
+                row.RepositoryUrl = $"https://github.com/{record.Repository}";
+                row.Description = description;
+                row.DescriptionVisibility = description.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed;
+                row.NodesLine = nodesLine;
+                row.NodesVisibility = nodesLine is not null ? UIVisibility.Visible : UIVisibility.Collapsed;
+                row.LoadError = loadError;
+                row.ErrorVisibility = loadError.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed;
+                row.UpdateTitle = hasUpdate ? UIPhrase.Of("chatai.plugins.update-to", ("version", latestVersion)) : null;
+                row.UpdateVisibility = hasUpdate ? UIVisibility.Visible : UIVisibility.Collapsed;
+                row.Enabled = record.Enabled;
+                SyncBadges(row.Badges, versionText, record.Tags);
 
-            for (var t = 0; t < record.Tags.Count; t++)
-            {
-                var tag = record.Tags[t];
-                row.Badges.Add(new BadgeItem
-                {
-                    Id = $"tag:{tag}",
-                    IsContent = true,
-                    BadgeTitle = tag,
-                    BadgeColor = TagColorOf(tag)
-                });
+                if (Plugins[i].Id != record.Id)
+                    _ = Plugins.Move(record.Id, i);
             }
-
-            Plugins.Add(row);
+            else
+            {
+                PluginItem created = new()
+                {
+                    Id = record.Id,
+                    Name = record.Name,
+                    VersionText = versionText,
+                    Repository = record.Repository,
+                    RepositoryUrl = $"https://github.com/{record.Repository}",
+                    Description = description,
+                    DescriptionVisibility = description.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed,
+                    NodesLine = nodesLine,
+                    NodesVisibility = nodesLine is not null ? UIVisibility.Visible : UIVisibility.Collapsed,
+                    LoadError = loadError,
+                    ErrorVisibility = loadError.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed,
+                    UpdateTitle = hasUpdate ? UIPhrase.Of("chatai.plugins.update-to", ("version", latestVersion)) : null,
+                    UpdateVisibility = hasUpdate ? UIVisibility.Visible : UIVisibility.Collapsed,
+                    Enabled = record.Enabled
+                };
+                SyncBadges(created.Badges, versionText, record.Tags);
+                Plugins.Insert(i, created);
+            }
         }
     }
 
-    private string FormatNodesLine(IReadOnlyList<PluginNodeSummary> nodes)
+    private static UIPhrase? FormatNodesLine(IReadOnlyList<PluginNodeSummary> nodes)
     {
         if (nodes.Count == 0)
-            return string.Empty;
+            return null;
 
-        StringBuilder sb = new();
-        var prefix = Context.Translate("chatai.plugins.nodes") ?? "Nodes: {nodes}";
         StringBuilder list = new();
 
         for (var i = 0; i < nodes.Count; i++)
@@ -155,16 +165,51 @@ internal sealed partial class PluginsController : ShellController
             _ = list.Append(nodes[i].Title).Append(" (").Append(nodes[i].Key).Append(')');
         }
 
-        _ = sb.Append(prefix.Replace("{nodes}", list.ToString(), StringComparison.Ordinal));
-
-        return sb.ToString();
+        return UIPhrase.Of("chatai.plugins.nodes", ("nodes", list.ToString()));
     }
 
-    private string FormatUpdateTitle(string version)
+    private static void SyncBadges(RecursiveCollection<BadgeItem> badges, string versionText, IReadOnlyList<string> tags)
     {
-        var template = Context.Translate("chatai.plugins.update-to") ?? "Update to v{version}";
+        HashSet<string> keep = new(1 + tags.Count, StringComparer.Ordinal) { "__version" };
 
-        return template.Replace("{version}", version, StringComparison.Ordinal);
+        for (var i = 0; i < tags.Count; i++)
+            _ = keep.Add($"tag:{tags[i]}");
+
+        for (var i = badges.Count - 1; i >= 0; i--)
+        {
+            if (!keep.Contains(badges[i].Id))
+                _ = badges.Remove(badges[i].Id);
+        }
+
+        UpsertBadge(badges, 0, "__version", versionText, null);
+
+        for (var i = 0; i < tags.Count; i++)
+        {
+            var tag = tags[i];
+            UpsertBadge(badges, i + 1, $"tag:{tag}", tag, TagColorOf(tag));
+        }
+    }
+
+    private static void UpsertBadge(RecursiveCollection<BadgeItem> badges, int index, string id, string title, UIThemeColor? color)
+    {
+        if (badges.TryGet(id, out BadgeItem? existing))
+        {
+            existing.BadgeTitle = title;
+            existing.BadgeColor = color;
+
+            if (badges[index].Id != id)
+                _ = badges.Move(id, index);
+
+            return;
+        }
+
+        badges.Insert(index, new BadgeItem
+        {
+            Id = id,
+            IsContent = true,
+            BadgeTitle = title,
+            BadgeColor = color
+        });
     }
 
     private static UIThemeColor TagColorOf(string tag)
@@ -174,14 +219,7 @@ internal sealed partial class PluginsController : ShellController
             _ => UIThemeColor.Primary
         };
 
-    protected override Task OnLanguageChangedAsync(string language, CancellationToken cancellationToken)
-    {
-        RefreshPlugins();
-
-        return base.OnLanguageChangedAsync(language, cancellationToken);
-    }
-
-    /// <summary>Downloads and installs the latest release from the repository typed into <see cref="RepositoryInput"/>.</summary>
+    /// <summary>Downloads and installs the latest release from <see cref="RepositoryInput"/>.</summary>
     [UICommand]
     public async Task<UICommandResult> InstallPluginAsync(CancellationToken cancellationToken)
     {
@@ -218,7 +256,7 @@ internal sealed partial class PluginsController : ShellController
         };
     }
 
-    /// <summary>Queries GitHub Releases for every installed plugin and updates each row's available update button.</summary>
+    /// <summary>Queries GitHub Releases for installed plugins and refreshes available update actions.</summary>
     [UICommand]
     public async Task<UICommandResult> CheckUpdatesAsync(CancellationToken cancellationToken)
     {
@@ -236,7 +274,7 @@ internal sealed partial class PluginsController : ShellController
             : Notify("chatai.plugins.updates.up-to-date", UIColorStyle.Success);
     }
 
-    /// <summary>Hot-updates one installed plugin in place without restarting the host.</summary>
+    /// <summary>Hot-updates an installed plugin in place without restarting the host.</summary>
     [UICommand]
     public async Task<UICommandResult> UpdatePluginAsync(string pluginId, CancellationToken cancellationToken)
     {
@@ -250,7 +288,7 @@ internal sealed partial class PluginsController : ShellController
         return Notify(UIPhrase.Of("chatai.plugins.updated", ("name", result.Plugin.Record.Name), ("version", result.Plugin.Record.InstalledVersion)), UIColorStyle.Success);
     }
 
-    /// <summary>Enables or disables an installed plugin and rebuilds the active scenario catalogue.</summary>
+    /// <summary>Enables or disables an installed plugin and rebuilds the scenario catalogue.</summary>
     [UICommand]
     public async Task TogglePluginEnabledAsync(string pluginId, CancellationToken cancellationToken)
     {
@@ -274,7 +312,7 @@ internal sealed partial class PluginsController : ShellController
         return UICommandResult.Ok([new OpenDialogEffect(UninstallDialogKey)]);
     }
 
-    /// <summary>Unloads and deletes the plugin asked about.</summary>
+    /// <summary>Unloads and deletes the plugin pending confirmation.</summary>
     [UICommand]
     public async Task<UICommandResult> UninstallPluginAsync(CancellationToken cancellationToken)
     {

@@ -105,15 +105,12 @@ public static class Slug
         return slug.ToString().TrimEnd('-');
     }
 
-    /// <summary>
-    /// A letter or digit as Latin, or <c>null</c> for a word break. Cyrillic is looked up whole — decomposed, й would lose its breve
-    /// and read as и — and a Latin letter with a mark keeps its base: é is e.
-    /// </summary>
     private static string? Transliterated(char character)
     {
         if (character is (>= 'a' and <= 'z') or (>= '0' and <= '9'))
             return character.ToString();
 
+        // Looked up before FormD decomposition so Cyrillic й keeps its breve instead of decomposing to и.
         var cyrillic = CyrillicLetters.IndexOf(character, StringComparison.Ordinal);
 
         if (cyrillic >= 0)

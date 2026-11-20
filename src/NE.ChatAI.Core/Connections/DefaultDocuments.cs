@@ -11,13 +11,10 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Connections;
 
-/// <summary>
-/// The base set of model formats, system prompts, prompt presets, samplers and scenarios — the repository's <c>default/</c> folder, built into
-/// this assembly: laid down on a first start, and on request whatever of it a data folder lacks.
-/// </summary>
+/// <summary>Shipped model formats, system prompts, prompt presets, samplers and scenarios embedded from <c>default/</c>.</summary>
 public static class DefaultDocuments
 {
-    /// <summary>The first connection laid down on an empty data folder, and the documents it names.</summary>
+    /// <summary>The first connection laid down on an empty data folder.</summary>
     public const string ConnectionId = "koboldcpp-d0000001";
     public const string FormatId = "gemma-4-d1000001";
     public const string SystemPromptId = "roleplay-d2000001";
@@ -42,7 +39,15 @@ public static class DefaultDocuments
     {
         HashSet<string> ids = [with(StringComparer.Ordinal)];
 
-        foreach (var resource in typeof(DefaultDocuments).Assembly.GetManifestResourceNames())
+        foreach ((_, var id, _) in EnumerateResources(typeof(DefaultDocuments).Assembly))
+            _ = ids.Add(id);
+
+        return ids;
+    }
+
+    private static IEnumerable<(string Kind, string Id, string Resource)> EnumerateResources(Assembly assembly)
+    {
+        foreach (var resource in assembly.GetManifestResourceNames())
         {
             var name = resource.Replace('\\', '/');
 
@@ -52,14 +57,11 @@ public static class DefaultDocuments
             var parts = name[Prefix.Length..^Extension.Length].Split('/');
 
             if (parts.Length == 2)
-                _ = ids.Add(parts[1]);
+                yield return (parts[0], parts[1], resource);
         }
-
-        return ids;
     }
 
-    /// <summary>Writes each document of the base set the folder holds no document under its id, or all of them when <paramref name="overwrite"/> is <c>true</c>; answers how many it wrote.</summary>
-    /// <remarks>When <paramref name="overwrite"/> is <c>false</c>, never writes over one the folder has: a default the reader changed stays changed, and one deleted comes back only from here.</remarks>
+    /// <summary>Writes missing (or all, when <paramref name="overwrite"/> is <see langword="true"/>) shipped documents into <paramref name="data"/> and returns the count written.</summary>
     public static async Task<int> LayDownAsync(DataFolder data, CancellationToken cancellationToken, bool overwrite = false)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -67,79 +69,20 @@ public static class DefaultDocuments
         Assembly assembly = typeof(DefaultDocuments).Assembly;
         var written = 0;
 
-        foreach (var resource in assembly.GetManifestResourceNames())
+        foreach ((var kind, var id, var resource) in EnumerateResources(assembly))
         {
-            var name = resource.Replace('\\', '/');
-
-            if (!name.StartsWith(Prefix, StringComparison.Ordinal) || !name.EndsWith(Extension, StringComparison.Ordinal))
-                continue;
-
-            var parts = name[Prefix.Length..^Extension.Length].Split('/');
-
-            if (parts.Length != 2)
-                continue;
-
-            written += parts[0] switch
+            written += kind switch
             {
-                "instruct" => await LayDownAsync(data.ModelFormats, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
-                "sysprompts" => await LayDownAsync(data.SystemPrompts, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
-                "prompts" => await LayDownAsync(data.Prompts, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
-                "samplers" => await LayDownAsync(data.Samplers, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
-                "graphs" => await LayDownAsync(data.Scenarios, assembly, resource, parts[1], overwrite, cancellationToken).ConfigureAwait(false),
+                "instruct" => await LayDownAsync(data.ModelFormats, assembly, resource, id, overwrite, cancellationToken).ConfigureAwait(false),
+                "sysprompts" => await LayDownAsync(data.SystemPrompts, assembly, resource, id, overwrite, cancellationToken).ConfigureAwait(false),
+                "prompts" => await LayDownAsync(data.Prompts, assembly, resource, id, overwrite, cancellationToken).ConfigureAwait(false),
+                "samplers" => await LayDownAsync(data.Samplers, assembly, resource, id, overwrite, cancellationToken).ConfigureAwait(false),
+                "graphs" => await LayDownAsync(data.Scenarios, assembly, resource, id, overwrite, cancellationToken).ConfigureAwait(false),
                 _ => 0
             };
         }
 
         return written;
-    }
-
-    /// <summary>Writes the shipped scenarios when an older data folder has never had a <c>graphs/</c> folder yet.</summary>
-    public static async Task LayDownScenariosAsync(DataFolder data, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-
-        var graphsFolder = Path.Combine(data.Root, "graphs");
-        _ = Directory.CreateDirectory(graphsFolder);
-        Assembly assembly = typeof(DefaultDocuments).Assembly;
-
-        foreach (var resource in assembly.GetManifestResourceNames())
-        {
-            var name = resource.Replace('\\', '/');
-
-            if (!name.StartsWith("default/graphs/", StringComparison.Ordinal) || !name.EndsWith(Extension, StringComparison.Ordinal))
-                continue;
-
-            var id = name["default/graphs/".Length..^Extension.Length];
-
-            if (!id.Contains('/', StringComparison.Ordinal))
-                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, overwrite: false, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>Reads a shipped scenario by <paramref name="id"/>, laying it down from <c>default/graphs/</c> first when absent.</summary>
-    public static async Task<Scenario?> EnsureScenarioAsync(DataFolder data, string id, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-
-        if (!Slug.IsValidId(id))
-            return null;
-
-        if (await data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is Scenario existing)
-            return existing;
-
-        Assembly assembly = typeof(DefaultDocuments).Assembly;
-        var target = $"default/graphs/{id}{Extension}";
-
-        foreach (var resource in assembly.GetManifestResourceNames())
-        {
-            if (string.Equals(resource.Replace('\\', '/'), target, StringComparison.Ordinal))
-            {
-                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, overwrite: false, cancellationToken).ConfigureAwait(false);
-                break;
-            }
-        }
-
-        return await data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<int> LayDownAsync<T>(DocumentStore<T> store, Assembly assembly, string resource, string id, bool overwrite, CancellationToken cancellationToken)
@@ -157,5 +100,45 @@ public static class DefaultDocuments
         await store.WriteAsync(id, document, cancellationToken).ConfigureAwait(false);
 
         return 1;
+    }
+
+    /// <summary>Writes the shipped scenarios when an older data folder has no <c>graphs/</c> directory yet.</summary>
+    public static async Task LayDownScenariosAsync(DataFolder data, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        _ = Directory.CreateDirectory(Path.Combine(data.Root, "graphs"));
+        Assembly assembly = typeof(DefaultDocuments).Assembly;
+
+        foreach ((var kind, var id, var resource) in EnumerateResources(assembly))
+        {
+            if (kind == "graphs")
+                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, overwrite: false, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Reads a shipped scenario by <paramref name="id"/>, laying it down from <c>default/graphs/</c> first when absent.</summary>
+    public static async Task<Scenario?> EnsureScenarioAsync(DataFolder data, string id, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        if (!Slug.IsValidId(id))
+            return null;
+
+        if (await data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false) is Scenario existing)
+            return existing;
+
+        Assembly assembly = typeof(DefaultDocuments).Assembly;
+
+        foreach ((var kind, var resourceId, var resource) in EnumerateResources(assembly))
+        {
+            if (kind == "graphs" && string.Equals(resourceId, id, StringComparison.Ordinal))
+            {
+                _ = await LayDownAsync(data.Scenarios, assembly, resource, id, overwrite: false, cancellationToken).ConfigureAwait(false);
+                break;
+            }
+        }
+
+        return await data.Scenarios.ReadAsync(id, cancellationToken).ConfigureAwait(false);
     }
 }

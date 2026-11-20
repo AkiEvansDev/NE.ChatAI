@@ -140,7 +140,7 @@ public sealed record KoboldGenerateRequest
             DrySequenceBreakers = samplers.Dry.SequenceBreakers,
             XtcThreshold = samplers.Xtc.Threshold,
             XtcProbability = samplers.Xtc.Probability,
-            DynamicTemperatureRange = dynamic is null ? 0 : (dynamic.Max - dynamic.Min) / 2,
+            DynamicTemperatureRange = dynamic is null ? 0 : Math.Max(0, (dynamic.Max - dynamic.Min) / 2),
             DynamicTemperatureExponent = dynamic?.Exponent ?? 1,
             SmoothingFactor = samplers.SmoothingFactor,
             Mirostat = samplers.Mirostat?.Mode ?? 0,

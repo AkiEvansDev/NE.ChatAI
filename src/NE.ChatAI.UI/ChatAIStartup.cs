@@ -140,7 +140,6 @@ internal sealed class ChatAIStartup : UIStartupBase
             .ConfigureLightPalette(static palette => palette with { Series = SeriesOf(palette, firstTint: 0, secondTint: 2, thirdTint: 4) })
         );
 
-        // A card or a preset file, several at once.
         _ = application.ConfigureFiles(static files => files.MaxFileSize = SettingsController.MaxImportBytes);
 
         // Kept inside the data folder so launcher updates that replace app/ preserve past logs.

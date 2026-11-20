@@ -3,10 +3,7 @@ using System.Collections.Generic;
 
 namespace NE.ChatAI.Chats;
 
-/// <summary>
-/// Resolves and maintains timeline-bound <see cref="Chat.Visuals"/> (<see cref="ChatVisualTarget.Stage"/> and
-/// <see cref="ChatVisualTarget.Background"/>) across scenario commits, variant swipes, edits, rollbacks and branches.
-/// </summary>
+/// <summary>Resolves and maintains timeline-bound <see cref="Chat.Visuals"/> across scenario commits, variant swipes, edits, rollbacks and branches.</summary>
 public static class ChatVisuals
 {
     /// <summary>Returns the canonical image key currently active for <paramref name="target"/> along <paramref name="messages"/>, or <c>null</c> when none is set or it was cleared.</summary>
@@ -18,7 +15,7 @@ public static class ChatVisuals
         if (visuals.Count == 0)
             return null;
 
-        Dictionary<string, int>? indexById = messages.Count > 0 ? IndexMap(messages) : null;
+        Dictionary<string, int>? indexById = messages.Count > 0 ? ChatEditing.IndexMap(messages) : null;
         ChatVisual? best = null;
         var bestAnchor = int.MinValue;
 
@@ -37,16 +34,6 @@ public static class ChatVisuals
         }
 
         return best is not null && !string.IsNullOrWhiteSpace(best.Image) ? best.Image : null;
-    }
-
-    private static Dictionary<string, int> IndexMap(IReadOnlyList<ChatMessage> messages)
-    {
-        Dictionary<string, int> map = new(messages.Count, StringComparer.Ordinal);
-
-        for (var i = 0; i < messages.Count; i++)
-            map[messages[i].Id] = i;
-
-        return map;
     }
 
     private static bool TryResolveActiveAnchor(ChatVisual visual, Dictionary<string, int>? indexById, IReadOnlyList<ChatMessage> messages, out int anchorIndex)
@@ -103,7 +90,7 @@ public static class ChatVisuals
     private static List<ChatVisual> MergeVisuals(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatVisual> existing, IReadOnlyList<ChatVisual> written)
     {
         List<ChatVisual> visuals = [.. existing];
-        Dictionary<string, int>? indexById = messages.Count > 0 ? IndexMap(messages) : null;
+        Dictionary<string, int>? indexById = messages.Count > 0 ? ChatEditing.IndexMap(messages) : null;
 
         for (var i = 0; i < written.Count; i++)
         {
@@ -150,7 +137,6 @@ public static class ChatVisuals
             : visual with { Image = image, Variant = variant };
     }
 
-    /// <summary>Stamps <paramref name="variant"/> on any visual anchored to <paramref name="messageId"/> that was saved without an explicit variant index.</summary>
     internal static IReadOnlyList<ChatVisual> PinVariantVisuals(IReadOnlyList<ChatVisual> visuals, string messageId, int variant)
     {
         if (visuals.Count == 0)
@@ -181,7 +167,7 @@ public static class ChatVisuals
         if (visuals.Count == 0 || fromAt < 0 || fromAt >= messages.Count)
             return visuals;
 
-        Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(messages);
         List<ChatVisual>? kept = null;
 
         for (var i = 0; i < visuals.Count; i++)
@@ -192,7 +178,7 @@ public static class ChatVisuals
                 && (afterIndex > fromAt || (afterIndex == fromAt && IsVariantActive(visual, messages[fromAt])));
 
             if (drop)
-                kept ??= CopyPrefix(visuals, i);
+                kept ??= ChatEditing.CopyPrefix(visuals, i);
             else
                 kept?.Add(visual);
         }
@@ -200,24 +186,13 @@ public static class ChatVisuals
         return kept ?? visuals;
     }
 
-    private static List<ChatVisual> CopyPrefix(IReadOnlyList<ChatVisual> visuals, int count)
-    {
-        List<ChatVisual> copy = [with(visuals.Count)];
-
-        for (var i = 0; i < count; i++)
-            copy.Add(visuals[i]);
-
-        return copy;
-    }
-
-    /// <summary>Drops visuals anchored to the deleted message at <paramref name="deletedAt"/> or whose anchor message no longer survives.</summary>
     internal static IReadOnlyList<ChatVisual> OnMessageDeleted(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatVisual> visuals, int deletedAt, IReadOnlyList<ChatMessage> after)
     {
         if (visuals.Count == 0)
             return visuals;
 
-        Dictionary<string, int> indexById = IndexMap(before);
-        HashSet<string> survivingIds = CollectAllMessageIds(after);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(before);
+        HashSet<string> survivingIds = ChatEditing.CollectAllMessageIds(after);
         List<ChatVisual>? changed = null;
 
         for (var i = 0; i < visuals.Count; i++)
@@ -227,7 +202,7 @@ public static class ChatVisuals
                 || ((!indexById.TryGetValue(visual.After, out var afterIndex) || afterIndex != deletedAt) && survivingIds.Contains(visual.After));
 
             if (!keep)
-                changed ??= CopyPrefix(visuals, i);
+                changed ??= ChatEditing.CopyPrefix(visuals, i);
             else
                 changed?.Add(visual);
         }
@@ -235,36 +210,13 @@ public static class ChatVisuals
         return changed ?? visuals;
     }
 
-    private static HashSet<string> CollectAllMessageIds(IReadOnlyList<ChatMessage> messages)
-    {
-        HashSet<string> ids = [with(StringComparer.Ordinal)];
-        AddMessageIds(messages, ids);
-        return ids;
-    }
-
-    private static void AddMessageIds(IReadOnlyList<ChatMessage> messages, HashSet<string> ids)
-    {
-        for (var i = 0; i < messages.Count; i++)
-        {
-            ChatMessage message = messages[i];
-            _ = ids.Add(message.Id);
-
-            for (var j = 0; j < message.Variants.Count; j++)
-            {
-                if (message.Variants[j].Tail is { Count: > 0 } tail)
-                    AddMessageIds(tail, ids);
-            }
-        }
-    }
-
-    /// <summary>Drops visuals past the rollback point when a chat is remade or truncated.</summary>
     internal static IReadOnlyList<ChatVisual> OnRolledBack(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatVisual> visuals, IReadOnlyList<ChatMessage> after, int? remadeAt = null)
     {
         if (visuals.Count == 0)
             return visuals;
 
-        Dictionary<string, int> indexById = IndexMap(before);
-        HashSet<string> survivingIds = CollectAllMessageIds(after);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(before);
+        HashSet<string> survivingIds = ChatEditing.CollectAllMessageIds(after);
         var cutoff = remadeAt ?? after.Count;
         List<ChatVisual>? changed = null;
 
@@ -287,7 +239,7 @@ public static class ChatVisuals
             }
 
             if (!keep)
-                changed ??= CopyPrefix(visuals, i);
+                changed ??= ChatEditing.CopyPrefix(visuals, i);
             else
                 changed?.Add(visual);
         }
@@ -295,14 +247,13 @@ public static class ChatVisuals
         return changed ?? visuals;
     }
 
-    /// <summary>Keeps visuals up to <paramref name="upToAt"/> for a branched chat.</summary>
     internal static IReadOnlyList<ChatVisual> OnBranchedUpTo(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatVisual> visuals, int upToAt, IReadOnlyList<ChatMessage> after)
     {
         if (visuals.Count == 0 || after.Count == 0)
             return [];
 
-        Dictionary<string, int> indexById = IndexMap(before);
-        HashSet<string> survivingIds = CollectAllMessageIds(after);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(before);
+        HashSet<string> survivingIds = ChatEditing.CollectAllMessageIds(after);
         List<ChatVisual> kept = [with(visuals.Count)];
 
         for (var i = 0; i < visuals.Count; i++)

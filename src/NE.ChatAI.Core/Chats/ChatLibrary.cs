@@ -39,13 +39,18 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
     {
         ChatMessage? last = chat.Messages.Count == 0 ? null : chat.Messages[^1];
 
-        return new ChatSummary(id, chat.Name, chat.Character, character?.Name ?? string.Empty, character?.Tags ?? [], last?.At ?? DateTimeOffset.MinValue, last?.Current.Text ?? string.Empty);
+        return new ChatSummary(
+            id,
+            chat.Name,
+            chat.Character,
+            character?.Name ?? string.Empty,
+            character?.Tags ?? [],
+            last?.At ?? chat.Created ?? DateTimeOffset.MinValue,
+            last?.Current.Text ?? string.Empty
+        );
     }
 
-    /// <summary>
-    /// A new chat with <paramref name="characterId"/>, opened by the character's first message — its greetings as the message's
-    /// variants, swiped between as replies are.
-    /// </summary>
+    /// <summary>Starts a new chat for <paramref name="characterId"/> seeded with the character's non-empty greetings as variants.</summary>
     public async Task<string?> StartAsync(string characterId, string? personaId, CancellationToken cancellationToken)
     {
         if (await data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) is not Character character)
@@ -63,16 +68,14 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
             Name = $"{character.Name} {now.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}",
             Character = characterId,
             Persona = personaId,
+            Created = greetings.Count == 0 ? now : null,
             Messages = messages
         };
 
         return await data.Chats.CreateAsync(chat, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// A new chat copied from <paramref name="chat"/> up to and with the message named, its notes, persona and seed with it, named as
-    /// a new chat with its character is; nothing links the two afterwards. <c>null</c> for a message the chat does not hold.
-    /// </summary>
+    /// <summary>Branches <paramref name="chat"/> up to <paramref name="messageId"/> into a new standalone chat document, copying its background and referenced media.</summary>
     public async Task<string?> BranchAsync(Chat chat, string messageId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(chat);
@@ -121,11 +124,7 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
         foreach (StoredDocument<Chat> chat in chats.Items)
         {
             if (chat.Document.Character == characterId)
-            {
-                _ = data.Chats.Delete(chat.Id);
-                ChatPictures.Delete(data, chat.Id);
-                GalleryPictures.DeleteChatMedia(data, chat.Id);
-            }
+                _ = Delete(chat.Id);
         }
 
         return data.Characters.Delete(characterId);

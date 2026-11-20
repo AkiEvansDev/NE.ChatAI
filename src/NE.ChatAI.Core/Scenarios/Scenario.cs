@@ -85,7 +85,7 @@ internal sealed class ScenarioTriggerJsonConverter : JsonConverter<ScenarioTrigg
             };
         }
 
-        ScenarioTriggerKind kind = kindText is not null && Enum.TryParse(kindText, ignoreCase: true, out ScenarioTriggerKind parsed)
+        ScenarioTriggerKind kind = kindText is not null && Enum.TryParse(kindText, ignoreCase: true, out ScenarioTriggerKind parsed) && Enum.IsDefined(parsed)
             ? parsed
             : ScenarioTriggerKind.Manual;
 
@@ -184,12 +184,12 @@ public sealed record Scenario : NamedDocument
     /// <summary>Upgrades a scenario read with a legacy <c>contextShare</c> trigger or retired <c>chat.gate</c> node into <c>Trigger.Gate</c> and <c>When</c> edges.</summary>
     public Scenario UpgradeLegacyTrigger()
     {
-        var rawSheet = Sheet is JsonElement element && element.ValueKind == JsonValueKind.Object ? element.GetRawText() : null;
-        var hasLegacyGateNode = rawSheet is not null && rawSheet.Contains(LegacyGateNodeKey, StringComparison.Ordinal);
+        var hasLegacyGateNode = Sheet is JsonElement sheetElement && HasNodeOfType(sheetElement, LegacyGateNodeKey);
 
         if (Trigger.LegacyContextShare is null && !hasLegacyGateNode)
             return this;
 
+        var rawSheet = Sheet is JsonElement element && element.ValueKind == JsonValueKind.Object ? element.GetRawText() : null;
         JsonObject sheet = rawSheet is not null && JsonNode.Parse(rawSheet) is JsonObject parsed
             ? parsed
             : [];
@@ -218,6 +218,25 @@ public sealed record Scenario : NamedDocument
             },
             Sheet = JsonSerializer.SerializeToElement(sheet, DocumentJson.Options)
         };
+    }
+
+    private static bool HasNodeOfType(JsonElement sheet, string nodeType)
+    {
+        if (sheet.ValueKind != JsonValueKind.Object || !sheet.TryGetProperty("nodes", out JsonElement nodes) || nodes.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (JsonElement node in nodes.EnumerateArray())
+        {
+            if (node.ValueKind == JsonValueKind.Object
+                && node.TryGetProperty("type", out JsonElement typeProp)
+                && typeProp.ValueKind == JsonValueKind.String
+                && string.Equals(typeProp.GetString(), nodeType, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static ScenarioGate MigrateGateNodes(JsonArray nodes, JsonArray edges, ScenarioGate currentGate)
@@ -306,32 +325,6 @@ public sealed record Scenario : NamedDocument
         }
     }
 
-    private static void AddContextWhenEdges(JsonArray nodes, JsonArray edges, double share)
-    {
-        var contextId = FindEnabledNodeId(nodes, ContextNodeKey);
-
-        if (contextId is null)
-        {
-            (var minX, var minY, var hasNode) = FindTopLeft(nodes);
-            contextId = NextUniqueId(nodes, "context");
-            var threshold = Math.Clamp((int)Math.Round(share * 100.0), 5, 95);
-
-            nodes.Insert(0, new JsonObject
-            {
-                ["id"] = contextId,
-                ["type"] = ContextNodeKey,
-                ["x"] = hasNode ? minX : 0.0,
-                ["y"] = hasNode ? minY - 288.0 : 0.0,
-                ["values"] = new JsonObject
-                {
-                    ["Threshold"] = threshold
-                }
-            });
-        }
-
-        WireConditionToTargets(nodes, edges, contextId, "Crossed");
-    }
-
     private static void WireConditionToTargets(JsonArray nodes, JsonArray edges, string fromNode, string fromPin)
     {
         List<string> targets = CollectEnabledTargets(nodes, [ModelCallNodeKey]);
@@ -403,6 +396,57 @@ public sealed record Scenario : NamedDocument
         return false;
     }
 
+    private static string NextUniqueId(JsonArray items, string baseId)
+    {
+        if (!ContainsId(items, baseId))
+            return baseId;
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = $"{baseId}-{suffix}";
+
+            if (!ContainsId(items, candidate))
+                return candidate;
+        }
+    }
+
+    private static bool ContainsId(JsonArray items, string id)
+    {
+        foreach (JsonNode? item in items)
+        {
+            if (item is JsonObject obj && string.Equals((string?)obj["id"], id, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void AddContextWhenEdges(JsonArray nodes, JsonArray edges, double share)
+    {
+        var contextId = FindEnabledNodeId(nodes, ContextNodeKey);
+
+        if (contextId is null)
+        {
+            (var minX, var minY, var hasNode) = FindTopLeft(nodes);
+            contextId = NextUniqueId(nodes, "context");
+            var threshold = Math.Clamp((int)Math.Round(share * 100.0), 5, 95);
+
+            nodes.Insert(0, new JsonObject
+            {
+                ["id"] = contextId,
+                ["type"] = ContextNodeKey,
+                ["x"] = hasNode ? minX : 0.0,
+                ["y"] = hasNode ? minY - 288.0 : 0.0,
+                ["values"] = new JsonObject
+                {
+                    ["Threshold"] = threshold
+                }
+            });
+        }
+
+        WireConditionToTargets(nodes, edges, contextId, "Crossed");
+    }
+
     private static string? FindEnabledNodeId(JsonArray nodes, string nodeType)
     {
         foreach (JsonNode? item in nodes)
@@ -441,30 +485,5 @@ public sealed record Scenario : NamedDocument
         }
 
         return (minX, minY, hasNode);
-    }
-
-    private static string NextUniqueId(JsonArray items, string baseId)
-    {
-        if (!ContainsId(items, baseId))
-            return baseId;
-
-        for (var suffix = 2; ; suffix++)
-        {
-            var candidate = $"{baseId}-{suffix}";
-
-            if (!ContainsId(items, candidate))
-                return candidate;
-        }
-    }
-
-    private static bool ContainsId(JsonArray items, string id)
-    {
-        foreach (JsonNode? item in items)
-        {
-            if (item is JsonObject obj && string.Equals((string?)obj["id"], id, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
     }
 }

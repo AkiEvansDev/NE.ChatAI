@@ -23,6 +23,7 @@ public sealed class DataFolder : IDisposable
     private readonly SemaphoreSlim _settingsWrite = new(1, 1);
     private readonly Lock _settingsCacheLock = new();
     private CachedSettings? _cachedSettings;
+    private long _settingsGeneration;
 
     public DataFolder(string root)
     {
@@ -74,9 +75,7 @@ public sealed class DataFolder : IDisposable
 
         if (!info.Exists)
         {
-            lock (_settingsCacheLock)
-                _cachedSettings = null;
-
+            ClearCachedSettings();
             return new AppSettings();
         }
 
@@ -89,38 +88,44 @@ public sealed class DataFolder : IDisposable
                 return cached.Settings;
         }
 
-        var content = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-        ReadOnlySpan<byte> utf8 = content.AsSpan();
-
-        if (utf8.StartsWith("\uFEFF"u8))
-            utf8 = utf8[3..];
+        var generation = Volatile.Read(ref _settingsGeneration);
+        byte[] content;
 
         try
         {
-            AppSettings settings = JsonSerializer.Deserialize<AppSettings>(utf8, DocumentJson.Options) ?? new AppSettings();
-
-            if (settings.Format > Document.CurrentFormat)
-            {
-                lock (_settingsCacheLock)
-                    _cachedSettings = null;
-
-                throw new DocumentFormatException(path, $"format {settings.Format} is newer than this version writes.");
-            }
-
-            var writtenTicks = File.GetLastWriteTimeUtc(path).Ticks;
-
-            lock (_settingsCacheLock)
-                _cachedSettings = new CachedSettings(writtenTicks, content.LongLength, settings);
-
-            return settings;
+            content = await AtomicFile.ReadBytesAsync(path, cancellationToken).ConfigureAwait(false);
         }
-        catch (JsonException exception)
+        catch (FileNotFoundException)
         {
-            lock (_settingsCacheLock)
-                _cachedSettings = null;
-
-            throw new DocumentFormatException(path, exception.Message, exception);
+            ClearCachedSettings();
+            return new AppSettings();
         }
+
+        AppSettings settings;
+
+        try
+        {
+            settings = DocumentJson.Read<AppSettings>(content, path);
+        }
+        catch (DocumentFormatException)
+        {
+            ClearCachedSettings();
+            throw;
+        }
+
+        lock (_settingsCacheLock)
+        {
+            if (_settingsGeneration == generation && content.LongLength == length)
+                _cachedSettings = new CachedSettings(lastWriteTicks, length, settings);
+        }
+
+        return settings;
+    }
+
+    private void ClearCachedSettings()
+    {
+        lock (_settingsCacheLock)
+            _cachedSettings = null;
     }
 
     public async Task WriteSettingsAsync(AppSettings settings, CancellationToken cancellationToken)
@@ -131,10 +136,14 @@ public sealed class DataFolder : IDisposable
 
         try
         {
+            _ = Interlocked.Increment(ref _settingsGeneration);
             await AtomicFile.WriteAsync(Path.Combine(Root, SettingsFile), JsonSerializer.SerializeToUtf8Bytes(settings with { Format = Document.CurrentFormat }, DocumentJson.Options), cancellationToken).ConfigureAwait(false);
 
             lock (_settingsCacheLock)
+            {
+                _ = Interlocked.Increment(ref _settingsGeneration);
                 _cachedSettings = null;
+            }
         }
         finally
         {
@@ -145,7 +154,10 @@ public sealed class DataFolder : IDisposable
     internal void InvalidateCaches()
     {
         lock (_settingsCacheLock)
+        {
+            _ = Interlocked.Increment(ref _settingsGeneration);
             _cachedSettings = null;
+        }
 
         Connections.ClearCache();
         ModelFormats.ClearCache();

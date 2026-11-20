@@ -8,14 +8,12 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>A tag in the tags dialog: its name as it is kept, its name as edited, and the colour its badge is drawn in everywhere.</summary>
+/// <summary>One tag row in the tag management dialog.</summary>
 internal sealed partial class TagRow : RecursiveObservable, IBindableItem, IContentItem
 {
-    /// <summary>The tag's name as it is kept, the row's key until a rename keeps the new one.</summary>
     [RecursiveMember(false)]
     public required string Id { get; init; }
 
-    /// <summary>A tag is the reader's own word, never a key.</summary>
     public bool IsContent => true;
 
     [RecursiveMember]
@@ -25,72 +23,104 @@ internal sealed partial class TagRow : RecursiveObservable, IBindableItem, ICont
     public partial UIThemeColor? Color { get; set; }
 }
 
-/// <summary>
-/// A card's tags: picked in the field from every tag known; made, renamed, recoloured and deleted for every card at once in the
-/// tags dialog.
-/// </summary>
+/// <summary>Card tag selection and tag catalog dialog commands.</summary>
 internal abstract partial class ShellController
 {
     public const string TagsDialogKey = "chatai-card-tags";
     public const string DeleteTagDialogKey = "chatai-card-tag-delete";
 
-    /// <summary>The tag about to be deleted, asked about first.</summary>
     private string? _deletingTag;
 
     [RecursiveMember]
     public partial IReadOnlyList<string> CardTags { get; set; } = [];
 
-    /// <summary>Every tag known for this kind of card, to pick from.</summary>
     [RecursiveMember(false)]
     public RecursiveCollection<OptionItem> CardTagOptions { get; } = [];
 
-    /// <summary>Every tag known for this kind of card, as the tags dialog edits them.</summary>
     [RecursiveMember(false)]
     public RecursiveCollection<TagRow> AllTags { get; } = [];
 
-    /// <summary>The name of the tag about to be made in the dialog.</summary>
     [RecursiveMember]
     public partial string NewTag { get; set; } = string.Empty;
 
     [RecursiveMember]
     public partial UIPhrase? DeleteTagQuestion { get; set; }
 
-    /// <summary>Every tag known for this kind of card to pick from, and the same in the dialog's list.</summary>
     private async Task ShowTagsAsync(CancellationToken cancellationToken)
     {
         NewTag = string.Empty;
         IReadOnlyList<KnownTag> known = await TagCatalog.ListAsync(Data, _editingCardScope, cancellationToken).ConfigureAwait(false);
-        Dictionary<string, UIThemeColor> colors = TagColorsOf(known);
+        Dictionary<string, UIThemeColor> colors = TagBadges.ColorsOf(known);
 
         RefreshCardTagOptions(known, colors);
-        AllTags.Clear();
-
-        foreach (KnownTag tag in known)
-            AllTags.Add(new TagRow { Id = tag.Name, Name = tag.Name, Color = colors.TryGetValue(tag.Name, out UIThemeColor color) ? color : null });
-    }
-
-    private static Dictionary<string, UIThemeColor> TagColorsOf(IReadOnlyList<KnownTag> known)
-    {
-        Dictionary<string, UIThemeColor> colors = [with(StringComparer.OrdinalIgnoreCase)];
-
-        foreach (KnownTag tag in known)
-        {
-            if (UIThemeColor.TryParse(tag.Color, out UIThemeColor color) && TagBadges.HasColor(color))
-                colors[tag.Name] = color;
-        }
-
-        return colors;
+        SyncAllTags(known, colors);
     }
 
     private void RefreshCardTagOptions(IReadOnlyList<KnownTag> known, Dictionary<string, UIThemeColor> colors)
     {
-        CardTagOptions.Clear();
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
 
-        foreach (KnownTag tag in known)
-            CardTagOptions.Add(TagBadges.OptionOf(tag.Name, colors));
+        for (var i = 0; i < known.Count; i++)
+            _ = kept.Add(known[i].Name);
+
+        for (var i = CardTagOptions.Count - 1; i >= 0; i--)
+        {
+            if (!kept.Contains(CardTagOptions[i].Id))
+                _ = CardTagOptions.Remove(CardTagOptions[i].Id);
+        }
+
+        for (var i = 0; i < known.Count; i++)
+        {
+            var name = known[i].Name;
+
+            if (CardTagOptions.TryGet(name, out OptionItem? existing))
+            {
+                existing.BadgeTitle = name;
+                existing.BadgeColor = colors.TryGetValue(name, out UIThemeColor color) ? color : null;
+
+                if (!string.Equals(CardTagOptions[i].Id, name, StringComparison.Ordinal))
+                    _ = CardTagOptions.Move(name, i);
+            }
+            else
+            {
+                CardTagOptions.Insert(i, TagBadges.OptionOf(name, colors));
+            }
+        }
     }
 
-    /// <summary>Keeps the tags picked, each once whatever its case.</summary>
+    private void SyncAllTags(IReadOnlyList<KnownTag> known, Dictionary<string, UIThemeColor> colors)
+    {
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < known.Count; i++)
+            _ = kept.Add(known[i].Name);
+
+        for (var i = AllTags.Count - 1; i >= 0; i--)
+        {
+            if (!kept.Contains(AllTags[i].Id))
+                _ = AllTags.Remove(AllTags[i].Id);
+        }
+
+        for (var i = 0; i < known.Count; i++)
+        {
+            var name = known[i].Name;
+            UIThemeColor? badgeColor = colors.TryGetValue(name, out UIThemeColor color) ? color : null;
+
+            if (AllTags.TryGet(name, out TagRow? existing))
+            {
+                existing.Name = name;
+                existing.Color = badgeColor;
+
+                if (!string.Equals(AllTags[i].Id, name, StringComparison.Ordinal))
+                    _ = AllTags.Move(name, i);
+            }
+            else
+            {
+                AllTags.Insert(i, new TagRow { Id = name, Name = name, Color = badgeColor });
+            }
+        }
+    }
+
     [UICommand]
     public async Task SaveTagsAsync(CancellationToken cancellationToken)
     {
@@ -124,7 +154,6 @@ internal abstract partial class ShellController
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Makes the tag named in the dialog and gives it to the card.</summary>
     [UICommand]
     public async Task<UICommandResult> AddTagAsync(CancellationToken cancellationToken)
     {
@@ -144,7 +173,6 @@ internal abstract partial class ShellController
         return UICommandResult.Ok();
     }
 
-    /// <summary>Renames a tag on every card of this kind that carries it; an empty name puts the old one back.</summary>
     [UICommand]
     public async Task RenameTagAsync(string tag, CancellationToken cancellationToken)
     {
@@ -157,7 +185,6 @@ internal abstract partial class ShellController
             row.Name = row.Id;
     }
 
-    /// <summary>The card's tags read again after a rename or a delete touched every card of this kind, then the lists.</summary>
     private async Task ShowRetaggedAsync(CancellationToken cancellationToken)
     {
         if (_editingCardId is string cardId && Slug.IsValidId(cardId))
@@ -177,7 +204,6 @@ internal abstract partial class ShellController
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Keeps the colour picked for a tag, for every card of this kind that carries it; zero opacity clears it back to none.</summary>
     [UICommand]
     public async Task SaveTagColorAsync(string tag, CancellationToken cancellationToken)
     {
@@ -192,7 +218,7 @@ internal abstract partial class ShellController
 
         await TagCatalog.SetColorAsync(Data, _editingCardScope, row.Id, canonical, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<KnownTag> known = await TagCatalog.ListAsync(Data, _editingCardScope, cancellationToken).ConfigureAwait(false);
-        RefreshCardTagOptions(known, TagColorsOf(known));
+        RefreshCardTagOptions(known, TagBadges.ColorsOf(known));
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -211,7 +237,6 @@ internal abstract partial class ShellController
         return UICommandResult.Ok([new OpenDialogEffect(DeleteTagDialogKey)]);
     }
 
-    /// <summary>Takes the tag off every card of this kind that carries it and forgets its colour.</summary>
     [UICommand]
     public async Task<UICommandResult> DeleteTagAsync(CancellationToken cancellationToken)
     {

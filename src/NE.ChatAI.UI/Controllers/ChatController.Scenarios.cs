@@ -12,7 +12,7 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>One scenario record shown as a quiet folded block under the message it follows or replaces up to.</summary>
+/// <summary>One scenario record shown as a folded block under the message it follows or replaces up to.</summary>
 internal sealed partial class ChatRecordItem : RecursiveObservable, IBindableItem, IContentItem
 {
     [RecursiveMember(false)]
@@ -50,11 +50,7 @@ internal sealed partial class ChatRecordItem : RecursiveObservable, IBindableIte
     }
 }
 
-/// <summary>
-/// Scenarios in the chat: the composer's <c>Scenarios</c> submenu (global on/off toggles, manual runs on the open chat, and the way
-/// to <c>/scenarios</c>), automatic triggers (<see cref="ScenarioTriggerKind.BeforeSend"/>, <see cref="ScenarioTriggerKind.BeforeReply"/> and
-/// <see cref="ScenarioTriggerKind.AfterReply"/>), live streaming into folded blocks, and inline editing or removal of records.
-/// </summary>
+/// <summary>Scenario menus, manual and triggered batch execution, live record/draft streaming, and inline record editing.</summary>
 internal sealed partial class ChatController
 {
     public const string MessageRecordsId = "chatai-message-records";
@@ -72,14 +68,6 @@ internal sealed partial class ChatController
     private string? _draftGenerationId;
     private readonly List<string> _draftContinuations = [];
     private readonly HashSet<string> _hiddenBackupRecordIds = [with(StringComparer.Ordinal)];
-
-    private async Task ShowScenarioMenuAsync(CancellationToken cancellationToken)
-    {
-        List<StoredDocument<Scenario>> ordered = ScenarioExecutor.Order((await Data.Scenarios.ListAsync(cancellationToken).ConfigureAwait(false)).Items);
-        _knownScenarios = ordered;
-        RebuildScenarioMenu();
-        RefreshRealizedRecords();
-    }
 
     private void RebuildScenarioMenu()
     {
@@ -241,6 +229,135 @@ internal sealed partial class ChatController
         }
     }
 
+    private void RefreshRealizedRecords()
+    {
+        foreach (ChatMessageItem item in Messages.Items)
+            SyncRecords(item);
+    }
+
+    private void SyncRecords(ChatMessageItem item)
+    {
+        List<(string Id, UIPhrase Title, string Text, bool Streaming)> desired = [];
+        var hideSavedInsertions = (ReferenceEquals(item, Messages.Live) && _liveKind is ReplyKind.Variant or ReplyKind.Remake)
+            || (_editingId == item.Id && _editingNew);
+
+        if (_chat is { Records.Count: > 0 } chat)
+        {
+            for (var i = 0; i < chat.Records.Count; i++)
+            {
+                ChatRecord record = chat.Records[i];
+
+                if (hideSavedInsertions && record.Replaces is not { Count: >= 2 })
+                    continue;
+
+                if (_generating && _hiddenBackupRecordIds.Contains(record.Id))
+                    continue;
+
+                if (ChatRecords.VisibleAnchorMessageId(record, chat.Messages, chat.Records) == item.Id)
+                    desired.Add((record.Id, FormatRecordTitle(record, ResolveRecordName(record)), record.Text, false));
+            }
+        }
+
+        for (var i = 0; i < _streamingRecords.Count; i++)
+        {
+            StreamingRecord stream = _streamingRecords[i];
+
+            if (stream.AnchorMessageId == item.Id)
+                desired.Add((stream.StreamId, UIPhrase.Of("chatai.scenarios.running", ("name", stream.ScenarioName)), stream.Text, true));
+        }
+
+        HashSet<string> kept = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < desired.Count; i++)
+            _ = kept.Add(desired[i].Id);
+
+        for (var i = item.Records.Count - 1; i >= 0; i--)
+        {
+            var existingId = item.Records[i].Id;
+
+            if (!kept.Contains(existingId))
+            {
+                if (_editingRecordId == existingId)
+                    _editingRecordId = null;
+
+                _ = item.Records.Remove(existingId);
+            }
+        }
+
+        for (var i = 0; i < desired.Count; i++)
+        {
+            (var id, UIPhrase title, var text, var streaming) = desired[i];
+            var hideActions = streaming || _generating;
+
+            if (item.Records.TryGet(id, out ChatRecordItem? existing))
+            {
+                existing.Title = title;
+                existing.Text = text;
+                existing.ActionsVisibility = hideActions ? UIVisibility.Collapsed : UIVisibility.Visible;
+
+                if (hideActions)
+                {
+                    existing.ToolsVisibility = UIVisibility.Collapsed;
+                    existing.EditorVisibility = UIVisibility.Collapsed;
+                    existing.TextVisibility = UIVisibility.Visible;
+                }
+                else if (_editingRecordId != id)
+                {
+                    existing.ToolsVisibility = UIVisibility.Visible;
+                    existing.EditorVisibility = UIVisibility.Collapsed;
+                    existing.TextVisibility = UIVisibility.Visible;
+                }
+
+                if (!string.Equals(item.Records[i].Id, id, StringComparison.Ordinal))
+                    _ = item.Records.Move(id, i);
+            }
+            else
+            {
+                item.Records.Insert(i, new ChatRecordItem
+                {
+                    Id = id,
+                    Title = title,
+                    Text = text,
+                    ActionsVisibility = hideActions ? UIVisibility.Collapsed : UIVisibility.Visible,
+                    ToolsVisibility = hideActions ? UIVisibility.Collapsed : UIVisibility.Visible
+                });
+            }
+        }
+    }
+
+    private static UIPhrase FormatRecordTitle(ChatRecord record, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return record.Stale ? UIPhrase.Of("chatai.scenarios.stale-title", ("name", new UIPhrase("chatai.scenarios.record"))) : new UIPhrase("chatai.scenarios.record");
+
+        return record.Stale ? UIPhrase.Of("chatai.scenarios.stale-title", ("name", name)) : UIPhrase.Text(name);
+    }
+
+    private string? ResolveRecordName(ChatRecord record)
+    {
+        if (record.Scenario is string scenarioId)
+        {
+            for (var i = 0; i < _knownScenarios.Count; i++)
+            {
+                if (_knownScenarios[i].Id == scenarioId)
+                    return _knownScenarios[i].Document.Name;
+            }
+        }
+
+        if (_chat is not null && record.Generation is string generationId)
+        {
+            for (var i = _chat.Generations.Count - 1; i >= 0; i--)
+            {
+                GenerationRecord generation = _chat.Generations[i];
+
+                if (generation.Id == generationId && !string.IsNullOrWhiteSpace(generation.Purpose) && generation.Purpose != GenerationPurpose.Reply && generation.Purpose != GenerationPurpose.Impersonate)
+                    return generation.Purpose;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(record.Tag) ? null : record.Tag;
+    }
+
     private async Task<UICommandResult?> ScenarioActionAsync(string action, CancellationToken cancellationToken)
     {
         if (action == ImpersonateAction)
@@ -261,40 +378,8 @@ internal sealed partial class ChatController
     private async Task<UICommandResult> ImpersonateAsync(CancellationToken cancellationToken)
     {
         _ = await DefaultDocuments.EnsureScenarioAsync(Data, DefaultDocuments.ImpersonateScenarioId, cancellationToken).ConfigureAwait(false);
+
         return await RunScenarioByHandAsync(DefaultDocuments.ImpersonateScenarioId, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<UICommandResult> ToggleScenarioAsync(string scenarioId, CancellationToken cancellationToken)
-    {
-        var busy = false;
-
-        await Context.Runtime.InvokeAsync(() => busy = _generating, cancellationToken).ConfigureAwait(false);
-
-        if (busy)
-            return Notify("chatai.chat.busy", UIColorStyle.Info);
-
-        if (!Slug.IsValidId(scenarioId) || await Data.Scenarios.ReadAsync(scenarioId, cancellationToken).ConfigureAwait(false) is not Scenario scenario)
-            return UICommandResult.Ok();
-
-        Scenario updated = scenario with { Enabled = !scenario.Enabled };
-        await Data.Scenarios.WriteAsync(scenarioId, updated, cancellationToken).ConfigureAwait(false);
-
-        await Context.Runtime.InvokeAsync(() =>
-        {
-            var toggleId = ScenarioTogglePrefix + scenarioId;
-            MenuItem menu = ExtraOf(ScenariosAction);
-
-            for (var i = 0; i < _knownScenarios.Count; i++)
-            {
-                if (_knownScenarios[i].Id == scenarioId)
-                    _knownScenarios[i] = new StoredDocument<Scenario>(scenarioId, updated);
-            }
-
-            if (menu.Items.TryGet(toggleId, out MenuItem? item))
-                item.Checked = updated.Enabled;
-        }, cancellationToken).ConfigureAwait(false);
-
-        return UICommandResult.Ok();
     }
 
     private async Task<UICommandResult> RunScenarioByHandAsync(string scenarioId, CancellationToken cancellationToken)
@@ -320,13 +405,7 @@ internal sealed partial class ChatController
             }
 
             chatId = OpenChatId;
-            _generating = true;
-            CaptureHiddenBackupRecords(_chat);
-            CloseOpenEditors();
-            RefreshRealizedMessages();
-            RefreshRealizedRecords();
-            ShowSendButton(stops: true);
-            ShowLastActions();
+            EnterGeneratingState(_chat);
         }, cancellationToken).ConfigureAwait(false);
 
         if (busy)
@@ -374,13 +453,48 @@ internal sealed partial class ChatController
             }, lifetime).ConfigureAwait(false);
 
             if (startChat is not null)
-                _ = await RunScenarioBatchOnOpenChatAsync(chatId, startChat, [scenario], bypassGates: true, preTurnChat: null, generation.Token).ConfigureAwait(false);
+                _ = await RunScenarioBatchOnOpenChatAsync(chatId, startChat, [scenario], bypassGates: true, commitImmediately: true, preTurnChat: null, generation.Token).ConfigureAwait(false);
         }
         finally
         {
-            if (!lifetime.IsCancellationRequested)
+            if (lifetime.IsCancellationRequested)
+                await _activeGenerations.AbortAllAsync(exception => Context.Logger.LogBackendFailure(exception), CancellationToken.None).ConfigureAwait(false);
+            else
                 await ReleaseGenerationAsync().ConfigureAwait(false);
         }
+    }
+
+    private async Task<UICommandResult> ToggleScenarioAsync(string scenarioId, CancellationToken cancellationToken)
+    {
+        var busy = false;
+
+        await Context.Runtime.InvokeAsync(() => busy = _generating, cancellationToken).ConfigureAwait(false);
+
+        if (busy)
+            return Notify("chatai.chat.busy", UIColorStyle.Info);
+
+        if (!Slug.IsValidId(scenarioId) || await Data.Scenarios.ReadAsync(scenarioId, cancellationToken).ConfigureAwait(false) is not Scenario scenario)
+            return UICommandResult.Ok();
+
+        Scenario updated = scenario with { Enabled = !scenario.Enabled };
+        await Data.Scenarios.WriteAsync(scenarioId, updated, cancellationToken).ConfigureAwait(false);
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            var toggleId = ScenarioTogglePrefix + scenarioId;
+            MenuItem menu = ExtraOf(ScenariosAction);
+
+            for (var i = 0; i < _knownScenarios.Count; i++)
+            {
+                if (_knownScenarios[i].Id == scenarioId)
+                    _knownScenarios[i] = new StoredDocument<Scenario>(scenarioId, updated);
+            }
+
+            if (menu.Items.TryGet(toggleId, out MenuItem? item))
+                item.Checked = updated.Enabled;
+        }, cancellationToken).ConfigureAwait(false);
+
+        return UICommandResult.Ok();
     }
 
     private async Task<List<StoredDocument<Scenario>>> CandidatesForAsync(ScenarioTriggerKind kind, CancellationToken cancellationToken)
@@ -399,21 +513,24 @@ internal sealed partial class ChatController
         return candidates;
     }
 
-    private async Task<bool> RunBeforeSendBatchAsync(string chatId, Chat startChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, CancellationToken cancellationToken)
-    {
-        (_, var allSucceeded) = await RunScenarioBatchOnOpenChatAsync(chatId, startChat, scenarios, bypassGates: false, startChat, cancellationToken).ConfigureAwait(false);
+    private Task<ScenarioBatchResult> RunBeforeSendBatchAsync(string chatId, Chat startChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, CancellationToken cancellationToken)
+        => RunScenarioBatchOnOpenChatAsync(chatId, startChat, scenarios, bypassGates: false, commitImmediately: false, startChat, cancellationToken);
 
-        return allSucceeded;
-    }
-
-    private async Task<(Chat Chat, bool AllSucceeded)> RunScenarioBatchOnOpenChatAsync(string chatId, Chat startChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, bool bypassGates, Chat? preTurnChat, CancellationToken cancellationToken)
+    private async Task<ScenarioBatchResult> RunScenarioBatchOnOpenChatAsync(string chatId, Chat startChat, IReadOnlyList<StoredDocument<Scenario>> scenarios, bool bypassGates, bool commitImmediately, Chat? preTurnChat, CancellationToken cancellationToken)
     {
         KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
         var initialDraft = string.Empty;
+        string? initialDraftGen = null;
+        List<string> initialContinuations = [];
 
-        await Context.Runtime.InvokeAsync(() => initialDraft = Draft, CancellationToken.None).ConfigureAwait(false);
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            initialDraft = Draft;
+            initialDraftGen = _draftGenerationId;
+            initialContinuations = [.. _draftContinuations];
+        }, CancellationToken.None).ConfigureAwait(false);
 
-        DraftStreamState draftState = new(initialDraft);
+        DraftStreamState draftState = new(initialDraft, initialDraftGen, initialContinuations);
         var allSucceeded = true;
 
         ScenarioBatchCallbacks callbacks = new()
@@ -422,19 +539,42 @@ internal sealed partial class ChatController
             BypassGates = bypassGates,
             PreTurnChat = preTurnChat,
             OnStreamChunkAsync = (scenario, nodeId, anchorId, text, thought) => OnScenarioStreamChunkAsync(scenario.Id, scenario.Document.Name, nodeId, anchorId, text, thought),
-            OnDraftChunkAsync = (_, partial) => OnScenarioDraftChunkAsync(draftState, partial),
+            OnDraftChunkAsync = (scenario, partial) => OnScenarioDraftChunkAsync(draftState, scenario.Id, partial),
             OnScenarioFinishedAsync = async (scenario, outcome, liveChat) =>
             {
                 if (!outcome.Succeeded || outcome.Cancelled)
                     allSucceeded = false;
 
-                await OnScenarioFinishedAsync(chatId, draftState, scenario, outcome, liveChat).ConfigureAwait(false);
+                await OnScenarioFinishedAsync(chatId, draftState, commitImmediately, scenario, outcome, liveChat).ConfigureAwait(false);
             }
         };
 
         Chat updated = await ScenarioExecutor.RunBatchAsync(Context.Services, Data, clients, startChat, scenarios, callbacks, cancellationToken, initialDraft, chatId).ConfigureAwait(false);
+        var succeeded = allSucceeded && !cancellationToken.IsCancellationRequested;
 
-        return (updated, allSucceeded && !cancellationToken.IsCancellationRequested);
+        if (!commitImmediately && !succeeded)
+        {
+            await Context.Runtime.InvokeAsync(() =>
+            {
+                Draft = initialDraft;
+                _streamingRecords.Clear();
+                RefreshRealizedRecords();
+            }, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        return new ScenarioBatchResult(updated, succeeded, draftState.CommittedDraft, draftState.DraftGenerationId, draftState.DraftContinuations, draftState.ReopenStage);
+    }
+
+    private void ApplyCommittedBeforeSendBatch(ScenarioBatchResult batch)
+    {
+        _chat = batch.Chat;
+        Draft = batch.FinalDraft;
+        _draftGenerationId = batch.DraftGenerationId;
+        _draftContinuations.Clear();
+        _draftContinuations.AddRange(batch.DraftContinuations);
+
+        if (batch.ReopenStage)
+            _stageHiddenByUser = false;
     }
 
     private async ValueTask OnScenarioStreamChunkAsync(string scenarioId, string scenarioName, string nodeId, string anchorMessageId, string text, string thought)
@@ -469,48 +609,39 @@ internal sealed partial class ChatController
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
-    private async ValueTask OnScenarioDraftChunkAsync(DraftStreamState draftState, string partialDraft)
+    private async ValueTask OnScenarioDraftChunkAsync(DraftStreamState draftState, string scenarioId, string partialDraft)
         => await Context.Runtime.InvokeAsync(() =>
         {
-            draftState.Streamed = true;
+            draftState.StreamingScenarioId = scenarioId;
             Draft = partialDraft;
         }, CancellationToken.None).ConfigureAwait(false);
 
-    private async ValueTask OnScenarioFinishedAsync(string chatId, DraftStreamState draftState, StoredDocument<Scenario> scenario, ScenarioExecutionOutcome outcome, Chat liveChat)
+    private async ValueTask OnScenarioFinishedAsync(string chatId, DraftStreamState draftState, bool commitImmediately, StoredDocument<Scenario> scenario, ScenarioExecutionOutcome outcome, Chat liveChat)
     {
-        if (outcome.Cancelled)
+        if (outcome.Cancelled || !outcome.Succeeded)
         {
             await Context.Runtime.InvokeAsync(() =>
             {
-                if (draftState.Streamed)
+                if (!commitImmediately)
+                {
+                    Draft = draftState.InitialDraft;
+                    draftState.StreamingScenarioId = null;
+                }
+                else if (draftState.StreamingScenarioId == scenario.Id)
                 {
                     Draft = draftState.CommittedDraft;
-                    draftState.Streamed = false;
+                    draftState.StreamingScenarioId = null;
                 }
 
                 ClearScenarioStreams(scenario.Id);
                 RefreshRealizedRecords();
             }, CancellationToken.None).ConfigureAwait(false);
 
-            return;
-        }
-
-        if (!outcome.Succeeded)
-        {
-            await Context.Runtime.InvokeAsync(() =>
+            if (!outcome.Cancelled)
             {
-                if (draftState.Streamed)
-                {
-                    Draft = draftState.CommittedDraft;
-                    draftState.Streamed = false;
-                }
-
-                ClearScenarioStreams(scenario.Id);
-                RefreshRealizedRecords();
-            }, CancellationToken.None).ConfigureAwait(false);
-
-            UIPhrase failure = FormatScenarioFailure(scenario.Document.Name, outcome.Error);
-            await Context.SendEffectsToAllAsync([new ShowNotificationEffect(failure, UIColorStyle.Danger)], CancellationToken.None).ConfigureAwait(false);
+                UIPhrase failure = FormatScenarioFailure(scenario.Document.Name, outcome.Error);
+                await Context.SendEffectsToAllAsync([new ShowNotificationEffect(failure, UIColorStyle.Danger)], CancellationToken.None).ConfigureAwait(false);
+            }
 
             return;
         }
@@ -519,54 +650,49 @@ internal sealed partial class ChatController
         {
             ClearScenarioStreams(scenario.Id);
 
-            if (_chat is not null && OpenChatId == chatId)
+            if (_chat is null || OpenChatId != chatId)
+                return;
+
+            if (outcome.Delta.Draft is string stagedDraft)
+            {
+                Draft = stagedDraft;
+                draftState.ApplyDraft(stagedDraft, outcome.Delta.DraftGenerationId, outcome.Delta.DraftContinued);
+
+                if (commitImmediately)
+                {
+                    _draftGenerationId = draftState.DraftGenerationId;
+                    _draftContinuations.Clear();
+                    _draftContinuations.AddRange(draftState.DraftContinuations);
+                }
+            }
+
+            if (outcome.Delta.Visuals is { Count: > 0 } stagedVisuals)
+            {
+                for (var i = 0; i < stagedVisuals.Count; i++)
+                {
+                    if (stagedVisuals[i].Target == ChatVisualTarget.Stage && !string.IsNullOrWhiteSpace(stagedVisuals[i].Image))
+                    {
+                        draftState.ReopenStage = true;
+
+                        if (commitImmediately)
+                            _stageHiddenByUser = false;
+
+                        break;
+                    }
+                }
+            }
+
+            if (commitImmediately)
             {
                 _chat = liveChat;
-
-                if (outcome.Delta.Draft is string stagedDraft)
-                {
-                    Draft = stagedDraft;
-                    draftState.CommittedDraft = stagedDraft;
-                    draftState.Streamed = false;
-
-                    if (outcome.Delta.DraftGenerationId is string draftGenId)
-                    {
-                        if (outcome.Delta.DraftContinued && _draftGenerationId is not null)
-                        {
-                            _draftContinuations.Add(draftGenId);
-                        }
-                        else
-                        {
-                            _draftGenerationId = draftGenId;
-                            _draftContinuations.Clear();
-                        }
-                    }
-                    else if (!outcome.Delta.DraftContinued)
-                    {
-                        _draftGenerationId = null;
-                        _draftContinuations.Clear();
-                    }
-                }
-
-                if (outcome.Delta.Visuals is { Count: > 0 } stagedVisuals)
-                {
-                    for (var i = 0; i < stagedVisuals.Count; i++)
-                    {
-                        if (stagedVisuals[i].Target == ChatVisualTarget.Stage && !string.IsNullOrWhiteSpace(stagedVisuals[i].Image))
-                        {
-                            _stageHiddenByUser = false;
-                            break;
-                        }
-                    }
-                }
-
                 RefreshVisuals();
-                RefreshRealizedRecords();
                 RefreshLoadedStatistics();
             }
+
+            RefreshRealizedRecords();
         }, CancellationToken.None).ConfigureAwait(false);
 
-        if (Data.Chats.Exists(chatId))
+        if (commitImmediately && Data.Chats.Exists(chatId))
             await Chats.WriteAsync(chatId, liveChat, CancellationToken.None).ConfigureAwait(false);
     }
 
@@ -598,159 +724,7 @@ internal sealed partial class ChatController
     }
 
     private async Task RunTriggeredScenariosAsync(ReplyJob job, Chat afterReplyChat, List<StoredDocument<Scenario>> candidates, CancellationToken cancellationToken)
-        => _ = await RunScenarioBatchOnOpenChatAsync(job.ChatId, afterReplyChat, candidates, bypassGates: false, job.PreTurnChat, cancellationToken).ConfigureAwait(false);
-
-    private void RefreshRealizedRecords()
-    {
-        foreach (ChatMessageItem item in Messages.Items)
-            SyncRecords(item);
-    }
-
-    /// <summary>Updates <paramref name="item"/>'s records in place so an unfolded record stays open across edits and streaming ticks.</summary>
-    private void SyncRecords(ChatMessageItem item)
-    {
-        List<(string Id, UIPhrase Title, string Text, bool Streaming)> desired = [];
-        var hideSavedInsertions = (ReferenceEquals(item, Messages.Live) && _liveKind is ReplyKind.Variant or ReplyKind.Remake)
-            || (_editingId == item.Id && _editingNew);
-
-        if (_chat is { Records.Count: > 0 } chat)
-        {
-            for (var i = 0; i < chat.Records.Count; i++)
-            {
-                ChatRecord record = chat.Records[i];
-
-                if (hideSavedInsertions && record.Replaces is not { Count: >= 2 })
-                    continue;
-
-                if (_generating && _hiddenBackupRecordIds.Contains(record.Id))
-                    continue;
-
-                if (ChatRecords.VisibleAnchorMessageId(record, chat.Messages, chat.Records) == item.Id)
-                    desired.Add((record.Id, FormatRecordTitle(record, ResolveRecordName(record)), record.Text, false));
-            }
-        }
-
-        for (var i = 0; i < _streamingRecords.Count; i++)
-        {
-            StreamingRecord stream = _streamingRecords[i];
-
-            if (stream.AnchorMessageId == item.Id)
-                desired.Add((stream.StreamId, UIPhrase.Of("chatai.scenarios.running", ("name", stream.ScenarioName)), stream.Text, true));
-        }
-
-        for (var i = item.Records.Count - 1; i >= 0; i--)
-        {
-            var existingId = item.Records[i].Id;
-            var keep = false;
-
-            for (var j = 0; j < desired.Count; j++)
-            {
-                if (desired[j].Id == existingId)
-                {
-                    keep = true;
-                    break;
-                }
-            }
-
-            if (!keep)
-            {
-                if (_editingRecordId == existingId)
-                    _editingRecordId = null;
-
-                item.Records.RemoveAt(i);
-            }
-        }
-
-        for (var i = 0; i < desired.Count; i++)
-        {
-            (var id, UIPhrase title, var text, var streaming) = desired[i];
-            var hideActions = streaming || _generating;
-            var foundAt = -1;
-
-            for (var j = i; j < item.Records.Count; j++)
-            {
-                if (item.Records[j].Id == id)
-                {
-                    foundAt = j;
-                    break;
-                }
-            }
-
-            if (foundAt >= 0)
-            {
-                ChatRecordItem existing = item.Records[foundAt];
-
-                if (foundAt != i)
-                {
-                    item.Records.RemoveAt(foundAt);
-                    item.Records.Insert(i, existing);
-                }
-
-                existing.Title = title;
-                existing.Text = text;
-                existing.ActionsVisibility = hideActions ? UIVisibility.Collapsed : UIVisibility.Visible;
-
-                if (hideActions)
-                {
-                    existing.ToolsVisibility = UIVisibility.Collapsed;
-                    existing.EditorVisibility = UIVisibility.Collapsed;
-                    existing.TextVisibility = UIVisibility.Visible;
-                }
-                else if (_editingRecordId != id)
-                {
-                    existing.ToolsVisibility = UIVisibility.Visible;
-                    existing.EditorVisibility = UIVisibility.Collapsed;
-                    existing.TextVisibility = UIVisibility.Visible;
-                }
-            }
-            else
-            {
-                ChatRecordItem created = new()
-                {
-                    Id = id,
-                    Title = title,
-                    Text = text,
-                    ActionsVisibility = hideActions ? UIVisibility.Collapsed : UIVisibility.Visible,
-                    ToolsVisibility = hideActions ? UIVisibility.Collapsed : UIVisibility.Visible
-                };
-
-                item.Records.Insert(i, created);
-            }
-        }
-    }
-
-    private static UIPhrase FormatRecordTitle(ChatRecord record, string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            return record.Stale ? UIPhrase.Of("chatai.scenarios.stale-title", ("name", new UIPhrase("chatai.scenarios.record"))) : new UIPhrase("chatai.scenarios.record");
-
-        return record.Stale ? UIPhrase.Of("chatai.scenarios.stale-title", ("name", name)) : UIPhrase.Text(name);
-    }
-
-    private string? ResolveRecordName(ChatRecord record)
-    {
-        if (record.Scenario is string scenarioId)
-        {
-            for (var i = 0; i < _knownScenarios.Count; i++)
-            {
-                if (_knownScenarios[i].Id == scenarioId)
-                    return _knownScenarios[i].Document.Name;
-            }
-        }
-
-        if (_chat is not null && record.Generation is string generationId)
-        {
-            for (var i = _chat.Generations.Count - 1; i >= 0; i--)
-            {
-                GenerationRecord generation = _chat.Generations[i];
-
-                if (generation.Id == generationId && !string.IsNullOrWhiteSpace(generation.Purpose) && generation.Purpose != GenerationPurpose.Reply && generation.Purpose != GenerationPurpose.Impersonate)
-                    return generation.Purpose;
-            }
-        }
-
-        return string.IsNullOrWhiteSpace(record.Tag) ? null : record.Tag;
-    }
+        => _ = await RunScenarioBatchOnOpenChatAsync(job.ChatId, afterReplyChat, candidates, bypassGates: false, commitImmediately: true, job.PreTurnChat, cancellationToken).ConfigureAwait(false);
 
     private void CloseOpenRecordEditor()
     {
@@ -881,10 +855,44 @@ internal sealed partial class ChatController
 
     private sealed record StreamingRecord(string StreamId, string ScenarioId, string AnchorMessageId, string ScenarioName, string Text);
 
-    private sealed class DraftStreamState(string committedDraft)
-    {
-        public string CommittedDraft { get; set; } = committedDraft;
+    private sealed record ScenarioBatchResult(Chat Chat, bool AllSucceeded, string FinalDraft, string? DraftGenerationId, IReadOnlyList<string> DraftContinuations, bool ReopenStage);
 
-        public bool Streamed { get; set; }
+    private sealed class DraftStreamState(string initialDraft, string? initialGenerationId, List<string> initialContinuations)
+    {
+        public string InitialDraft { get; } = initialDraft;
+
+        public string CommittedDraft { get; private set; } = initialDraft;
+
+        public string? DraftGenerationId { get; private set; } = initialGenerationId;
+
+        public List<string> DraftContinuations { get; } = initialContinuations;
+
+        public string? StreamingScenarioId { get; set; }
+
+        public bool ReopenStage { get; set; }
+
+        public void ApplyDraft(string draft, string? generationId, bool continued)
+        {
+            CommittedDraft = draft;
+            StreamingScenarioId = null;
+
+            if (generationId is not null)
+            {
+                if (continued && DraftGenerationId is not null)
+                {
+                    DraftContinuations.Add(generationId);
+                }
+                else
+                {
+                    DraftGenerationId = generationId;
+                    DraftContinuations.Clear();
+                }
+            }
+            else if (!continued)
+            {
+                DraftGenerationId = null;
+                DraftContinuations.Clear();
+            }
+        }
     }
 }

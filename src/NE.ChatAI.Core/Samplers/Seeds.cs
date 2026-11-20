@@ -6,15 +6,10 @@ namespace NE.ChatAI.Samplers;
 /// <summary>The seed a generation is made with, and the chat's seed after it.</summary>
 public readonly record struct SeedChoice(long Seed, long? ChatSeed);
 
-/// <summary>
-/// Picks a generation's seed by the preset's rule. It always names one — never koboldcpp's <c>-1</c>, whose pick nobody learns — so
-/// the seed is kept with the reply.
-/// </summary>
+/// <summary>Picks a concrete non-negative seed for each generation so the seed used is always known and persisted.</summary>
 public static class Seeds
 {
-    /// <param name="rule">The preset's rule.</param>
-    /// <param name="chatSeed">The chat's seed so far, <c>null</c> for a chat that has none yet.</param>
-    /// <param name="regenerate">Whether this is a new variant of a reply already there.</param>
+    /// <summary>Resolves the generation seed and updated chat seed according to <paramref name="rule"/>.</summary>
     public static SeedChoice Pick(SeedRule rule, long? chatSeed, bool regenerate)
     {
         ArgumentNullException.ThrowIfNull(rule);

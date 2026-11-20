@@ -45,12 +45,11 @@ internal sealed partial class ConnectionDraft : RecursiveObservable, IDocumentDr
         Samplers = connection.Samplers;
     }
 
-    /// <summary>The draft over <paramref name="kept"/>: what the editor does not show — fields it does not know — stays as it was.</summary>
     public ConnectionProfile Apply(ConnectionProfile kept)
         => kept with
         {
             Name = Name.Trim(),
-            Address = Uri.TryCreate(Address.Trim(), UriKind.Absolute, out Uri? address) ? address : kept.Address,
+            Address = Uri.TryCreate(Address.Trim(), UriKind.Absolute, out Uri? address) && address.Scheme is "http" or "https" ? address : kept.Address,
             ContextLength = new ContextLength { Auto = ContextAuto, Value = (int)ContextValue },
             Instruct = Instruct,
             SystemPrompt = SystemPrompt,

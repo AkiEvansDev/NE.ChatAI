@@ -8,13 +8,67 @@ using NE.Colors;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>
-/// The settings page's editors, one per kind of document: the list it is chosen from with New, Copy and Delete beside it, and its
-/// fields — each kept as it lets go of its value.
-/// </summary>
 internal static class SettingsEditors
 {
-    /// <summary>What concerns the whole application rather than a document: the language, the theme, the message surface and the picture behind a chat whose character has none of its own.</summary>
+    private static readonly UIThemeColor MacroValueColor = UIThemeColor.Create(
+        UIThemeDefaults.LightPalette.Primary,
+        new ColorVariant(UIThemeDefaults.DarkPalette.Primary.Name, ColorAdjustment.Tint, 4)
+    );
+
+    private static readonly UIThemeColor MacroConditionColor = UIThemeColor.Create(
+        UIThemeDefaults.LightPalette.Info,
+        new ColorVariant(UIThemeDefaults.DarkPalette.Info.Name, ColorAdjustment.Tint, 4)
+    );
+
+    private static readonly UIThemeColor SpeechColor = UIThemeColor.Create(
+        UIThemeDefaults.LightPalette.Accent,
+        new ColorVariant(UIThemeDefaults.DarkPalette.Accent.Name, ColorAdjustment.Tint, 4)
+    );
+
+    private static readonly OptionItem[] NamesBehaviors =
+    [
+        new() { Id = "None", Title = "chatai.settings.format.names.none" },
+        new() { Id = "Force", Title = "chatai.settings.format.names.force" },
+        new() { Id = "Always", Title = "chatai.settings.format.names.always" }
+    ];
+
+    private static readonly OptionItem[] Roles =
+    [
+        new() { Id = "System", Title = "chatai.settings.role.system" },
+        new() { Id = "User", Title = "chatai.settings.role.user" },
+        new() { Id = "Model", Title = "chatai.settings.role.character" }
+    ];
+
+    private static readonly OptionItem[] ThoughtDisplays =
+    [
+        new() { Id = "Folded", Title = "chatai.settings.prompt.thought.folded" },
+        new() { Id = "Hidden", Title = "chatai.settings.prompt.thought.hidden" }
+    ];
+
+    private static readonly UICodeCompletion[] MacroCompletions =
+    [
+        new() { Label = "{{char}}", Detail = "Character name", Kind = "regex" },
+        new() { Label = "{{user}}", Detail = "Persona name", Kind = "regex" },
+        new() { Label = "{{system}}", Detail = "System prompt", Kind = "regex" },
+        new() { Label = "{{original}}", Detail = "Preset system prompt", Kind = "regex" },
+        new() { Label = "{{description}}", Detail = "Character description", Kind = "regex" },
+        new() { Label = "{{personality}}", Detail = "Character personality", Kind = "regex" },
+        new() { Label = "{{scenario}}", Detail = "Character scenario", Kind = "regex" },
+        new() { Label = "{{persona}}", Detail = "Persona description", Kind = "regex" },
+        new() { Label = "{{loreBefore}}", Detail = "World info before story", Kind = "regex" },
+        new() { Label = "{{loreAfter}}", Detail = "World info after story", Kind = "regex" },
+        new() { Label = "{{wiBefore}}", Detail = "World info before story", Kind = "regex" },
+        new() { Label = "{{wiAfter}}", Detail = "World info after story", Kind = "regex" },
+        new() { Label = "{{mesExamples}}", Detail = "Formatted example dialogues", Kind = "regex" },
+        new() { Label = "{{mesExamplesRaw}}", Detail = "Raw example dialogues", Kind = "regex" },
+        new() { Label = "{{newline}}", Detail = "Line break", Kind = "meta" },
+        new() { Label = "{{noop}}", Detail = "Empty placeholder", Kind = "meta" },
+        new() { Label = "{{trim}}", Detail = "Trim surrounding whitespace", Kind = "meta" },
+        new() { Label = "{{#if …}}", InsertText = "{{#if ", Detail = "Conditional block", Kind = "keyword" },
+        new() { Label = "{{else}}", Detail = "Else branch", Kind = "keyword" },
+        new() { Label = "{{/if}}", Detail = "End conditional block", Kind = "keyword" }
+    ];
+
     public static CardComponent CreateGeneral()
         => Card(null,
             UIForm.Row(
@@ -36,7 +90,6 @@ internal static class SettingsEditors
             PictureFields.Background<SettingsController>("chatai.settings.background", "chatai.settings.background.hint", static x => x.Background, nameof(SettingsController.SaveBackgroundAsync), nameof(SettingsController.RemoveBackground), dimSliderId: SettingsController.DimSliderId)
         );
 
-    /// <summary>A framed card holding a group of settings fields that belong together.</summary>
     private static CardComponent Card(string? title, params IVisualComponent[] fields)
         => UICard.Create(title is null ? null : new UIPhrase(title), null, UILayout.Stack(16, fields));
 
@@ -47,7 +100,7 @@ internal static class SettingsEditors
         return Editor(SettingsController.ConnectionKind, static x => x.ConnectionOptions, static x => x.Connection,
             Card(null,
                 Text("chatai.settings.connection.address", static x => x.Connection.Draft.Address, SettingsController.ConnectionKind)
-                    .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Connect), "chatai.connection.check").OnClick(nameof(SettingsController.CheckEditedConnectionAsync))),
+                    .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Connect), "chatai.connection.check").OnClickShowingLoading(nameof(SettingsController.CheckEditedConnectionAsync))),
                 UIForm.Row(
                     contextAuto,
                     Number("chatai.generation.context.length", static x => x.Connection.Draft.ContextValue, SettingsController.ConnectionKind, 512, 1048576, 1024).EnabledWhen(contextAuto, false)
@@ -66,7 +119,6 @@ internal static class SettingsEditors
             .BindValue(value)
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
-    /// <summary>A kind's editor at <paramref name="editor"/>: its list with New and More (Rename, Copy, Delete) inside, then its fields, shown while one is chosen.</summary>
     private static StackPanelComponent Editor<T, TDraft>(string kind, Expression<Func<SettingsController, object?>> options, Expression<Func<SettingsController, DocumentEditor<T, TDraft>>> editor, params IVisualComponent[] fields)
         where T : NamedDocument
         where TDraft : RecursiveObservable, IDocumentDraft<T>, new()
@@ -107,7 +159,6 @@ internal static class SettingsEditors
             .BindValue(value)
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
-    /// <remarks>The stepper shown, which a number field leaves off by default.</remarks>
     private static NumberInputComponent Number(string title, Expression<Func<SettingsController, object?>> value, string kind, decimal min, decimal max, decimal step)
         => new NumberInputComponent()
             .SetTitle(title)
@@ -126,7 +177,7 @@ internal static class SettingsEditors
             .BindValue(value)
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
-    /// <remarks>The thought markers stay enabled with thinking off: they still write the empty thought the reply is opened with.</remarks>
+    // Thought prefix/suffix stay editable when thinking is off: they still form the empty-thought reply prefill.
     public static StackPanelComponent CreateFormat()
     {
         SwitchComponent thinking = Switch("chatai.settings.format.thought-enabled", static x => x.Format.Draft.ThoughtEnabled, SettingsController.FormatKind);
@@ -177,7 +228,6 @@ internal static class SettingsEditors
             .BindValue(value)
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
-    /// <summary>A system prompt: its name and its words, in a field sized for a long one.</summary>
     public static StackPanelComponent CreateSystemPrompt()
         => Editor(SettingsController.SystemPromptKind, static x => x.SystemPromptOptions, static x => x.SystemPrompt,
             Card(null,
@@ -185,14 +235,12 @@ internal static class SettingsEditors
             )
         );
 
-    /// <summary>A document's text with macros in it, kept as it lets go.</summary>
     private static CodeInputComponent Code(string title, Expression<Func<SettingsController, object?>> value, string kind, int rows, bool lineNumbers = false, bool expandable = false)
         => MacroInput(title, rows, lineNumbers, expandable)
             .BindValue(value)
             .OnChange(nameof(SettingsController.SaveAsync), UIAction.Arg("kind", kind));
 
-    /// <summary>A Markdown field with roleplay speech, narration and SillyTavern macro styling and completions.</summary>
-    /// <remarks>Filled named here: a code input starts ghost, as a listing to read, and here it stands among the form's filled fields.</remarks>
+    // CodeInputComponent defaults to Ghost; Filled matches adjacent form fields, while expanded modal editors revert to Ghost.
     public static CodeInputComponent MacroInput(string? title, int rows, bool lineNumbers = false, bool expandable = false)
     {
         CodeInputComponent input = StyleMacroCode(new CodeInputComponent())
@@ -213,7 +261,6 @@ internal static class SettingsEditors
         return input;
     }
 
-    /// <summary>Styles a Markdown code input for roleplay prompts and cards: muted narration, speech, control tags, directives and value macros.</summary>
     public static CodeInputComponent StyleMacroCode(CodeInputComponent input)
     {
         UIMarkdownTextStyle speech = new() { Color = SpeechColor };
@@ -252,16 +299,13 @@ internal static class SettingsEditors
             ),
             Card("chatai.settings.prompt.thoughts",
                 UIForm.Row(
-                    UILayout.Stack(16,
-                        Select("chatai.settings.prompt.thought-show", ThoughtDisplays, static x => x.Prompt.Draft.ThoughtShow, SettingsController.PromptKind),
-                        Switch("chatai.settings.prompt.keep-thoughts", static x => x.Prompt.Draft.KeepThoughts, SettingsController.PromptKind)
-                    ),
-                    new ContainerComponent()
+                    Select("chatai.settings.prompt.thought-show", ThoughtDisplays, static x => x.Prompt.Draft.ThoughtShow, SettingsController.PromptKind),
+                    Switch("chatai.settings.prompt.keep-thoughts", static x => x.Prompt.Draft.KeepThoughts, SettingsController.PromptKind)
                 )
             )
         );
 
-    /// <remarks>Only a fixed seed has a value here: a chat's own seed is the chat's, set in its generation panel.</remarks>
+    // Per-chat seeds live on Chat documents and are edited in GenerationPanel.
     public static StackPanelComponent CreateSamplers()
     {
         SwitchComponent dynamic = Switch("chatai.samplers.dynamic-on", static x => x.Samplers.Draft.DynamicTemperature, SettingsController.SamplersKind);
@@ -332,7 +376,6 @@ internal static class SettingsEditors
     private static NumberInputComponent SamplerNumber(string title, Expression<Func<SettingsController, object?>> value, decimal min, decimal max, decimal step)
         => Number(title, value, SettingsController.SamplersKind, min, max, step);
 
-    /// <summary>The global author's note, a text with macros, and where the notes go: a depth in the history and whose turn.</summary>
     public static CardComponent CreateAuthorsNote()
         => Card(null,
             UIText.Note("chatai.settings.notes.description"),
@@ -358,7 +401,6 @@ internal static class SettingsEditors
                 .OnChange(nameof(SettingsController.SaveAuthorsNoteAsync))
         );
 
-    /// <summary>The quick phrases, a field each with its remove inside, then a new one; the chat's extras send each with one press.</summary>
     public static CardComponent CreatePhrases()
         => Card(null,
             UIText.Note("chatai.settings.phrases.description"),
@@ -380,7 +422,6 @@ internal static class SettingsEditors
                 .SetHorizontalAlignment(UIAlignment.Start)
         );
 
-    /// <summary>The global image gallery (<c>global.&lt;id&gt;</c>), available to scenarios in every chat.</summary>
     public static CardComponent CreateGallery()
         => Card(null,
             PictureFields.Gallery<SettingsController>(
@@ -395,7 +436,6 @@ internal static class SettingsEditors
             )
         );
 
-    /// <summary>Named API keys encrypted in <c>secrets.json</c> (or supplied via <c>ChatAI__Secrets__&lt;name&gt;</c>) for scenario plugins.</summary>
     public static CardComponent CreateSecrets()
         => Card(null,
             UIText.Note("chatai.secrets.description"),
@@ -435,10 +475,6 @@ internal static class SettingsEditors
         );
     }
 
-    /// <summary>
-    /// The field archives and SillyTavern's files go in by a pick or a drop, what became of each listed under it, the archive export by
-    /// scope, and the application's own base set of presets laid down again where missing.
-    /// </summary>
     public static StackPanelComponent CreateImport()
         => UILayout.Stack(16,
             Card("chatai.import.title",
@@ -449,7 +485,8 @@ internal static class SettingsEditors
                     .SetMultiple(true)
                     .SetMaxFileSize(SettingsController.MaxImportBytes)
                     .BindSelectionId<SettingsController>(static x => x.ImportSelectionId)
-                    .OnChange(nameof(SettingsController.ImportAsync)),
+                    .OnChange(nameof(SettingsController.ImportAsync))
+                    .ShowLoadingDuring(EventNames.Change),
                 new ItemsViewComponent()
                     .SetVerticalScroll(UIScrollMode.Disabled)
                     .BindItems<SettingsController>(static x => x.ImportResults)
@@ -485,69 +522,10 @@ internal static class SettingsEditors
                 UIText.Note("chatai.import.defaults.description"),
                 UIButtons.Toolbar(
                     UIButtons.Outline("chatai.import.defaults.add")
-                        .OnClick(nameof(SettingsController.LayDownDefaultsAsync)),
+                        .OnClickShowingLoading(nameof(SettingsController.LayDownDefaultsAsync)),
                     UIButtons.Outline("chatai.import.defaults.restore")
                         .InteractOn(EventNames.Click, new OpenDialogEffect(SettingsController.RestoreDefaultsDialogKey))
                 )
             )
         );
-
-    private static readonly UIThemeColor MacroValueColor = UIThemeColor.Create(
-        UIThemeDefaults.LightPalette.Primary,
-        new ColorVariant(UIThemeDefaults.DarkPalette.Primary.Name, ColorAdjustment.Tint, 4)
-    );
-
-    private static readonly UIThemeColor MacroConditionColor = UIThemeColor.Create(
-        UIThemeDefaults.LightPalette.Info,
-        new ColorVariant(UIThemeDefaults.DarkPalette.Info.Name, ColorAdjustment.Tint, 4)
-    );
-
-    private static readonly UIThemeColor SpeechColor = UIThemeColor.Create(
-        UIThemeDefaults.LightPalette.Accent,
-        new ColorVariant(UIThemeDefaults.DarkPalette.Accent.Name, ColorAdjustment.Tint, 4)
-    );
-
-    private static readonly OptionItem[] NamesBehaviors =
-    [
-        new() { Id = "None", Title = "chatai.settings.format.names.none" },
-        new() { Id = "Force", Title = "chatai.settings.format.names.force" },
-        new() { Id = "Always", Title = "chatai.settings.format.names.always" }
-    ];
-
-    private static readonly OptionItem[] Roles =
-    [
-        new() { Id = "System", Title = "chatai.settings.role.system" },
-        new() { Id = "User", Title = "chatai.settings.role.user" },
-        new() { Id = "Model", Title = "chatai.settings.role.character" }
-    ];
-
-    private static readonly OptionItem[] ThoughtDisplays =
-    [
-        new() { Id = "Folded", Title = "chatai.settings.prompt.thought.folded" },
-        new() { Id = "Hidden", Title = "chatai.settings.prompt.thought.hidden" }
-    ];
-
-    private static readonly UICodeCompletion[] MacroCompletions =
-    [
-        new() { Label = "{{char}}", Detail = "Character name", Kind = "regex" },
-        new() { Label = "{{user}}", Detail = "Persona name", Kind = "regex" },
-        new() { Label = "{{system}}", Detail = "System prompt", Kind = "regex" },
-        new() { Label = "{{original}}", Detail = "Preset system prompt", Kind = "regex" },
-        new() { Label = "{{description}}", Detail = "Character description", Kind = "regex" },
-        new() { Label = "{{personality}}", Detail = "Character personality", Kind = "regex" },
-        new() { Label = "{{scenario}}", Detail = "Character scenario", Kind = "regex" },
-        new() { Label = "{{persona}}", Detail = "Persona description", Kind = "regex" },
-        new() { Label = "{{loreBefore}}", Detail = "World info before story", Kind = "regex" },
-        new() { Label = "{{loreAfter}}", Detail = "World info after story", Kind = "regex" },
-        new() { Label = "{{wiBefore}}", Detail = "World info before story", Kind = "regex" },
-        new() { Label = "{{wiAfter}}", Detail = "World info after story", Kind = "regex" },
-        new() { Label = "{{mesExamples}}", Detail = "Formatted example dialogues", Kind = "regex" },
-        new() { Label = "{{mesExamplesRaw}}", Detail = "Raw example dialogues", Kind = "regex" },
-        new() { Label = "{{newline}}", Detail = "Line break", Kind = "meta" },
-        new() { Label = "{{noop}}", Detail = "Empty placeholder", Kind = "meta" },
-        new() { Label = "{{trim}}", Detail = "Trim surrounding whitespace", Kind = "meta" },
-        new() { Label = "{{#if …}}", InsertText = "{{#if ", Detail = "Conditional block", Kind = "keyword" },
-        new() { Label = "{{else}}", Detail = "Else branch", Kind = "keyword" },
-        new() { Label = "{{/if}}", Detail = "End conditional block", Kind = "keyword" }
-    ];
 }

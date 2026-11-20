@@ -3,16 +3,7 @@ using System.Text;
 
 namespace NE.ChatAI.Prompts;
 
-/// <summary>
-/// The reply as it streams in, with a thinking model's thought — marked as its format says, or in <c>&lt;think&gt;</c> tags — kept
-/// apart from what it says.
-/// </summary>
-/// <remarks>
-/// koboldcpp does not stream a special marker faithfully: the same prompt opens with <c>&lt;|channel&gt;thought</c>, a bare
-/// <c>thought</c>, or <c>&lt;thought</c>, and several tokens may come as one piece. So the thought is read from the whole text: its
-/// label (the prefix's word, <c>thought</c>) with nothing before it but characters of the marker it follows, up to the suffix.
-/// A fine-tune often thinks in <c>&lt;think&gt;…&lt;/think&gt;</c> whatever its base's format says, so those tags are read too.
-/// </remarks>
+/// <summary>Separates a streaming model reply into spoken <see cref="Text"/> and reasoning <see cref="Thought"/>.</summary>
 public sealed class ReplyReader
 {
     private const string ThinkOpen = "<think>";
@@ -21,15 +12,11 @@ public sealed class ReplyReader
     private readonly ThoughtFormat _thought;
     private readonly string _marker;
     private readonly string _label;
+    private readonly string _trimmedSuffix;
     private readonly string _speakerPrefix;
+    private readonly string _opened;
     private readonly StringBuilder _raw = new();
     private bool _complete;
-
-    /// <summary>
-    /// The thought's opening the prompt already wrote (<see cref="ThoughtFormat.OpenedByPrompt"/>): the stream continues it, so it is
-    /// read as the stream's start.
-    /// </summary>
-    private readonly string _opened;
 
     public ReplyReader(ThoughtFormat thought, string? speaker = null)
     {
@@ -37,11 +24,11 @@ public sealed class ReplyReader
 
         _thought = thought;
         (_marker, _label) = SplitPrefix(thought.Prefix);
+        _trimmedSuffix = thought.Suffix.Trim('\r', '\n');
         _speakerPrefix = string.IsNullOrWhiteSpace(speaker) ? string.Empty : $"{speaker.Trim()}:";
         _opened = thought.OpenedByPrompt ? thought.Prefix : string.Empty;
     }
 
-    /// <summary>A prefix as its special marker and its label: <c>&lt;|channel&gt;</c> and <c>thought</c>, or no marker and all of it.</summary>
     private static (string Marker, string Label) SplitPrefix(string prefix)
     {
         var close = prefix.StartsWith('<', StringComparison.Ordinal) ? prefix.IndexOf('>', StringComparison.Ordinal) : prefix.StartsWith('[', StringComparison.Ordinal) ? prefix.IndexOf(']', StringComparison.Ordinal) : -1;
@@ -65,17 +52,6 @@ public sealed class ReplyReader
         return Split();
     }
 
-    /// <summary>
-    /// The stream has ended: a partial marker that never finished opening becomes text, while an opened thought cut short before its
-    /// closing marker stays in <see cref="Thought"/>.
-    /// </summary>
-    public bool Complete()
-    {
-        _complete = true;
-
-        return Split();
-    }
-
     private bool Split()
     {
         var text = Text;
@@ -90,7 +66,6 @@ public sealed class ReplyReader
         return !string.Equals(text, Text, StringComparison.Ordinal) || !string.Equals(thought, Thought, StringComparison.Ordinal);
     }
 
-    /// <summary>The thought as the format marks it; none when the reply does not open with it.</summary>
     private (string Text, string Thought)? ReadFormat(string raw)
     {
         var label = LabelEnd(raw);
@@ -106,10 +81,18 @@ public sealed class ReplyReader
         if (close >= 0)
             return (raw[(close + _thought.Suffix.Length)..].TrimStart(), raw[label..close].Trim());
 
+        // SillyTavern reasoning templates often wrap the closing tag in extra newlines the model itself may omit.
+        if (_trimmedSuffix.Length > 0 && !string.Equals(_trimmedSuffix, _thought.Suffix, StringComparison.Ordinal))
+        {
+            var fallbackClose = raw.IndexOf(_trimmedSuffix, label, StringComparison.Ordinal);
+
+            if (fallbackClose >= 0)
+                return (raw[(fallbackClose + _trimmedSuffix.Length)..].TrimStart(), raw[label..fallbackClose].Trim());
+        }
+
         return (string.Empty, raw[label..].Trim());
     }
 
-    /// <summary>Where the thought's label ends in <paramref name="raw"/>; <see cref="Opening.Pending"/> while it may still open one.</summary>
     private int LabelEnd(string raw)
     {
         // A marker with no label (<think>) stands whole: skipping its characters would read "think about it" as one.
@@ -118,7 +101,7 @@ public sealed class ReplyReader
 
         var start = 0;
 
-        // Whatever of the marker came through stands first: all of it, some of it, or none.
+        // koboldcpp may drop part or all of a special token marker (<|channel|>thought) when streaming chunks.
         while (start < raw.Length && _marker.Contains(raw[start], StringComparison.Ordinal))
             start++;
 
@@ -132,13 +115,14 @@ public sealed class ReplyReader
             if (end == raw.Length)
                 return Opening.Pending;
 
-            return raw[end] is '\n' or '\r' or ' ' || raw.AsSpan(end).StartsWith(_thought.Suffix, StringComparison.Ordinal) ? end : Opening.None;
+            return raw[end] is '\n' or '\r' or ' ' || raw.AsSpan(end).StartsWith(_thought.Suffix, StringComparison.Ordinal) || (_trimmedSuffix.Length > 0 && raw.AsSpan(end).StartsWith(_trimmedSuffix, StringComparison.Ordinal))
+                ? end
+                : Opening.None;
         }
 
         return _label.AsSpan().StartsWith(rest, StringComparison.Ordinal) ? Opening.Pending : Opening.None;
     }
 
-    /// <summary>The thought in <c>&lt;think&gt;</c> tags opening the reply, after any blank; else the reply is all text.</summary>
     private (string Text, string Thought) ReadTags(string raw)
     {
         ReadOnlySpan<char> rest = raw.AsSpan().TrimStart();
@@ -146,7 +130,6 @@ public sealed class ReplyReader
 
         if (!rest.StartsWith(ThinkOpen, StringComparison.Ordinal))
         {
-            // "<thi" may yet be the tag: nothing is said until it is or is not.
             var pending = !_complete && !rest.IsEmpty && ThinkOpen.AsSpan().StartsWith(rest, StringComparison.Ordinal);
 
             return pending ? (string.Empty, string.Empty) : (raw, string.Empty);
@@ -161,7 +144,6 @@ public sealed class ReplyReader
         return (string.Empty, raw[open..].Trim());
     }
 
-    /// <summary>Takes the speaker's <c>Name:</c> and the space after it off the reply's opening, waiting while a partial name may still end in <c>:</c>.</summary>
     private string StripSpeaker(string text)
     {
         if (_speakerPrefix.Length == 0 || text.Length == 0)
@@ -178,12 +160,20 @@ public sealed class ReplyReader
         if (!_complete && _speakerPrefix.AsSpan().StartsWith(trimmed, StringComparison.OrdinalIgnoreCase))
             return string.Empty;
 
-        return trimmed.Length == text.Length ? text : trimmed.ToString();
+        return text;
+    }
+
+    /// <summary>Finalizes the stream, flushing any unfinished opening marker as text while keeping an unclosed thought in <see cref="Thought"/>.</summary>
+    public bool Complete()
+    {
+        _complete = true;
+
+        return Split();
     }
 
     private static class Opening
     {
         public const int None = -1;
-        public const int Pending = 0;
+        public const int Pending = -2;
     }
 }

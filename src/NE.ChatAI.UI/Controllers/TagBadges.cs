@@ -5,27 +5,24 @@ using NE.ChatAI.Settings;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>A tag as a badge draws it: its name in its colour.</summary>
+/// <summary>One tag badge rendered on a card row.</summary>
 internal sealed partial class TagBadge : RecursiveObservable, IBindableItem, IContentItem
 {
     [RecursiveMember(false)]
     public required string Id { get; init; }
 
-    /// <summary>A tag is the reader's own word, never a key.</summary>
     public bool IsContent => true;
 
     [RecursiveMember]
     public partial string Text { get; set; } = string.Empty;
 
-    /// <summary>The tag's colour; none, and the badge is drawn as a quiet surface.</summary>
     [RecursiveMember]
     public partial UIThemeColor? Color { get; set; }
 }
 
-/// <summary>The tags' colours as the settings keep them, read into badges.</summary>
+/// <summary>Maps persisted tag styles into <see cref="UIThemeColor"/> values and syncs badge collections in place.</summary>
 internal static class TagBadges
 {
-    /// <summary>Each tag's colour in <paramref name="scope"/> by its name, case aside; a colour the UI cannot read is left out.</summary>
     public static Dictionary<string, UIThemeColor> ColorsOf(AppSettings settings, TagScope scope)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -38,23 +35,36 @@ internal static class TagBadges
         };
         Dictionary<string, UIThemeColor> colors = [with(StringComparer.OrdinalIgnoreCase)];
 
-        foreach (TagStyle tag in styles)
-        {
-            if (UIThemeColor.TryParse(tag.Color, out UIThemeColor color) && HasColor(color))
-                colors[tag.Name] = color;
-        }
+        for (var i = 0; i < styles.Count; i++)
+            AddColor(colors, styles[i].Name, styles[i].Color);
 
         return colors;
     }
 
-    /// <summary>Whether <paramref name="color"/> has a visible fill; zero opacity clears a tag's colour back to the theme's quiet badge.</summary>
+    public static Dictionary<string, UIThemeColor> ColorsOf(IReadOnlyList<KnownTag> known)
+    {
+        ArgumentNullException.ThrowIfNull(known);
+
+        Dictionary<string, UIThemeColor> colors = [with(StringComparer.OrdinalIgnoreCase)];
+
+        for (var i = 0; i < known.Count; i++)
+            AddColor(colors, known[i].Name, known[i].Color);
+
+        return colors;
+    }
+
+    private static void AddColor(Dictionary<string, UIThemeColor> colors, string name, string? rawColor)
+    {
+        if (UIThemeColor.TryParse(rawColor, out UIThemeColor color) && HasColor(color))
+            colors[name] = color;
+    }
+
     public static bool HasColor(UIThemeColor? color)
         => color is { } value
             && value != UIThemeColor.Transparent
             && value.Light is not { Opacity: 0 }
             && value.Dark is not { Opacity: 0 };
 
-    /// <summary>A tag as a badge select offers it: the badge itself, in its colour, the reader's own word.</summary>
     public static OptionItem OptionOf(string tag, IReadOnlyDictionary<string, UIThemeColor> colors)
     {
         ArgumentNullException.ThrowIfNull(colors);

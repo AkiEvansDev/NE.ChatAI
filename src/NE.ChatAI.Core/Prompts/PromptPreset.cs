@@ -13,10 +13,7 @@ public enum PromptRole
     Model
 }
 
-/// <summary>
-/// Where the author's notes — global, the character's and the chat's, added together — stand in the history: <see cref="Depth"/>
-/// messages from its end, 0 after the last and 1 before it, written as <see cref="Role"/>'s turn.
-/// </summary>
+/// <summary>Depth from the end of history (<c>0</c> after the last message) and turn role for injected author's notes.</summary>
 public sealed record AuthorsNotePlacement
 {
     public int Depth { get; init; } = 4;
@@ -36,15 +33,11 @@ public sealed record ThoughtHandling
 {
     public ThoughtDisplay Show { get; init; } = ThoughtDisplay.Folded;
 
-    /// <summary>Whether earlier replies' thoughts go back into the prompt; they rarely help and always cost context.</summary>
+    /// <summary>Whether earlier replies' thoughts are sent back in the assembled history.</summary>
     public bool KeepInHistory { get; init; }
 }
 
-/// <summary>
-/// The words around a chat, whatever the model: the story string over the history, and what becomes of thoughts. The system prompt
-/// is a document of its own (<see cref="SystemPromptPreset"/>), so one preset serves several; where author's notes go is the
-/// global note's (<see cref="Settings.AppSettings.AuthorsNotePlacement"/>).
-/// </summary>
+/// <summary>Model-independent prompt template: story string, separators, speaker-name toggle and thought handling.</summary>
 public sealed record PromptPreset : NamedDocument
 {
     /// <summary>The top of the prompt in SillyTavern's syntax, <c>{{macro}}</c> and <c>{{#if macro}}…{{/if}}</c>; each macro is a block.</summary>

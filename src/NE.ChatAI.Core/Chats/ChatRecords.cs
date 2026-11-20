@@ -10,10 +10,7 @@ public sealed record ChatProjectedTurn(PromptMessage Message, string FirstMessag
 /// <summary>A slice of chat history handed to a scenario, with the underlying message range a replacement record covers.</summary>
 public sealed record ChatHistorySlice(IReadOnlyList<PromptMessage> Messages, string? FirstMessageId, string? LastMessageId);
 
-/// <summary>
-/// Projects, slices and maintains <see cref="Chat.Records"/> as scenarios write them and as the reader edits, swipes or rolls back
-/// the chat (<c>docs/GRAPHS.md</c>).
-/// </summary>
+/// <summary>Projects, slices and maintains <see cref="Chat.Records"/> across scenario commits, edits, variant swipes and rollbacks.</summary>
 public static class ChatRecords
 {
     /// <summary>How many active-branch records sharing a tag are kept across distinct anchors: the current one and one previous backup.</summary>
@@ -43,7 +40,7 @@ public static class ChatRecords
         if (records.Count == 0)
             return RawTurns(messages);
 
-        Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(messages);
         Dictionary<string, (int Anchor, int Span, int RecordIndex)>? latestByTag = SelectLatestNonStaleByTag(records, indexById, messages);
         List<(int First, int Last, int Order, ChatRecord Record)> replacements = [];
         Dictionary<int, List<ChatRecord>> insertions = [];
@@ -77,7 +74,6 @@ public static class ChatRecords
         if (replacements.Count == 0 && insertions.Count == 0)
             return RawTurns(messages);
 
-        // Broader or newer replacements starting at or covering the same index win cleanly.
         replacements.Sort(static (left, right) =>
         {
             var byStart = left.First.CompareTo(right.First);
@@ -102,7 +98,11 @@ public static class ChatRecords
             {
                 (var first, var last, _, ChatRecord record) = replacements[repCursor];
                 turns.Add(new ChatProjectedTurn(new PromptMessage(record.Role, FormatRecordText(record), record.Thought, ExpandMacros: true), messages[first].Id, messages[last].Id, record.Id));
-                AppendInsertions(turns, insertions, last, messages[last].Id);
+
+                // Preserve active insertions anchored anywhere inside the summarized span rather than dropping interior anchors.
+                for (var k = first; k <= last; k++)
+                    AppendInsertions(turns, insertions, k, messages[last].Id);
+
                 i = last;
                 continue;
             }
@@ -126,16 +126,6 @@ public static class ChatRecords
         }
 
         return turns;
-    }
-
-    private static Dictionary<string, int> IndexMap(IReadOnlyList<ChatMessage> messages)
-    {
-        Dictionary<string, int> map = new(messages.Count, StringComparer.Ordinal);
-
-        for (var i = 0; i < messages.Count; i++)
-            map[messages[i].Id] = i;
-
-        return map;
     }
 
     private static Dictionary<string, (int Anchor, int Span, int RecordIndex)>? SelectLatestNonStaleByTag(IReadOnlyList<ChatRecord> records, Dictionary<string, int> indexById, IReadOnlyList<ChatMessage> messages)
@@ -250,7 +240,7 @@ public static class ChatRecords
         return new ChatHistorySlice(sliced, source[start].FirstMessageId, source[end - 1].LastMessageId);
     }
 
-    /// <summary>The message id in <paramref name="messages"/> under which <paramref name="record"/>'s folded block stands, or <c>null</c> when its messages sit in another variant's tail or another variant of that message.</summary>
+    /// <summary>The message id in <paramref name="messages"/> under which <paramref name="record"/>'s folded block stands, or <c>null</c> when inactive.</summary>
     public static string? AnchorMessageId(ChatRecord record, IReadOnlyList<ChatMessage> messages)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -274,7 +264,7 @@ public static class ChatRecords
         return null;
     }
 
-    /// <summary>The message id under which <paramref name="record"/> renders its folded block in the feed, or <c>null</c> when inactive or superseded by a newer active record of the same tag.</summary>
+    /// <summary>The message id under which <paramref name="record"/> renders its folded block in the feed, or <c>null</c> when inactive or superseded.</summary>
     public static string? VisibleAnchorMessageId(ChatRecord record, IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -287,7 +277,7 @@ public static class ChatRecords
         if (record.Tag is not string tag)
             return anchorId;
 
-        Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(messages);
 
         if (!TryResolveActiveAnchor(record, indexById, messages, out var ownAnchor, out var ownSpan))
             return null;
@@ -320,7 +310,7 @@ public static class ChatRecords
         return anchorId;
     }
 
-    /// <summary>Finds the active timeline's latest record carrying <paramref name="tag"/> (optionally strictly before <paramref name="beforeAnchorId"/>), stale or current; <c>null</c> when none matches.</summary>
+    /// <summary>Finds the active timeline's latest record carrying <paramref name="tag"/> (optionally strictly before <paramref name="beforeAnchorId"/>); <c>null</c> when none matches.</summary>
     public static ChatRecord? FindByTag(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records, string? tag, string? beforeAnchorId = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
@@ -330,7 +320,7 @@ public static class ChatRecords
             return null;
 
         var trimmed = tag.Trim();
-        Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(messages);
         var cutoff = -1;
         var hasCutoff = beforeAnchorId is not null && indexById.TryGetValue(beforeAnchorId, out cutoff);
         ChatRecord? best = null;
@@ -377,10 +367,7 @@ public static class ChatRecords
         return count;
     }
 
-    /// <summary>
-    /// Counts how many <see cref="MessageRole.User"/> turns have elapsed strictly after the latest active-branch record or visual written by
-    /// <paramref name="scenarioId"/> on <paramref name="chat"/>; <c>null</c> when that scenario has no active output on the branch.
-    /// </summary>
+    /// <summary>Counts user turns elapsed strictly after the latest active-branch record or visual written by <paramref name="scenarioId"/>; <see langword="null"/> when none exists.</summary>
     public static int? TurnsSinceScenarioOutput(Chat chat, string? scenarioId)
     {
         ArgumentNullException.ThrowIfNull(chat);
@@ -389,7 +376,7 @@ public static class ChatRecords
             return null;
 
         var trimmed = scenarioId.Trim();
-        Dictionary<string, int>? indexById = chat.Messages.Count > 0 ? IndexMap(chat.Messages) : null;
+        Dictionary<string, int>? indexById = chat.Messages.Count > 0 ? ChatEditing.IndexMap(chat.Messages) : null;
         var latestAnchor = int.MinValue;
 
         if (indexById is not null)
@@ -455,7 +442,7 @@ public static class ChatRecords
             return null;
 
         var trimmed = scenarioId.Trim();
-        Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(messages);
         ChatRecord? best = null;
         var bestAnchor = -1;
         var bestSpan = -1;
@@ -493,7 +480,7 @@ public static class ChatRecords
             return chat;
 
         List<ChatRecord> records = [.. chat.Records];
-        Dictionary<string, int>? indexById = written.Count > 0 ? IndexMap(chat.Messages) : null;
+        Dictionary<string, int>? indexById = written.Count > 0 ? ChatEditing.IndexMap(chat.Messages) : null;
 
         for (var i = 0; i < written.Count; i++)
         {
@@ -589,7 +576,6 @@ public static class ChatRecords
             records.RemoveAt(removeIndices[i]);
     }
 
-    /// <summary>Stamps <paramref name="variant"/> on any insertion record anchored to <paramref name="messageId"/> that was saved without an explicit variant index.</summary>
     internal static IReadOnlyList<ChatRecord> PinVariantRecords(IReadOnlyList<ChatRecord> records, string messageId, int variant)
     {
         if (records.Count == 0)
@@ -655,13 +641,12 @@ public static class ChatRecords
         return chat with { Records = records };
     }
 
-    /// <summary>Marks stale any active record covering or following the edited message at <paramref name="editedAt"/>.</summary>
     internal static IReadOnlyList<ChatRecord> OnMessageEdited(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatRecord> records, int editedAt)
     {
         if (records.Count == 0)
             return records;
 
-        Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(messages);
         List<ChatRecord>? changed = null;
 
         for (var i = 0; i < records.Count; i++)
@@ -684,7 +669,6 @@ public static class ChatRecords
         return changed ?? records;
     }
 
-    /// <summary>Marks stale any replacement covering the deleted message at <paramref name="deletedAt"/> and drops insertion or replacement records whose messages are gone.</summary>
     internal static IReadOnlyList<ChatRecord> OnMessageDeleted(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatRecord> records, int deletedAt, IReadOnlyList<ChatMessage> after)
     {
         if (records.Count == 0)
@@ -693,8 +677,8 @@ public static class ChatRecords
         if (after.Count == 0)
             return [];
 
-        Dictionary<string, int> indexById = IndexMap(before);
-        HashSet<string> survivingIds = CollectAllMessageIds(after);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(before);
+        HashSet<string> survivingIds = ChatEditing.CollectAllMessageIds(after);
         List<ChatRecord>? changed = null;
 
         for (var i = 0; i < records.Count; i++)
@@ -703,7 +687,7 @@ public static class ChatRecords
 
             if (TryResolveRange(record, indexById, out var first, out var last) && first <= deletedAt && deletedAt <= last)
             {
-                changed ??= CopyPrefix(records, i);
+                changed ??= ChatEditing.CopyPrefix(records, i);
 
                 if (first == last)
                     continue;
@@ -716,11 +700,11 @@ public static class ChatRecords
             }
             else if (record.After is string afterId && indexById.TryGetValue(afterId, out var afterIndex) && afterIndex == deletedAt)
             {
-                changed ??= CopyPrefix(records, i);
+                changed ??= ChatEditing.CopyPrefix(records, i);
             }
             else if (!ReferencesSurvive(record, survivingIds))
             {
-                changed ??= CopyPrefix(records, i);
+                changed ??= ChatEditing.CopyPrefix(records, i);
             }
             else
             {
@@ -729,38 +713,6 @@ public static class ChatRecords
         }
 
         return changed ?? records;
-    }
-
-    private static HashSet<string> CollectAllMessageIds(IReadOnlyList<ChatMessage> messages)
-    {
-        HashSet<string> ids = [with(StringComparer.Ordinal)];
-        AddMessageIds(messages, ids);
-        return ids;
-    }
-
-    private static void AddMessageIds(IReadOnlyList<ChatMessage> messages, HashSet<string> ids)
-    {
-        for (var i = 0; i < messages.Count; i++)
-        {
-            ChatMessage message = messages[i];
-            _ = ids.Add(message.Id);
-
-            for (var j = 0; j < message.Variants.Count; j++)
-            {
-                if (message.Variants[j].Tail is { Count: > 0 } tail)
-                    AddMessageIds(tail, ids);
-            }
-        }
-    }
-
-    private static List<ChatRecord> CopyPrefix(IReadOnlyList<ChatRecord> records, int count)
-    {
-        List<ChatRecord> copy = [with(records.Count)];
-
-        for (var i = 0; i < count; i++)
-            copy.Add(records[i]);
-
-        return copy;
     }
 
     private static bool ReferencesSurvive(ChatRecord record, HashSet<string> survivingIds)
@@ -780,7 +732,7 @@ public static class ChatRecords
         if (records.Count == 0 || fromAt < 0 || fromAt >= messages.Count)
             return records;
 
-        Dictionary<string, int> indexById = IndexMap(messages);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(messages);
         List<ChatRecord>? kept = null;
 
         for (var i = 0; i < records.Count; i++)
@@ -792,19 +744,14 @@ public static class ChatRecords
                 && (afterIndex > fromAt || (afterIndex == fromAt && IsVariantActive(record, messages[fromAt])));
 
             if (drop)
-            {
-                kept ??= CopyPrefix(records, i);
-            }
+                kept ??= ChatEditing.CopyPrefix(records, i);
             else
-            {
                 kept?.Add(record);
-            }
         }
 
         return kept ?? records;
     }
 
-    /// <summary>Marks stale and clamps any replacement touched when the chat is remade or rolled back, dropping records whose messages are gone.</summary>
     internal static IReadOnlyList<ChatRecord> OnRolledBack(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatRecord> records, IReadOnlyList<ChatMessage> after, int? remadeAt = null)
     {
         if (records.Count == 0)
@@ -813,8 +760,8 @@ public static class ChatRecords
         if (after.Count == 0)
             return [];
 
-        Dictionary<string, int> indexById = IndexMap(before);
-        HashSet<string> survivingIds = CollectAllMessageIds(after);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(before);
+        HashSet<string> survivingIds = ChatEditing.CollectAllMessageIds(after);
         var keptCount = after.Count;
         var cutoff = remadeAt ?? keptCount;
         List<ChatRecord>? changed = null;
@@ -831,7 +778,7 @@ public static class ChatRecords
                     continue;
                 }
 
-                changed ??= CopyPrefix(records, i);
+                changed ??= ChatEditing.CopyPrefix(records, i);
 
                 if (first < keptCount)
                     changed.Add(record with { Replaces = [before[first].Id, after[Math.Min(last, keptCount - 1)].Id], Stale = true });
@@ -844,11 +791,11 @@ public static class ChatRecords
                     continue;
                 }
 
-                changed ??= CopyPrefix(records, i);
+                changed ??= ChatEditing.CopyPrefix(records, i);
             }
             else if (!ReferencesSurvive(record, survivingIds))
             {
-                changed ??= CopyPrefix(records, i);
+                changed ??= ChatEditing.CopyPrefix(records, i);
             }
             else
             {
@@ -859,14 +806,13 @@ public static class ChatRecords
         return changed ?? records;
     }
 
-    /// <summary>Keeps records belonging up to <paramref name="upToAt"/> for a branched chat, marking partial ranges stale and dropping future records.</summary>
     internal static IReadOnlyList<ChatRecord> OnBranchedUpTo(IReadOnlyList<ChatMessage> before, IReadOnlyList<ChatRecord> records, int upToAt, IReadOnlyList<ChatMessage> after)
     {
         if (records.Count == 0 || after.Count == 0)
             return [];
 
-        Dictionary<string, int> indexById = IndexMap(before);
-        HashSet<string> survivingIds = CollectAllMessageIds(after);
+        Dictionary<string, int> indexById = ChatEditing.IndexMap(before);
+        HashSet<string> survivingIds = ChatEditing.CollectAllMessageIds(after);
         var lastKeptId = after[^1].Id;
         List<ChatRecord> kept = [with(records.Count)];
 

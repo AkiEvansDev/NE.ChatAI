@@ -2,10 +2,6 @@ using NE.ChatAI.Controllers;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>
-/// A character's wide editor dialog: the card's head (<see cref="CardEditor"/>), its words, its first messages, its examples and the
-/// instructions of its own, each kept as it lets go of its value.
-/// </summary>
 internal static class CharacterView
 {
     public static UIDialog CreateDialog()
@@ -53,7 +49,6 @@ internal static class CharacterView
                 )
         );
 
-    /// <summary>The first messages in an accordion, the first line and delete in each header and a borderless ghost editor inside, a new chat opening with them as variants.</summary>
     private static StackPanelComponent CreateGreetings()
         => UILayout.Stack(12,
             new ItemsViewComponent()

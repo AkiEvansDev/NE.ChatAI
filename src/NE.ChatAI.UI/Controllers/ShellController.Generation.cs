@@ -13,16 +13,19 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>
-/// The generation panel: the active connection and the presets it names, and what of them is changed while chatting — the
-/// samplers, thinking, the context. Every change is written to its file as it lands, so the next reply is made with it.
-/// </summary>
+/// <summary>Generation side panel: active connection, presets, samplers, thinking toggle, and context length.</summary>
 internal abstract partial class ShellController
 {
     public const string CustomOptionGroup = "custom";
 
-    /// <summary>How long the panel waits for the server to say which model it runs; a server away is said, not waited for.</summary>
-    private static readonly TimeSpan ModelInfoTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ModelInfoTimeout = TimeSpan.FromSeconds(4);
+
+    public static IReadOnlyList<OptionItem> SeedModes { get; } =
+    [
+        new OptionItem { Id = nameof(Samplers.SeedMode.PerChat), Title = "chatai.seed.per-chat" },
+        new OptionItem { Id = nameof(Samplers.SeedMode.Random), Title = "chatai.seed.random" },
+        new OptionItem { Id = nameof(Samplers.SeedMode.Fixed), Title = "chatai.seed.fixed" }
+    ];
 
     private ActiveProfile? _profile;
 
@@ -56,14 +59,12 @@ internal abstract partial class ShellController
     [RecursiveMember]
     public partial string? SamplersId { get; set; }
 
-    /// <summary>What the server runs and the context it was started with, or that it does not answer.</summary>
     [RecursiveMember]
     public partial UIPhrase? ModelLine { get; set; }
 
     [RecursiveMember]
     public partial bool Thinking { get; set; }
 
-    /// <summary>Whether the format marks thoughts at all; a format that does not has nothing to turn on.</summary>
     [RecursiveMember]
     public partial bool ThinkingAvailable { get; set; }
 
@@ -94,23 +95,20 @@ internal abstract partial class ShellController
     [RecursiveMember]
     public partial string SeedMode { get; set; } = nameof(Samplers.SeedMode.PerChat);
 
-    /// <summary>The preset's fixed seed, which Fixed generates with.</summary>
     [RecursiveMember]
     public partial decimal SeedValue { get; set; }
 
     protected DataFolder Data => Context.Services.GetRequiredService<DataFolder>();
 
-    /// <summary>Reads the settings, the active connection and every preset into the panel, then asks the server about its model.</summary>
     protected async Task LoadGenerationAsync(CancellationToken cancellationToken)
     {
-        await LoadPresetsAsync(cancellationToken).ConfigureAwait(false);
+        await LoadPresetsAsync(runtimeActive: true, cancellationToken).ConfigureAwait(false);
 
         if (_profile?.Connection.Address is Uri address)
             Context.Runtime.Start(lifetime => DescribeModelAsync(address, lifetime));
     }
 
-    /// <summary>The panel's part that needs no server: the settings, the active connection and every preset.</summary>
-    protected async Task LoadPresetsAsync(CancellationToken cancellationToken)
+    protected async Task LoadPresetsAsync(bool runtimeActive, CancellationToken cancellationToken)
     {
         Fill(ConnectionOptions, await Data.Connections.ListAsync(cancellationToken).ConfigureAwait(false));
         Fill(FormatOptions, await Data.ModelFormats.ListAsync(cancellationToken).ConfigureAwait(false));
@@ -120,12 +118,7 @@ internal abstract partial class ShellController
 
         _profile = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false);
         Show(_profile);
-        OnProfileLoaded(_profile);
-    }
-
-    /// <summary>The active profile read afresh — at the start, or after the panel changed it; the page follows what it shows by it.</summary>
-    protected virtual void OnProfileLoaded(ActiveProfile? profile)
-    {
+        await OnProfileLoadedAsync(_profile, runtimeActive, cancellationToken).ConfigureAwait(false);
     }
 
     protected static void Fill<T>(RecursiveCollection<OptionItem> options, DocumentListing<T> listing)
@@ -211,12 +204,18 @@ internal abstract partial class ShellController
         SeedValue = Math.Max(0, samplers.Seed.Value);
     }
 
-    /// <summary>A job of the runtime's, off the page's turn: a server that is slow or away must not hold the panel.</summary>
+    protected virtual Task OnProfileLoadedAsync(ActiveProfile? profile, bool runtimeActive, CancellationToken cancellationToken)
+        => Task.CompletedTask;
+
     private async Task DescribeModelAsync(Uri address, CancellationToken lifetime)
     {
         (UIPhrase line, _, _) = await QueryModelAsync(address, lifetime).ConfigureAwait(false);
 
-        await Context.Runtime.InvokeAsync(() => ModelLine = line, lifetime).ConfigureAwait(false);
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            if (_profile?.Connection.Address == address)
+                ModelLine = line;
+        }, lifetime).ConfigureAwait(false);
     }
 
     private async Task<(UIPhrase Line, UIPhrase Toast, UIColorStyle Style)> QueryModelAsync(Uri address, CancellationToken cancellationToken)
@@ -248,11 +247,9 @@ internal abstract partial class ShellController
         }
     }
 
-    /// <summary>koboldcpp names the model <c>koboldcpp/&lt;file&gt;</c>; the file is the name.</summary>
     protected static string ShortModelName(string model)
         => model.StartsWith("koboldcpp/", StringComparison.Ordinal) ? model["koboldcpp/".Length..] : model;
 
-    /// <summary>Makes another connection the active one; its presets come with it.</summary>
     [UICommand]
     public async Task SelectConnectionAsync(CancellationToken cancellationToken)
     {
@@ -262,7 +259,6 @@ internal abstract partial class ShellController
         await LoadGenerationAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Asks the active connection's server for its model and context now, updating the panel's line and showing a notification.</summary>
     [UICommand]
     public Task<UICommandResult> CheckConnectionAsync(CancellationToken cancellationToken)
         => _profile?.Connection.Address is Uri address
@@ -281,7 +277,6 @@ internal abstract partial class ShellController
         return UICommandResult.Ok([new ShowNotificationEffect(toast, style)]);
     }
 
-    /// <summary>Points the active connection at the model format, system prompt, prompt and sampler presets chosen.</summary>
     [UICommand]
     public async Task SelectPresetsAsync(CancellationToken cancellationToken)
     {
@@ -292,7 +287,6 @@ internal abstract partial class ShellController
         await LoadGenerationAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Writes the panel's samplers into the active sampler preset.</summary>
     [UICommand]
     public async Task SaveSamplersAsync(CancellationToken cancellationToken)
     {
@@ -313,7 +307,6 @@ internal abstract partial class ShellController
         _profile = _profile with { Samplers = samplers };
     }
 
-    /// <summary>Turns the active model format's thinking on or off.</summary>
     [UICommand]
     public async Task SaveThinkingAsync(CancellationToken cancellationToken)
     {
@@ -326,7 +319,6 @@ internal abstract partial class ShellController
         _profile = _profile with { Format = format };
     }
 
-    /// <summary>Turns prepending speaker names on messages in the active prompt preset on or off.</summary>
     [UICommand]
     public async Task SaveIncludeNamesAsync(CancellationToken cancellationToken)
     {
@@ -339,7 +331,6 @@ internal abstract partial class ShellController
         _profile = _profile with { Prompt = prompt };
     }
 
-    /// <summary>Writes the active connection's context: the server's own, or the number given.</summary>
     [UICommand]
     public async Task SaveContextAsync(CancellationToken cancellationToken)
     {
@@ -351,12 +342,4 @@ internal abstract partial class ShellController
         await Data.Connections.WriteAsync(_profile.ConnectionId, connection, cancellationToken).ConfigureAwait(false);
         _profile = _profile with { Connection = connection };
     }
-
-    /// <summary>The seed rules in the order the panel offers them.</summary>
-    public static IReadOnlyList<OptionItem> SeedModes { get; } =
-    [
-        new OptionItem { Id = nameof(Samplers.SeedMode.PerChat), Title = "chatai.seed.per-chat" },
-        new OptionItem { Id = nameof(Samplers.SeedMode.Random), Title = "chatai.seed.random" },
-        new OptionItem { Id = nameof(Samplers.SeedMode.Fixed), Title = "chatai.seed.fixed" }
-    ];
 }

@@ -12,21 +12,18 @@ using NE.ChatAI.Connections;
 using NE.ChatAI.Hosting;
 using NE.ChatAI.Prompts;
 using NE.ChatAI.Samplers;
+using NE.ChatAI.Scenarios;
 using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>
-/// What the open chat is written with, from the composer's extras: its assembled prompt, its own author's note in a dialog, the
-/// persona it is written as picked from a list, and the reader's quick phrases, each inserted into the composer draft.
-/// </summary>
+/// <summary>Chat-level extras: assembled prompt viewer, chat author's note, per-chat background, persona switcher, and quick phrases.</summary>
 internal sealed partial class ChatController
 {
     public const string NoteDialogKey = "chatai-chat-note";
     public const string PromptDialogKey = "chatai-chat-prompt";
     public const string StageImageId = "chatai-stage-image";
 
-    /// <summary>The extras' entries for the chat itself, and the prefixes their lists' entries carry.</summary>
     public const string PromptAction = "prompt";
     public const string StageAction = "stage";
     public const string NoteAction = "note";
@@ -34,35 +31,26 @@ internal sealed partial class ChatController
     public const string PhrasesAction = "phrases";
     public const string PhrasePrefix = "phrase:";
     private const string PersonaPrefix = "persona:";
-
-    /// <summary>A phrase's entry shows this much of it.</summary>
     private const int PhraseShown = 48;
 
-    /// <summary>The open chat's own author's note, as its dialog edits it.</summary>
     [RecursiveMember]
     public partial string ChatNote { get; set; } = string.Empty;
 
-    /// <summary>The picture behind this chat alone; none, and it takes the character's or the application's.</summary>
     [RecursiveMember]
     public partial PictureSlot ChatBackground { get; set; } = new();
 
-    /// <summary>The character name shown on the sample message over the chat's background preview.</summary>
     [RecursiveMember]
     public partial string ChatBackgroundPreviewAuthor { get; set; } = AppName;
 
-    /// <summary>The character avatar shown on the sample message over the chat's background preview.</summary>
     [RecursiveMember]
     public partial string? ChatBackgroundPreviewAvatar { get; set; }
 
-    /// <summary>How many tokens and history messages the assembled prompt holds.</summary>
     [RecursiveMember]
     public partial UIPhrase? PromptSummary { get; set; }
 
-    /// <summary>The open chat's assembled prompt text, markers and all.</summary>
     [RecursiveMember]
     public partial string PromptText { get; set; } = string.Empty;
 
-    /// <summary>A page found again reads the personas, phrases, background and card presentation afresh.</summary>
     protected override async Task OnAttachedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)
     {
         await base.OnAttachedAsync(navigation, cancellationToken).ConfigureAwait(false);
@@ -70,24 +58,26 @@ internal sealed partial class ChatController
         await ShowChatListsAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// The extras' lists: every persona, the chat's own checked and named beside the entry (disabled unless there is another persona
-    /// to switch to); every phrase. An empty list's entry stands disabled.
-    /// </summary>
     private async Task ShowChatListsAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<string> savedPhrases = (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).Phrases;
+        List<StoredDocument<Scenario>> orderedScenarios = ScenarioExecutor.Order((await Data.Scenarios.ListAsync(cancellationToken).ConfigureAwait(false)).Items);
 
-        ShowPersonas();
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            ShowPersonas();
 
-        MenuItem phrases = ExtraOf(PhrasesAction);
-        phrases.Items.Clear();
+            MenuItem phrases = ExtraOf(PhrasesAction);
+            phrases.Items.Clear();
 
-        for (var i = 0; i < savedPhrases.Count; i++)
-            phrases.Items.Add(new MenuItem { Id = PhrasePrefix + i.ToString(CultureInfo.InvariantCulture), Title = Shortened(savedPhrases[i]), Value = UIPhrase.Text(savedPhrases[i]), IsContent = true });
+            for (var i = 0; i < savedPhrases.Count; i++)
+                phrases.Items.Add(new MenuItem { Id = PhrasePrefix + i.ToString(CultureInfo.InvariantCulture), Title = Shortened(savedPhrases[i]), Value = UIPhrase.Text(savedPhrases[i]), IsContent = true });
 
-        phrases.Enabled = phrases.Items.Count > 0 && _chat is not null;
-        await ShowScenarioMenuAsync(cancellationToken).ConfigureAwait(false);
+            phrases.Enabled = phrases.Items.Count > 0 && _chat is not null;
+            _knownScenarios = orderedScenarios;
+            RebuildScenarioMenu();
+            RefreshRealizedRecords();
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private void ShowPersonas()
@@ -106,7 +96,6 @@ internal sealed partial class ChatController
     private MenuItem ExtraOf(string id)
         => Extras.TryGet(id, out MenuItem? item) ? item : throw new InvalidOperationException($"Extras menu has no '{id}' entry.");
 
-    /// <summary>A phrase's first line, cut to what an entry shows.</summary>
     private static string Shortened(string phrase)
     {
         ReadOnlySpan<char> line = phrase.AsSpan().Trim();
@@ -118,7 +107,6 @@ internal sealed partial class ChatController
         return line.Length <= PhraseShown ? line.ToString() : string.Concat(line[..PhraseShown].TrimEnd(), "…");
     }
 
-    /// <summary>An extras entry for the chat itself: its statistics, its assembled prompt, its note's dialog, or a persona picked; none for any other.</summary>
     private async Task<UICommandResult?> ChatActionAsync(string action, CancellationToken cancellationToken)
     {
         if (action == StatisticsAction)
@@ -171,7 +159,7 @@ internal sealed partial class ChatController
         if (chat is null)
             return UICommandResult.Ok();
 
-        // Send the dialog open effect before building or counting the prompt so the UI opens immediately without waiting on I/O.
+        // Opens the dialog immediately before token counting runs.
         await Context.SendEffectsAsync([new OpenDialogEffect(PromptDialogKey)], cancellationToken).ConfigureAwait(false);
 
         ActiveProfile profile = await Profiles.LoadActiveAsync(Data, cancellationToken).ConfigureAwait(false)
@@ -185,7 +173,7 @@ internal sealed partial class ChatController
         if (profile.Connection.Address is not null)
             Context.Runtime.Start(lifetime => RefreshExactPromptAsync(profile, chat, totalHistory, lifetime));
 
-        return UICommandResult.Ok([new OpenDialogEffect(PromptDialogKey)]);
+        return UICommandResult.Ok();
     }
 
     private void ShowBuiltPrompt(BuiltPrompt built, int contextLength, int totalHistory)
@@ -209,14 +197,14 @@ internal sealed partial class ChatController
         KoboldCppClients clients = Context.Services.GetRequiredService<KoboldCppClients>();
         using IDisposable serverSlot = await clients.AcquireSlotAsync(address, cancellationToken).ConfigureAwait(false);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(1));
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
         KoboldCppClient kobold = clients.For(address);
         string? model;
         int contextLength;
 
         try
         {
-            model = await TryGetModelAsync(kobold, timeout.Token).ConfigureAwait(false);
+            model = await KoboldCppClients.TryGetModelNameAsync(kobold, timeout.Token).ConfigureAwait(false);
 
             if (model is null)
                 return;
@@ -263,71 +251,6 @@ internal sealed partial class ChatController
         return open ? UICommandResult.Ok([new OpenDialogEffect(NoteDialogKey)]) : UICommandResult.Ok();
     }
 
-    /// <summary>Keeps the chat's own author's note as it lets go of its value; an empty one is none.</summary>
-    [UICommand]
-    public async Task SaveChatNoteAsync(CancellationToken cancellationToken)
-    {
-        string? chatId = null;
-        Chat? changed = null;
-
-        await Context.Runtime.InvokeAsync(() =>
-        {
-            if (_chat is null)
-                return;
-
-            if (_generating)
-            {
-                ChatNote = (_chat.AuthorsNote ?? string.Empty).TrimEnd('\r', '\n');
-                return;
-            }
-
-            var note = ChatNote.TrimEnd('\r', '\n');
-            chatId = OpenChatId;
-            _chat = changed = _chat with { AuthorsNote = string.IsNullOrWhiteSpace(note) ? null : note };
-        }, cancellationToken).ConfigureAwait(false);
-
-        if (changed is not null && chatId is not null)
-            await Chats.WriteAsync(chatId, changed, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Takes in the picture the field just uploaded as the one behind this chat alone.</summary>
-    [UICommand]
-    public async Task SaveChatBackgroundAsync(CancellationToken cancellationToken)
-    {
-        if (OpenChatId is not string chatId || _chat is null || _generating || await TakePictureAsync(ChatBackground, cancellationToken).ConfigureAwait(false) is not var (content, contentType))
-            return;
-
-        var fileName = await ChatPictures.WriteAsync(Data, chatId, content, contentType, cancellationToken).ConfigureAwait(false);
-        _chat = _chat with { Background = fileName };
-        await Chats.WriteAsync(chatId, _chat, cancellationToken).ConfigureAwait(false);
-        ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
-        RefreshVisuals();
-    }
-
-    /// <summary>Takes the chat's own background away; the chat stands on the character's or the application's.</summary>
-    [UICommand]
-    public async Task RemoveChatBackgroundAsync(CancellationToken cancellationToken)
-    {
-        if (OpenChatId is not string chatId || _chat is null || _generating)
-            return;
-
-        ChatPictures.Delete(Data, chatId);
-        _chat = _chat with { Background = null };
-        await Chats.WriteAsync(chatId, _chat, cancellationToken).ConfigureAwait(false);
-        ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
-        RefreshVisuals();
-    }
-
-    /// <summary>Hides the stage pane for the current session; the stage entry in <see cref="Extras"/> brings it back.</summary>
-    [UICommand]
-    public async Task HideStageAsync(CancellationToken cancellationToken)
-        => await Context.Runtime.InvokeAsync(() =>
-        {
-            _stageHiddenByUser = true;
-            RefreshVisuals();
-        }, cancellationToken).ConfigureAwait(false);
-
-    /// <summary>The chat written as another persona from now on: the reader's messages read again under its name and picture.</summary>
     private async Task<UICommandResult> ChoosePersonaAsync(string personaId, CancellationToken cancellationToken)
     {
         Persona? persona = Slug.IsValidId(personaId) ? await Data.Personas.ReadAsync(personaId, cancellationToken).ConfigureAwait(false) : null;
@@ -361,4 +284,100 @@ internal sealed partial class ChatController
 
         return UICommandResult.Ok();
     }
+
+    [UICommand]
+    public async Task SaveChatNoteAsync(CancellationToken cancellationToken)
+    {
+        string? chatId = null;
+        Chat? changed = null;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            if (_chat is null)
+                return;
+
+            if (_generating)
+            {
+                ChatNote = (_chat.AuthorsNote ?? string.Empty).TrimEnd('\r', '\n');
+                return;
+            }
+
+            var note = ChatNote.TrimEnd('\r', '\n');
+            chatId = OpenChatId;
+            _chat = changed = _chat with { AuthorsNote = string.IsNullOrWhiteSpace(note) ? null : note };
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (changed is not null && chatId is not null)
+            await Chats.WriteAsync(chatId, changed, cancellationToken).ConfigureAwait(false);
+    }
+
+    [UICommand]
+    public async Task SaveChatBackgroundAsync(CancellationToken cancellationToken)
+    {
+        string? chatId = null;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            if (!_generating && _chat is not null)
+                chatId = OpenChatId;
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (chatId is null || await TakePictureAsync(ChatBackground, cancellationToken).ConfigureAwait(false) is not var (content, contentType))
+            return;
+
+        var fileName = await ChatPictures.WriteAsync(Data, chatId, content, contentType, cancellationToken).ConfigureAwait(false);
+        Chat? changed = null;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            if (_generating || _chat is null || OpenChatId != chatId)
+                return;
+
+            _chat = changed = _chat with { Background = fileName };
+            ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
+            RefreshVisuals();
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (changed is not null)
+            await Chats.WriteAsync(chatId, changed, cancellationToken).ConfigureAwait(false);
+    }
+
+    [UICommand]
+    public async Task RemoveChatBackgroundAsync(CancellationToken cancellationToken)
+    {
+        string? chatId = null;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            if (!_generating && _chat is not null)
+                chatId = OpenChatId;
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (chatId is null)
+            return;
+
+        ChatPictures.Delete(Data, chatId);
+        Chat? changed = null;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            if (_generating || _chat is null || OpenChatId != chatId)
+                return;
+
+            _chat = changed = _chat with { Background = null };
+            ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
+            RefreshVisuals();
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (changed is not null)
+            await Chats.WriteAsync(chatId, changed, cancellationToken).ConfigureAwait(false);
+    }
+
+    [UICommand]
+    public async Task HideStageAsync(CancellationToken cancellationToken)
+        => await Context.Runtime.InvokeAsync(() =>
+        {
+            _stageHiddenByUser = true;
+            RefreshVisuals();
+        }, cancellationToken).ConfigureAwait(false);
 }

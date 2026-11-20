@@ -8,10 +8,11 @@ using NE.ChatAI.Connections;
 using NE.ChatAI.Import;
 using NE.ChatAI.Prompts;
 using NE.ChatAI.Samplers;
+using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Controllers;
 
-/// <summary>What one imported file became: the file's name and a phrase saying it, one line per document made.</summary>
+/// <summary>Result line for one imported file on <c>/settings</c>.</summary>
 internal sealed partial class ImportLine : RecursiveObservable, IBindableItem
 {
     [RecursiveMember(false)]
@@ -24,13 +25,9 @@ internal sealed partial class ImportLine : RecursiveObservable, IBindableItem
     public partial UIPhrase? Result { get; set; }
 }
 
-/// <summary>
-/// The import and export: ChatAI archives (<c>.zip</c>) and SillyTavern's files dropped or picked — character cards (PNG or JSON)
-/// and preset files — each taken into the data folder as the documents it holds, and a <c>.zip</c> archive downloaded by scope.
-/// </summary>
+/// <summary>Import, archive export, and built-in defaults restoration on <c>/settings</c>.</summary>
 internal sealed partial class SettingsController
 {
-    /// <summary>An archive with cards and backgrounds, a card or a preset file.</summary>
     public const long MaxImportBytes = 64 * 1024 * 1024;
 
     [RecursiveMember]
@@ -48,7 +45,6 @@ internal sealed partial class SettingsController
     [RecursiveMember]
     public partial bool ExportChats { get; set; } = true;
 
-    /// <summary>Takes in every file of the selection the field just uploaded.</summary>
     [UICommand]
     public async Task ImportAsync(CancellationToken cancellationToken)
     {
@@ -122,7 +118,7 @@ internal sealed partial class SettingsController
 
         try
         {
-            using JsonDocument json = JsonDocument.Parse(content);
+            using JsonDocument json = JsonDocument.Parse(DocumentJson.StripBom(content).ToArray());
             presets = SillyTavernImport.ReadPresets(json.RootElement, Path.GetFileNameWithoutExtension(file.FileName));
         }
         catch (JsonException)
@@ -152,30 +148,29 @@ internal sealed partial class SettingsController
         }
 
         if (summary.Settings || summary.Presets > 0)
-            Report(file, UIPhrase.Of("chatai.import.archive.settings", ("count", summary.Presets.ToString(CultureInfo.InvariantCulture))));
+            Report(file, UIPhrase.Of("chatai.import.archive.settings", ("count", summary.Presets)));
 
         if (summary.Characters > 0 || summary.Personas > 0 || summary.Worlds > 0)
         {
             Report(file, UIPhrase.Of(
                 "chatai.import.archive.content",
-                ("characters", summary.Characters.ToString(CultureInfo.InvariantCulture)),
-                ("personas", summary.Personas.ToString(CultureInfo.InvariantCulture)),
-                ("worlds", summary.Worlds.ToString(CultureInfo.InvariantCulture))
+                ("characters", summary.Characters),
+                ("personas", summary.Personas),
+                ("worlds", summary.Worlds)
             ));
         }
 
         if (summary.Chats > 0)
-            Report(file, UIPhrase.Of("chatai.import.archive.chats", ("count", summary.Chats.ToString(CultureInfo.InvariantCulture))));
+            Report(file, UIPhrase.Of("chatai.import.archive.chats", ("count", summary.Chats)));
 
         return summary.Settings || summary.Presets > 0;
     }
 
-    /// <summary>A card's JSON names its spec, or carries the V1 fields a preset never has.</summary>
     private static bool LooksLikeCard(byte[] content)
     {
         try
         {
-            using JsonDocument json = JsonDocument.Parse(content);
+            using JsonDocument json = JsonDocument.Parse(DocumentJson.StripBom(content).ToArray());
             JsonElement root = json.RootElement;
 
             return root.ValueKind == JsonValueKind.Object && (root.TryGetProperty("spec", out _) || root.TryGetProperty("first_mes", out _));
@@ -201,7 +196,6 @@ internal sealed partial class SettingsController
         }
     }
 
-    /// <summary>Keeps each part a preset file held as a document of its own; a reasoning template alone goes into the format edited.</summary>
     private async Task ImportPresetsAsync(UIUploadFile file, SillyTavernPresets presets, CancellationToken cancellationToken)
     {
         if (presets.ModelFormat is ModelFormat format)
@@ -232,7 +226,6 @@ internal sealed partial class SettingsController
             await ImportThoughtAsync(file, thought, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>A reasoning template alone: its markers go into the format the editor shows, keeping whether thinking is on.</summary>
     private async Task ImportThoughtAsync(UIUploadFile file, ThoughtFormat thought, CancellationToken cancellationToken)
     {
         if (Format.Id is not string formatId || await Data.ModelFormats.ReadAsync(formatId, cancellationToken).ConfigureAwait(false) is not ModelFormat edited)
@@ -245,7 +238,6 @@ internal sealed partial class SettingsController
         Report(file, UIPhrase.Of("chatai.import.thought", ("name", edited.Name)));
     }
 
-    /// <summary>Packs the selected parts of the data folder into a <c>.zip</c> archive and sends it to the browser.</summary>
     [UICommand]
     public async Task<UICommandResult> ExportAsync(CancellationToken cancellationToken)
     {
@@ -271,24 +263,13 @@ internal sealed partial class SettingsController
         return UICommandResult.Ok();
     }
 
-    /// <summary>The base set of presets the application comes with, those the data folder lacks laid down again; the count said.</summary>
     [UICommand]
     public async Task<UICommandResult> LayDownDefaultsAsync(CancellationToken cancellationToken)
     {
         var written = await ApplyDefaultsAsync(overwrite: false, cancellationToken).ConfigureAwait(false);
-        UIPhrase said = written == 0 ? new UIPhrase("chatai.import.defaults.none") : UIPhrase.Of("chatai.import.defaults.added", ("count", written.ToString(CultureInfo.InvariantCulture)));
+        UIPhrase said = written == 0 ? new UIPhrase("chatai.import.defaults.none") : UIPhrase.Of("chatai.import.defaults.added", ("count", written));
 
         return UICommandResult.Ok([new ShowNotificationEffect(said, UIColorStyle.Success)]);
-    }
-
-    /// <summary>Overwrites every built-in document in the data folder with the base set's original version; user-created documents stay as they are.</summary>
-    [UICommand]
-    public async Task<UICommandResult> RestoreDefaultsAsync(CancellationToken cancellationToken)
-    {
-        var written = await ApplyDefaultsAsync(overwrite: true, cancellationToken).ConfigureAwait(false);
-        UIPhrase said = UIPhrase.Of("chatai.import.defaults.restored", ("count", written.ToString(CultureInfo.InvariantCulture)));
-
-        return UICommandResult.Ok([new CloseDialogEffect(RestoreDefaultsDialogKey), new ShowNotificationEffect(said, UIColorStyle.Success)]);
     }
 
     private async Task<int> ApplyDefaultsAsync(bool overwrite, CancellationToken cancellationToken)
@@ -299,8 +280,21 @@ internal sealed partial class SettingsController
         await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var kind in Kinds)
-            await EditorOf(kind).ShowAsync(cancellationToken).ConfigureAwait(false);
+        {
+            IDocumentEditor editor = EditorOf(kind);
+            editor.Choose(editor.Id);
+            await editor.ShowAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         return written;
+    }
+
+    [UICommand]
+    public async Task<UICommandResult> RestoreDefaultsAsync(CancellationToken cancellationToken)
+    {
+        var written = await ApplyDefaultsAsync(overwrite: true, cancellationToken).ConfigureAwait(false);
+        UIPhrase said = UIPhrase.Of("chatai.import.defaults.restored", ("count", written));
+
+        return UICommandResult.Ok([new CloseDialogEffect(RestoreDefaultsDialogKey), new ShowNotificationEffect(said, UIColorStyle.Success)]);
     }
 }

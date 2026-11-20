@@ -5,29 +5,19 @@ using NE.ChatAI.Controllers;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>
-/// The chats panel's body: the characters, the personas or the worlds, switched between at its top — a search over their names with a new one
-/// beside it, their tags to narrow by, each row its picture, its name, its tags as badges and its actions — or, a character picked, that
-/// character with its chats, a new chat and its editor dialog beside its name.
-/// </summary>
 internal static class ChatsPanel
 {
-    /// <summary>Matches a card's name plus one row of tag badges (24 + 4 + 16), so rows with and without tags keep the same height.</summary>
+    // Matches a card's name plus one row of tag badges (24 + 4 + 16), keeping rows uniform with or without tags.
     private const double AvatarSize = 44;
     private const double HeaderAvatarSize = 34;
     public const string SearchId = "chatai-card-search";
     public const string TagFilterId = "chatai-tag-filter";
     private const string ListSwitchId = "chatai-list-switch";
 
-    /// <summary>The panel's heading: the card list switch, or the picked character's back button, avatar and name.</summary>
     public static StackPanelComponent CreateHeading()
-        => new StackPanelComponent()
-            .SetOrientation(UIOrientation.Vertical)
-            .SetSpacing(0)
+        => UILayout.Stack(0, CreateListSwitch(), CreateCharacterTitle())
             .SetMinHeight(UILayoutLength.Absolute(HeaderAvatarSize))
-            .SetGlyphEdge(UIAlignment.Start)
-            .AddChild(CreateListSwitch())
-            .AddChild(CreateCharacterTitle());
+            .SetGlyphEdge(UIAlignment.Start);
 
     private static ButtonGroupComponent CreateListSwitch()
         => new ButtonGroupComponent(ListSwitchId)
@@ -43,24 +33,21 @@ internal static class ChatsPanel
             .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility);
 
     private static StackPanelComponent CreateCharacterTitle()
-        => new StackPanelComponent()
-            .SetOrientation(UIOrientation.Horizontal)
+        => UILayout.Row(8,
+                UIIconButtons.Back().SetSize(UISize.Small).SetVerticalAlignment(UIAlignment.Center).OnClick(nameof(ShellController.ShowCharacterList)),
+                Avatar<ShellController>(static x => x.PanelCharacter.Avatar, UIBindingScope.Root, HeaderAvatarSize),
+                new TextComponent()
+                    .BindTitle<ShellController>(static x => x.PanelCharacter.Name)
+                    .BindTooltip<ShellController>(static x => x.PanelCharacter.Name)
+                    .SetTooltipPlain(true)
+                    .AsContent(TextComponent.TitleProperty, ITooltipComponent.TooltipProperty)
+                    .AsSubtitle()
+                    .SetVerticalAlignment(UIAlignment.Center)
+            )
             .SetMinHeight(UILayoutLength.Absolute(HeaderAvatarSize))
             .SetGlyphEdge(UIAlignment.Start)
-            .SetSpacing(8)
-            .AddChild(UIIconButtons.Back().SetSize(UISize.Small).SetVerticalAlignment(UIAlignment.Center).OnClick(nameof(ShellController.ShowCharacterList)))
-            .AddChild(Avatar<ShellController>(static x => x.PanelCharacter.Avatar, UIBindingScope.Root, HeaderAvatarSize))
-            .AddChild(new TextComponent()
-                .BindTitle<ShellController>(static x => x.PanelCharacter.Name)
-                .BindTooltip<ShellController>(static x => x.PanelCharacter.Name)
-                .SetTooltipPlain(true)
-                .AsContent(TextComponent.TitleProperty, ITooltipComponent.TooltipProperty)
-                .AsSubtitle()
-                .SetVerticalAlignment(UIAlignment.Center)
-            )
             .BindVisibility<ShellController>(static x => x.ChatsPanes.DetailVisibility);
 
-    /// <summary>A card's picture in a circle, the person's glyph for one with none.</summary>
     private static ImageComponent Avatar<TSource>(Expression<Func<TSource, object?>> source, UIBindingScope scope, double size = AvatarSize)
         => new ImageComponent()
             .BindSource(source, scope)
@@ -70,7 +57,6 @@ internal static class ChatsPanel
             .SetWidth(UILayoutLength.Absolute(size))
             .SetVerticalAlignment(UIAlignment.Center);
 
-    /// <summary>The search field and embedded tag filter and card creation button, shown over the card lists.</summary>
     public static TextInputComponent CreateSearch()
         => new TextInputComponent(SearchId)
             .SetSearch()
@@ -79,7 +65,6 @@ internal static class ChatsPanel
             .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ShellController.AskCreateCard)))
             .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility);
 
-    /// <summary>The tag filter menu inside the search field, showing each tag as its badge and the active count on the button.</summary>
     private static MultiSelectComponent CreateTagFilter()
         => new MultiSelectComponent(TagFilterId)
             .SetVariant(UIMultiSelectVariant.Button)
@@ -116,18 +101,17 @@ internal static class ChatsPanel
             .SetTemplate(CreateCardRow(showEdit))
             .ShownWhen(ListSwitchId, ButtonGroupComponent.SelectedKeyProperty, UIComparisonOperator.Equal, listKey);
 
-    /// <summary>The card's picture, its name — the default persona or active card marked beside it — under the name its tags, and its row actions at the end.</summary>
-    /// <remarks>A plain row, not a <see cref="UISurfaceStyle.Background"/> surface: on the panel's own fill a framed row read worse.</remarks>
     private static ContainerComponent CreateCardRow(bool showEdit)
     {
+        ButtonComponent delete = UIIconButtons.Delete()
+            .SetSize(UISize.Small)
+            .OnClick(nameof(ShellController.AskDeletePanelCard), UIAction.ArgCurrentItemKey("cardId"));
         StackPanelComponent actions = showEdit
             ? UILayout.Row(4,
                 UIIconButtons.Edit().SetSize(UISize.Small).OnClick(nameof(ShellController.EditPanelCardAsync), UIAction.ArgCurrentItemKey("cardId")),
-                UIIconButtons.Delete().SetSize(UISize.Small).OnClick(nameof(ShellController.AskDeletePanelCard), UIAction.ArgCurrentItemKey("cardId"))
+                delete
             )
-            : UILayout.Row(4,
-                UIIconButtons.Delete().SetSize(UISize.Small).OnClick(nameof(ShellController.AskDeletePanelCard), UIAction.ArgCurrentItemKey("cardId"))
-            );
+            : UILayout.Row(4, delete);
 
         return new ContainerComponent()
             .SetColumn(1, UIGridUnit.Auto())
@@ -169,7 +153,6 @@ internal static class ChatsPanel
             );
     }
 
-    /// <summary>A tag in its own colour, in the body's letters rather than a label's capitals.</summary>
     private static BadgeComponent CreateTagBadge()
         => new BadgeComponent()
             .SetVariant(UIBadgeVariant.Surface)
@@ -177,7 +160,6 @@ internal static class ChatsPanel
             .BindTitle<TagBadge>(static x => x.Text, UIBindingScope.Relative)
             .BindColor<TagBadge>(static x => x.Color, UIBindingScope.Relative);
 
-    /// <summary>The character's chats under the fixed panel header, each with its delete button.</summary>
     private static ItemsViewComponent CreateCharacterChats()
         => new ItemsViewComponent("chatai-chat-list")
             .SetVerticalScroll(UIScrollMode.Disabled)
@@ -192,24 +174,18 @@ internal static class ChatsPanel
             .OnItemClick(nameof(ShellController.OpenPanelChatAsync), UIAction.ArgCurrentItemKey("chatId"));
 
     private static ContainerComponent CreateChatRow()
-        => new ContainerComponent()
-            .SetColumn(24, UIGridUnit.Auto())
-            .SetPadding(UIThickness.Symmetric(0, 2))
-            .AddChild(new TextComponent()
-                .AsBody()
-                .BindTitle<MenuItem>(static x => x.Title, UIBindingScope.Relative)
-                .BindDescription<MenuItem>(static x => x.Description, UIBindingScope.Relative)
-                .SetVerticalAlignment(UIAlignment.Center)
-                .SetPlacement(1, 1, 23, 1)
+        => UILayout.Ends(
+                new TextComponent()
+                    .AsBody()
+                    .SetDescriptionPlain(true)
+                    .BindTitle<MenuItem>(static x => x.Title, UIBindingScope.Relative)
+                    .BindDescription<MenuItem>(static x => x.Description, UIBindingScope.Relative),
+                UIIconButtons.Delete()
+                    .SetSize(UISize.Small)
+                    .OnClick(nameof(ShellController.AskDeleteChat), UIAction.ArgCurrentItemKey("chatId"))
             )
-            .AddChild(UIIconButtons.Delete()
-                .SetSize(UISize.Small)
-                .OnClick(nameof(ShellController.AskDeleteChat), UIAction.ArgCurrentItemKey("chatId"))
-                .SetVerticalAlignment(UIAlignment.Center)
-                .SetPlacement(24, 1, 1, 1)
-            );
+            .SetPadding(UIThickness.Symmetric(0, 2));
 
-    /// <summary>The character chat actions standing before Pin and Close in the drawer header.</summary>
     public static IVisualComponent[] CreateActions()
         =>
         [
@@ -223,7 +199,6 @@ internal static class ChatsPanel
                 .BindVisibility<ShellController>(static x => x.ChatsPanes.DetailVisibility)
         ];
 
-    /// <summary>The card creation and editor dialogs, tag dialogs, and deletion confirmation dialogs hosted on the shell.</summary>
     public static IReadOnlyList<UIDialog> CreateDialogs()
         =>
         [
@@ -233,7 +208,7 @@ internal static class ChatsPanel
                 null,
                 new TextInputComponent()
                     .SetTitle("chatai.card.name")
-                    .BindValue<ShellController>(static x => x.NewCardName),
+                    .BindValue<ShellController>(static x => x.NewCardName, mode: UIBindingMode.OnSubmit),
                 UIButtons.Primary("chatai.card.create").OnClick(nameof(ShellController.CreateCardAsync))
             ),
             CharacterView.CreateDialog(),
@@ -248,13 +223,13 @@ internal static class ChatsPanel
                     .SetPlaceholder("happy")
                     .AsContent(TextInputComponent.PlaceholderProperty)
                     .SetAutocomplete(UIAutocomplete.Off)
-                    .BindValue<ShellController>(static x => x.GalleryTagInput),
+                    .BindValue<ShellController>(static x => x.GalleryTagInput, mode: UIBindingMode.OnSubmit),
                 UIButtons.Primary(UIStandardAction.Save).OnClick(nameof(ShellController.SaveGalleryTagAsync))
             ),
             .. CardEditor.CreateTagsDialogs(),
-            UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteCharacterDialogKey, "chatai.character.delete.title", static x => x.DeleteCardQuestion, "chatai.character.delete", nameof(ShellController.DeletePanelCardAsync)),
-            UIDialogs.BoundConfirm<ShellController>(ShellController.DeletePersonaDialogKey, "chatai.persona.delete.title", static x => x.DeleteCardQuestion, "chatai.persona.delete", nameof(ShellController.DeletePanelCardAsync)),
-            UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteWorldDialogKey, "chatai.world.delete.title", static x => x.DeleteCardQuestion, "chatai.world.delete", nameof(ShellController.DeletePanelCardAsync)),
-            UIDialogs.Confirm(ShellController.DeleteChatDialogKey, "chatai.chat.delete-chat.title", (UIPhrase?)"chatai.chat.delete-chat.question", "chatai.chat.delete-chat", nameof(ShellController.DeletePanelChatAsync))
+            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeleteCharacterDialogKey, "chatai.character.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
+            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeletePersonaDialogKey, "chatai.persona.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
+            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeleteWorldDialogKey, "chatai.world.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
+            ShellView.ConfirmDialog(ShellController.DeleteChatDialogKey, "chatai.chat.delete-chat.title", "chatai.chat.delete-chat.question", UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelChatAsync))
         ];
 }

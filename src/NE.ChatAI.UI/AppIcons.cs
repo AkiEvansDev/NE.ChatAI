@@ -3,7 +3,6 @@ using System.Reflection;
 
 namespace NE.ChatAI;
 
-/// <summary>The glyphs the application draws, named for what they stand for; the platform registers exactly these.</summary>
 internal static class AppIcons
 {
     public const string Chats = MaterialIcons.Forum;
@@ -30,7 +29,6 @@ internal static class AppIcons
     public const string Gallery = MaterialIcons.PhotoLibrary;
     public const string Stage = MaterialIcons.Image;
     public const string Plugins = MaterialIcons.Extension;
-    public const string Key = MaterialIcons.Key;
     public const string Context = MaterialIcons.DataUsage;
     public const string TriggerMatch = MaterialIcons.ManageSearch;
     public const string Cue = MaterialIcons.Lightbulb;
@@ -40,7 +38,6 @@ internal static class AppIcons
     public static string Outline(string icon)
         => MaterialIcons.Outlined(icon);
 
-    /// <summary>Every glyph above, filled and outlined, for the host's registration.</summary>
     public static string[] All()
     {
         List<string> icons = [];

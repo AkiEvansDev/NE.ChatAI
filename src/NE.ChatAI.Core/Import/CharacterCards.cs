@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using NE.ChatAI.Characters;
+using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Import;
 
@@ -37,8 +38,7 @@ public sealed class CardFormatException : Exception
 /// <summary>Character cards V1, V2 and V3 — a PNG carrying the card in a text chunk (<c>ccv3</c> before <c>chara</c>), or its JSON.</summary>
 public static class CharacterCards
 {
-    /// <summary>The card in <paramref name="file"/>, a PNG or JSON.</summary>
-    /// <exception cref="CardFormatException">The file holds no card.</exception>
+    /// <summary>Reads the V1–V3 character card embedded in <paramref name="file"/> (PNG or UTF-8 JSON).</summary>
     public static CharacterCard Read(ReadOnlySpan<byte> file)
     {
         if (!PngText.IsPng(file))
@@ -46,8 +46,10 @@ public static class CharacterCards
 
         IReadOnlyDictionary<string, string> texts = PngText.Read(file);
 
-        // A V3 card keeps a V2 copy beside it for older readers; the V3 one is the card.
-        var encoded = texts.GetValueOrDefault("ccv3") ?? texts.GetValueOrDefault("chara") ?? throw new CardFormatException("The picture carries no character card.");
+        // A V3 card keeps a V2 copy beside it for older readers; prefer ccv3 when non-empty.
+        var encoded = NonEmpty(texts.GetValueOrDefault("ccv3"))
+            ?? NonEmpty(texts.GetValueOrDefault("chara"))
+            ?? throw new CardFormatException("The picture carries no character card.");
         byte[] json;
 
         try
@@ -62,13 +64,16 @@ public static class CharacterCards
         return ReadJson(json);
     }
 
+    private static string? NonEmpty(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value;
+
     private static CharacterCard ReadJson(ReadOnlySpan<byte> json)
     {
         JsonDocument document;
 
         try
         {
-            document = JsonDocument.Parse(Encoding.UTF8.GetString(json));
+            document = JsonDocument.Parse(Encoding.UTF8.GetString(DocumentJson.StripBom(json)));
         }
         catch (JsonException exception)
         {

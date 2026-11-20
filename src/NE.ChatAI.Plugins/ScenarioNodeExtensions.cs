@@ -6,7 +6,7 @@ namespace NE.ChatAI.Plugins;
 /// <summary>Typed helpers for resolving scenario services from <see cref="UINodeRunContext"/> inside plugin nodes.</summary>
 public static class ScenarioNodeExtensions
 {
-    private static readonly HttpClient FallbackHttp = new(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }, disposeHandler: false);
+    private static readonly SocketsHttpHandler FallbackHandler = new() { PooledConnectionLifetime = TimeSpan.FromMinutes(2) };
 
     /// <summary>Resolves the active <see cref="IScenarioContext"/> for <paramref name="context"/>.</summary>
     public static IScenarioContext GetScenarioContext(this UINodeRunContext context)
@@ -35,11 +35,11 @@ public static class ScenarioNodeExtensions
             ?? throw new UINodeFailureException("Scenario media storage is not available in this run.");
     }
 
-    /// <summary>Creates or retrieves a pooled <see cref="HttpClient"/> from the host without exhausting sockets.</summary>
+    /// <summary>Creates an <see cref="HttpClient"/> backed by a pooled handler safe for the caller to dispose or configure.</summary>
     public static HttpClient CreateHttpClient(this UINodeRunContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return context.Services?.GetService(typeof(HttpClient)) as HttpClient ?? FallbackHttp;
+        return context.Services?.GetService(typeof(HttpClient)) as HttpClient ?? new HttpClient(FallbackHandler, disposeHandler: false);
     }
 }

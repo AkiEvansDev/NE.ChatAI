@@ -1,16 +1,18 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Threading;
 
 namespace NE.ChatAI.Plugins;
 
-/// <summary>
-/// Collectible load context for one installed plugin version. Host and framework assemblies unify to <see cref="AssemblyLoadContext.Default"/>;
-/// plugin-private assemblies are read into memory so no <c>.dll</c> file on disk is locked during hot-updates or uninstalls.
-/// </summary>
+/// <summary>Collectible load context for one plugin version; unifies host assemblies to <see cref="AssemblyLoadContext.Default"/> and preloads plugin binaries into memory.</summary>
 internal sealed class PluginLoadContext(string name, string pluginDirectory) : AssemblyLoadContext(name, isCollectible: true)
 {
+    private readonly Lock _sync = new();
+    private readonly Dictionary<string, (byte[] Assembly, byte[]? Symbols)> _packagedAssemblies = [with(StringComparer.OrdinalIgnoreCase)];
+
     public Assembly LoadEntryAssembly(string entryFileName)
     {
         var fullPath = Path.GetFullPath(Path.Combine(pluginDirectory, entryFileName));
@@ -19,18 +21,47 @@ internal sealed class PluginLoadContext(string name, string pluginDirectory) : A
         if (!fullPath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase) || !File.Exists(fullPath))
             throw new FileNotFoundException($"Entry assembly '{entryFileName}' was not found in the plugin package.", entryFileName);
 
-        return LoadFromMemory(fullPath);
+        PreloadSecondaryAssemblies(fullPath);
+
+        return LoadImage(ReadAssemblyImage(fullPath));
     }
 
-    private Assembly LoadFromMemory(string dllPath)
+    private void PreloadSecondaryAssemblies(string entryFullPath)
+    {
+        var files = Directory.GetFiles(pluginDirectory, "*.dll", SearchOption.TopDirectoryOnly);
+
+        lock (_sync)
+        {
+            for (var i = 0; i < files.Length; i++)
+            {
+                var dllPath = Path.GetFullPath(files[i]);
+
+                if (string.Equals(dllPath, entryFullPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var simpleName = Path.GetFileNameWithoutExtension(dllPath);
+
+                if (simpleName.Length > 0 && !_packagedAssemblies.ContainsKey(simpleName))
+                    _packagedAssemblies[simpleName] = ReadAssemblyImage(dllPath);
+            }
+        }
+    }
+
+    private static (byte[] Assembly, byte[]? Symbols) ReadAssemblyImage(string dllPath)
     {
         var assemblyBytes = File.ReadAllBytes(dllPath);
-        using MemoryStream assemblyStream = new(assemblyBytes, writable: false);
         var pdbPath = Path.ChangeExtension(dllPath, ".pdb");
+        var pdbBytes = File.Exists(pdbPath) ? File.ReadAllBytes(pdbPath) : null;
 
-        if (File.Exists(pdbPath))
+        return (assemblyBytes, pdbBytes);
+    }
+
+    private Assembly LoadImage((byte[] Assembly, byte[]? Symbols) image)
+    {
+        using MemoryStream assemblyStream = new(image.Assembly, writable: false);
+
+        if (image.Symbols is byte[] pdbBytes)
         {
-            var pdbBytes = File.ReadAllBytes(pdbPath);
             using MemoryStream pdbStream = new(pdbBytes, writable: false);
 
             return LoadFromStream(assemblyStream, pdbStream);
@@ -50,8 +81,25 @@ internal sealed class PluginLoadContext(string name, string pluginDirectory) : A
                 return loaded;
         }
 
-        var localDll = Path.Combine(pluginDirectory, simpleName + ".dll");
+        try
+        {
+            return Default.LoadFromAssemblyName(assemblyName);
+        }
+        catch (FileNotFoundException)
+        {
+        }
+        catch (FileLoadException)
+        {
+        }
 
-        return File.Exists(localDll) ? LoadFromMemory(localDll) : null;
+        (byte[] Assembly, byte[]? Symbols) image;
+
+        lock (_sync)
+        {
+            if (!_packagedAssemblies.Remove(simpleName, out image))
+                return null;
+        }
+
+        return LoadImage(image);
     }
 }

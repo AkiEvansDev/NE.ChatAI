@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -52,10 +53,22 @@ internal static class ScenarioCatalog
 
     public static UINodeCatalog BuiltIn { get; } = UINodeCatalog.FromTypes([.. BuiltInTypes]);
 
+    public static FrozenSet<string> BuiltInKeys { get; } = BuildBuiltInKeys();
+
     public static UINodeCatalog Instance => BuiltIn;
 
     public static UINodeCatalog Resolve(IServiceProvider? services)
         => services?.GetService(typeof(Plugins.PluginManager)) is Plugins.PluginManager plugins ? plugins.Catalog : BuiltIn;
+
+    private static FrozenSet<string> BuildBuiltInKeys()
+    {
+        HashSet<string> keys = [with(StringComparer.Ordinal)];
+
+        for (var i = 0; i < BuiltIn.Types.Count; i++)
+            _ = keys.Add(BuiltIn.Types[i].Key);
+
+        return keys.ToFrozenSet(StringComparer.Ordinal);
+    }
 }
 
 /// <summary>Reads the system prompt of the chat's active connection.</summary>
@@ -71,8 +84,8 @@ internal sealed class PromptNode : IGraphNode
         => Prompt = ScenarioRunScope.From(context).ActiveProfile?.SystemPrompt.Content ?? string.Empty;
 }
 
-/// <summary>Reads the chat's persona: its structured card, name and text.</summary>
-[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Persona", Description = "The chat's persona: its name and description.", Icon = AppIcons.Persona, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
+/// <summary>Reads the chat's persona: its structured card, name, text, and tags.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Persona", Description = "The chat's persona: its name, description, and tags.", Icon = AppIcons.Persona, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
 internal sealed class PersonaNode : IGraphNode
 {
     public const string NodeKey = "chat.persona";
@@ -99,8 +112,8 @@ internal sealed class PersonaNode : IGraphNode
     }
 }
 
-/// <summary>Reads the chat's character: its card, name and author's note.</summary>
-[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Character", Description = "The chat's character: its name, card and author's note.", Icon = AppIcons.Chats, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
+/// <summary>Reads the chat's character: its card, name, author's note, and tags.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "Character", Description = "The chat's character: its name, card, author's note, and tags.", Icon = AppIcons.Chats, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
 internal sealed class CharacterNode : IGraphNode
 {
     public const string NodeKey = "chat.character";
@@ -132,8 +145,8 @@ internal sealed class CharacterNode : IGraphNode
     }
 }
 
-/// <summary>Reads the world the chat is played in: its character's, else its persona's.</summary>
-[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "World", Description = "The chat's world: its overview and enabled articles.", Icon = UIGlyphs.Folder, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
+/// <summary>Reads the world the chat is played in: its overview, enabled articles, and tags.</summary>
+[GraphNode(Key = NodeKey, Category = ScenarioCatalog.ChatCategory, Title = "World", Description = "The chat's world: its overview, enabled articles, and tags.", Icon = UIGlyphs.Folder, Color = ScenarioCatalog.InputColor, AlwaysRuns = true)]
 internal sealed class WorldNode : IGraphNode
 {
     public const string NodeKey = "chat.world";
@@ -164,7 +177,7 @@ internal sealed class WorldNode : IGraphNode
         }
 
         IReadOnlyList<PromptMessage> history = ChatRecords.ProjectHistory(scope.Chat.Messages, scope.Chat.Records);
-        IReadOnlyList<WorldArticle> articles = WorldInfo.ArticlesOf(world, history, scope.InitialDraft);
+        IReadOnlyList<WorldArticle> articles = WorldInfo.ArticlesOf(world, history, scope.PendingOutgoingDraft);
         var skipOverview = !string.IsNullOrWhiteSpace(world.Description) ? 1 : 0;
         var enabledTexts = new string[Math.Max(0, articles.Count - skipOverview)];
 
@@ -454,8 +467,8 @@ internal sealed class TriggerMatchNode : IGraphNode
         for (var i = start; i < projected.Count; i++)
             texts.Add(projected[i].Text);
 
-        if (!string.IsNullOrWhiteSpace(scope.InitialDraft))
-            texts.Add(scope.InitialDraft);
+        if (scope.PendingOutgoingDraft is string pendingDraft)
+            texts.Add(pendingDraft);
 
         Matched = WorldInfo.Matches([Triggers], texts);
     }
@@ -799,8 +812,6 @@ internal sealed class ModelCallNode : IGraphNodeAsync
     public const string ConnectionChoicesKey = "chat.connections";
     public const string SamplerChoicesKey = "chat.samplers";
 
-    private static readonly TimeSpan ReplyCountPatience = TimeSpan.FromSeconds(10);
-
     [GraphInput(Title = "Prompt", PinOnly = true, Required = true)]
     public CollectedPrompt? Prompt { get; set; }
 
@@ -923,8 +934,8 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         if (resolvedContext.ServerAway)
             throw new UINodeFailureException($"The model server at '{address}' did not answer.");
 
-        var model = await TryGetModelAsync(kobold, cancellationToken).ConfigureAwait(false);
-        BuiltPrompt built = await BuildPromptAsync(scope, spec, format, resolvedContext.Length, samplers.ReplyLength, address, kobold, model, cancellationToken).ConfigureAwait(false);
+        var model = await KoboldCppClients.TryGetModelNameAsync(kobold, cancellationToken).ConfigureAwait(false);
+        BuiltPrompt built = await scope.Clients.BuildPromptWithFallbackAsync(spec, format, resolvedContext.Length, samplers.ReplyLength, address, kobold, model, cancellationToken).ConfigureAwait(false);
         SeedChoice seed = Seeds.Pick(samplers.Seed, scope.Chat.Seed, regenerate: false);
         var genKey = $"ne_{Guid.NewGuid():N}";
         KoboldGenerateRequest request = KoboldGenerateRequest.From(built.Text, samplers, resolvedContext.Length, seed.Seed, format.AllStopSequences(), genKey);
@@ -974,12 +985,13 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         }
 
         _ = reader.Complete();
-        (var replyTokens, TokenCounts replyCounts) = await CountReplyAsync(kobold, sent.ToString(), built).ConfigureAwait(false);
+        (var replyTokens, TokenCounts replyCounts) = await KoboldCppClients.CountReplyAsync(kobold, sent.ToString(), built).ConfigureAwait(false);
         bool? thinkingFlag = format.Thought.IsDefined ? !continuingDraft && format.Thought.Enabled : null;
         GenerationRecord record = new()
         {
             Id = ChatLibrary.NewMessageId(),
             Purpose = impersonating ? GenerationPurpose.Impersonate : scope.ScenarioName,
+            AnchorMessage = scope.Chat.Messages.Count > 0 ? scope.Chat.Messages[^1].Id : null,
             Connection = profile.ConnectionId,
             Model = model,
             ContextLength = resolvedContext.Length,
@@ -1103,55 +1115,6 @@ internal sealed class ModelCallNode : IGraphNodeAsync
         => !format.Thought.IsDefined || Thinking == ScenarioThinking.FromProfile
             ? format
             : format with { Thought = format.Thought with { Enabled = Thinking == ScenarioThinking.On } };
-
-    private static async Task<string?> TryGetModelAsync(KoboldCppClient kobold, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var model = (await kobold.GetModelAsync(cancellationToken).ConfigureAwait(false)).Trim();
-
-            return model.Length == 0 ? null : model;
-        }
-        catch (HttpRequestException)
-        {
-            return null;
-        }
-    }
-
-    private static async Task<BuiltPrompt> BuildPromptAsync(ScenarioRunScope scope, PromptSpec spec, ModelFormat format, int contextLength, int replyLength, Uri address, KoboldCppClient kobold, string? model, CancellationToken cancellationToken)
-    {
-        try
-        {
-            ITokenCounter counter = scope.Clients.CounterFor(address, kobold, model);
-
-            return await PromptBuilder.BuildAsync(spec, format, contextLength, replyLength, counter, cancellationToken).ConfigureAwait(false);
-        }
-        catch (HttpRequestException)
-        {
-            return await PromptBuilder.BuildAsync(spec, format, contextLength, replyLength, ApproximateTokenCounter.Instance, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private static async Task<(int Tokens, TokenCounts Counts)> CountReplyAsync(KoboldCppClient kobold, string reply, BuiltPrompt prompt)
-    {
-        if (prompt.Counts == TokenCounts.Exact)
-        {
-            using CancellationTokenSource patience = new(ReplyCountPatience);
-
-            try
-            {
-                return (reply.Length == 0 ? 0 : await kobold.CountTokensAsync(reply, patience.Token).ConfigureAwait(false), TokenCounts.Exact);
-            }
-            catch (HttpRequestException)
-            {
-            }
-            catch (OperationCanceledException) when (patience.IsCancellationRequested)
-            {
-            }
-        }
-
-        return (ApproximateTokenCounter.Estimate(reply), TokenCounts.Approximate);
-    }
 }
 
 /// <summary>Writes a record in place of a message slice: the messages stay in the feed and leave the prompt.</summary>

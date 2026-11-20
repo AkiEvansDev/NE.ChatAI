@@ -6,14 +6,24 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Characters;
 
-/// <summary>
-/// A picture kept in a folder under a name of its own — <c>avatar</c>, <c>background</c> — as <c>.webp</c>, <c>.png</c> or
-/// <c>.jpg</c>; the one written last replaces whichever type was there.
-/// </summary>
+/// <summary>Stores named pictures (<c>.webp</c>, <c>.png</c>, <c>.jpg</c>, <c>.jpeg</c>) in a directory, replacing any previous extension under the same stem.</summary>
 public static class PictureFiles
 {
-    /// <summary>The types a picture may be kept as, in the order they are looked for.</summary>
     private static readonly string[] Extensions = [".webp", ".png", ".jpg", ".jpeg"];
+
+    /// <summary>Whether <paramref name="extension"/> is one of the supported picture file extensions.</summary>
+    public static bool IsExtension(string extension)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+
+        for (var i = 0; i < Extensions.Length; i++)
+        {
+            if (extension.Equals(Extensions[i], StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
 
     /// <summary>The picture's file, or <c>null</c> when the folder holds none under <paramref name="name"/>.</summary>
     public static string? Find(string folder, string name)
@@ -62,7 +72,7 @@ public static class PictureFiles
     }
 }
 
-/// <summary>A card's own pictures in its folder: its avatar, and the picture behind its chats — a character's, a persona's, a world's alike.</summary>
+/// <summary>A card's own pictures in its folder: its avatar, its chat background and its gallery.</summary>
 public static class CardPictures
 {
     public const string Avatar = "avatar";
@@ -84,13 +94,19 @@ public static class CardPictures
         return PictureFiles.WriteAsync(store.FolderOf(id), name, picture, contentType, cancellationToken);
     }
 
-    /// <summary>Copies the card's pictures (<see cref="Avatar"/> and <see cref="Background"/>) from <paramref name="sourceId"/> to <paramref name="targetId"/>.</summary>
+    /// <summary>Copies the card's avatar, background and gallery images from <paramref name="sourceId"/> to <paramref name="targetId"/>.</summary>
     public static void Copy<T>(DocumentStore<T> store, string sourceId, string targetId) where T : NamedDocument
     {
         ArgumentNullException.ThrowIfNull(store);
 
-        if (!Slug.IsValidId(sourceId) || !Slug.IsValidId(targetId) || !store.Exists(sourceId) || !store.Exists(targetId))
+        if (!Slug.IsValidId(sourceId)
+            || !Slug.IsValidId(targetId)
+            || string.Equals(sourceId, targetId, StringComparison.Ordinal)
+            || !store.Exists(sourceId)
+            || !store.Exists(targetId))
+        {
             return;
+        }
 
         var targetFolder = store.FolderOf(targetId);
 
@@ -99,7 +115,7 @@ public static class CardPictures
             if (PathOf(store, sourceId, name) is string sourcePath)
             {
                 PictureFiles.Delete(targetFolder, name);
-                File.Copy(sourcePath, Path.Combine(targetFolder, Path.GetFileName(sourcePath)), overwrite: true);
+                AtomicFile.Copy(sourcePath, Path.Combine(targetFolder, Path.GetFileName(sourcePath)));
             }
         }
 
@@ -114,9 +130,13 @@ public static class CardPictures
             {
                 var fileName = Path.GetFileName(file);
                 var id = Path.GetFileNameWithoutExtension(fileName);
+                var ext = Path.GetExtension(fileName);
 
-                if (Slug.IsValidId(id) && GalleryPictures.IsImageExtension(Path.GetExtension(fileName)))
-                    File.Copy(file, Path.Combine(targetGallery, fileName), overwrite: true);
+                if (Slug.IsValidId(id) && PictureFiles.IsExtension(ext))
+                {
+                    PictureFiles.Delete(targetGallery, id);
+                    AtomicFile.Copy(file, Path.Combine(targetGallery, id + ext.ToLowerInvariant()));
+                }
             }
         }
     }

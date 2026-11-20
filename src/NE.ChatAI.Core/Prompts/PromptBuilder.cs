@@ -15,10 +15,7 @@ public sealed record PromptMessage(MessageRole Role, string Text, string? Though
 /// <summary>One logical turn of an assembled prompt: its role, the block it counts under, its words, and who speaks it.</summary>
 public sealed record PromptTurn(PromptRole Role, string Block, string Text, string? Speaker = null);
 
-/// <summary>
-/// Everything a prompt is made of, independent of the target connection and its <see cref="ModelFormat"/>: what the chat, an
-/// impersonation, or a scenario's collector hands to a model call.
-/// </summary>
+/// <summary>Model-independent inputs for assembling a chat, impersonation or scenario prompt.</summary>
 public sealed record PromptSpec
 {
     /// <summary>The system prompt's words, <c>{{system}}</c> in the story string; a character's own wraps them as <c>{{original}}</c>.</summary>
@@ -84,17 +81,11 @@ public static class PromptBlocks
 /// <summary>A prompt made: its rendered text (empty without a <see cref="ModelFormat"/>), its logical turns, its tokens by block and in all, and how much of the history it could hold.</summary>
 public sealed record BuiltPrompt(string Text, IReadOnlyList<PromptTurn> Turns, IReadOnlyDictionary<string, int> Blocks, int Tokens, int MessagesSent, int MessagesDropped, TokenCounts Counts);
 
-/// <summary>
-/// Assembles a prompt from a <see cref="PromptSpec"/> into logical <see cref="PromptTurn"/>s and, when a <see cref="ModelFormat"/> is
-/// given, renders it as a text-completion string: the story string at the top in a system turn, the history, the author's notes where
-/// the preset puts them, the character's post-history instructions, any trailing instruction, and the opening of the reply's turn.
-/// The history is cut from its oldest message until the whole fits <c>contextLength - replyLength</c>.
-/// </summary>
+/// <summary>Builds a <see cref="PromptSpec"/> into counted blocks, logical turns and formatted text trimmed to fit the context window.</summary>
 public static class PromptBuilder
 {
     private const string ExampleStart = "<START>";
 
-    /// <summary>A macro's value as the block it is counted under.</summary>
     private static readonly Dictionary<string, string> BlockOfMacro = new(StringComparer.OrdinalIgnoreCase)
     {
         ["system"] = PromptBlocks.System,
@@ -110,6 +101,7 @@ public static class PromptBuilder
         ["mesExamplesRaw"] = PromptBlocks.Examples
     };
 
+    /// <summary>Assembles <paramref name="spec"/> within <c>contextLength - replyLength</c> tokens and counts each block through <paramref name="counter"/>.</summary>
     public static async Task<BuiltPrompt> BuildAsync(PromptSpec spec, ModelFormat? format, int contextLength, int replyLength, ITokenCounter counter, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -126,7 +118,6 @@ public static class PromptBuilder
         var examplesInStory = contributions.ContainsKey(PromptBlocks.Examples);
         var top = Top(spec, names, values, story, examplesInStory);
 
-        // Examples the story string did not name stand after it, and are counted as theirs all the same.
         if (!examplesInStory)
             Contribute(contributions, "mesExamples", values["mesExamples"]);
 
@@ -138,13 +129,14 @@ public static class PromptBuilder
             ? format with { NamesBehavior = NamesBehavior.Always }
             : format;
         var includeNames = spec.Prompt.IncludeNames || effectiveFormat?.NamesBehavior == NamesBehavior.Always;
+        PromptTurn? formattedInstruction = instruction is null ? null : instruction with { Text = TurnText(includeNames, instruction.Role, instruction.Text, instruction.Speaker) };
 
         var system = effectiveFormat is null ? top : effectiveFormat.SystemText(top);
         var topTurn = system.Length == 0 ? string.Empty : effectiveFormat is null ? system : effectiveFormat.Turn(PromptRole.System, system);
         var loreTurn = historyLore.Length == 0 ? string.Empty : effectiveFormat is null ? historyLore : effectiveFormat.Turn(PromptRole.System, historyLore);
         var noteTurn = notes.Length == 0 ? string.Empty : effectiveFormat is null ? notes : effectiveFormat.Turn(spec.NotePlacement.Role, notes);
         var postTurn = postText.Length == 0 ? string.Empty : effectiveFormat is null ? postText : effectiveFormat.Turn(PromptRole.System, postText);
-        var instructionTurn = instruction is null ? string.Empty : effectiveFormat is null ? instruction.Text : effectiveFormat.Turn(instruction.Role, TurnText(includeNames, instruction.Role, instruction.Text, instruction.Speaker));
+        var instructionTurn = formattedInstruction is null ? string.Empty : effectiveFormat is null ? formattedInstruction.Text : effectiveFormat.Turn(formattedInstruction.Role, formattedInstruction.Text);
 
         var bareOpening = effectiveFormat is null ? string.Empty : effectiveFormat.Opening(replySpeaker);
         var opening = effectiveFormat is null
@@ -163,7 +155,6 @@ public static class PromptBuilder
         var continuationTokens = Math.Max(0, openingTokens - bareOpeningTokens);
         var openingMarkerTokens = Math.Min(openingTokens, bareOpeningTokens);
 
-        // The history from its newest message back, as long as it fits what the fixed parts and the reply leave.
         var room = contextLength - replyLength - topTokens - loreTokens - noteTokens - postTokens - instructionTokens - openingTokens;
         List<KeptMessage> kept = [];
         var historyTokens = 0;
@@ -183,20 +174,20 @@ public static class PromptBuilder
             historyTokens += tokens;
         }
 
-        IReadOnlyList<PromptTurn> turns = AssembleTurns(top, kept, historyLore, notes, spec.NotePlacement, postText, instruction, spec.Continuation, replySpeaker);
-        var text = effectiveFormat is null ? string.Empty : AssembleText(effectiveFormat, topTurn, kept, loreTurn, noteTurn, spec.NotePlacement.Depth, postTurn, instructionTurn, opening);
+        var noteAt = NoteInsertionIndex(kept.Count, spec.NotePlacement.Depth);
+        IReadOnlyList<PromptTurn> turns = AssembleTurns(top, kept, historyLore, notes, spec.NotePlacement.Role, noteAt, postText, formattedInstruction, spec.Continuation, replySpeaker);
+        var text = effectiveFormat is null ? string.Empty : AssembleText(effectiveFormat, topTurn, kept, loreTurn, noteTurn, noteAt, postTurn, instructionTurn, opening);
 
         await CountContributionsAsync(blocks, contributions, counter, cancellationToken).ConfigureAwait(false);
 
-        // What of the top its macros did not take is the story string's own words and the turn's markers.
         Add(blocks, PromptBlocks.Story, Math.Max(0, topTokens - blocks.Values.Sum()));
         Add(blocks, PromptBlocks.Lore, loreTokens);
         Add(blocks, PromptBlocks.AuthorsNote, noteTokens);
         Add(blocks, PromptBlocks.History, historyTokens + continuationTokens);
         Add(blocks, PromptBlocks.PostHistory, postTokens);
 
-        if (instruction is not null)
-            Add(blocks, instruction.Block, instructionTokens);
+        if (formattedInstruction is not null)
+            Add(blocks, formattedInstruction.Block, instructionTokens);
 
         Add(blocks, PromptBlocks.Opening, openingMarkerTokens);
 
@@ -207,7 +198,6 @@ public static class PromptBuilder
         return new BuiltPrompt(text, turns, blocks, total, kept.Count, spec.History.Count - kept.Count, counter.Kind);
     }
 
-    /// <summary>Every macro the story string may name, each value with the names put into it.</summary>
     private static Dictionary<string, string> Values(PromptSpec spec, Dictionary<string, string> names)
     {
         Character? character = spec.Character;
@@ -236,7 +226,6 @@ public static class PromptBuilder
     private static string LoreText(PromptSpec spec, LorePosition position, Dictionary<string, string> names)
         => string.Join('\n', spec.Lore.Where(entry => entry.Enabled && entry.Position == position && entry.Text.Length > 0).Select(entry => Macros.Render(entry.Text, names).Trim()));
 
-    /// <summary>The example messages, each <c>&lt;START&gt;</c>-led dialogue under the preset's separator.</summary>
     private static string Examples(string examples, string separator)
     {
         if (examples.Length == 0)
@@ -258,10 +247,9 @@ public static class PromptBuilder
         _ = text.Append(value);
     }
 
-    /// <summary>The story string, then the examples where it did not put them itself, then the chat's start.</summary>
     private static string Top(PromptSpec spec, Dictionary<string, string> names, Dictionary<string, string> values, string story, bool examplesInStory)
     {
-        var top = story.Trim('\n');
+        var top = story.Trim('\r', '\n');
 
         if (!examplesInStory && values["mesExamples"].Length > 0)
             top = Join(top, values["mesExamples"]);
@@ -272,7 +260,6 @@ public static class PromptBuilder
     private static string Join(string first, string second)
         => first.Length == 0 ? second : second.Length == 0 ? first : $"{first}\n{second}";
 
-    /// <summary>The author's notes that have words, one under another, with the names put in.</summary>
     private static string Notes(PromptSpec spec, Dictionary<string, string> names)
         => string.Join('\n', spec.AuthorsNotes.Where(static note => !string.IsNullOrWhiteSpace(note)).Select(note => Macros.Render(note!, names).Trim()));
 
@@ -301,7 +288,6 @@ public static class PromptBuilder
         return speaker.Length == 0 ? null : speaker;
     }
 
-    /// <summary>A message's words, prefixed with its speaker where names are included, and its thought before them where kept in history.</summary>
     private static string HistoryText(PromptSpec spec, ModelFormat? format, PromptMessage message, IReadOnlyDictionary<string, string> names, string? speaker)
     {
         var rawText = message.ExpandMacros ? Macros.Render(message.Text, names) : message.Text;
@@ -321,16 +307,17 @@ public static class PromptBuilder
         return format.Thought.IsDefined ? $"{format.Thought.Prefix}{thought}{format.Thought.Suffix}{text}" : text;
     }
 
-    private static List<PromptTurn> AssembleTurns(string top, List<KeptMessage> kept, string historyLore, string notes, AuthorsNotePlacement notePlacement, string postText, PromptTurn? instruction, string? continuation, string replySpeaker)
+    private static int NoteInsertionIndex(int messageCount, int depth)
+        => Math.Clamp(messageCount - Math.Max(0, depth), 0, messageCount);
+
+    private static List<PromptTurn> AssembleTurns(string top, List<KeptMessage> kept, string historyLore, string notes, PromptRole noteRole, int noteAt, string postText, PromptTurn? instruction, string? continuation, string replySpeaker)
     {
         List<PromptTurn> turns = [];
 
         if (top.Length > 0)
             turns.Add(new PromptTurn(PromptRole.System, PromptBlocks.Story, top));
 
-        var noteAt = Math.Clamp(kept.Count - Math.Max(0, notePlacement.Depth), 0, kept.Count);
-
-        for (var i = 0; i < kept.Count; i++)
+        for (var i = 0; i <= kept.Count; i++)
         {
             if (i == noteAt)
             {
@@ -338,20 +325,14 @@ public static class PromptBuilder
                     turns.Add(new PromptTurn(PromptRole.System, PromptBlocks.Lore, historyLore));
 
                 if (notes.Length > 0)
-                    turns.Add(new PromptTurn(notePlacement.Role, PromptBlocks.AuthorsNote, notes));
+                    turns.Add(new PromptTurn(noteRole, PromptBlocks.AuthorsNote, notes));
             }
 
-            KeptMessage message = kept[i];
-            turns.Add(new PromptTurn(message.Role, PromptBlocks.History, message.Body, message.Speaker));
-        }
-
-        if (noteAt == kept.Count)
-        {
-            if (historyLore.Length > 0)
-                turns.Add(new PromptTurn(PromptRole.System, PromptBlocks.Lore, historyLore));
-
-            if (notes.Length > 0)
-                turns.Add(new PromptTurn(notePlacement.Role, PromptBlocks.AuthorsNote, notes));
+            if (i < kept.Count)
+            {
+                KeptMessage message = kept[i];
+                turns.Add(new PromptTurn(message.Role, PromptBlocks.History, message.Body, message.Speaker));
+            }
         }
 
         if (postText.Length > 0)
@@ -366,25 +347,23 @@ public static class PromptBuilder
         return turns;
     }
 
-    private static string AssembleText(ModelFormat format, string topTurn, List<KeptMessage> kept, string loreTurn, string noteTurn, int noteDepth, string postTurn, string instructionTurn, string opening)
+    private static string AssembleText(ModelFormat format, string topTurn, List<KeptMessage> kept, string loreTurn, string noteTurn, int noteAt, string postTurn, string instructionTurn, string opening)
     {
         StringBuilder prompt = new(topTurn);
-        // A note stands this many messages from the history's end: after the last is none, before it one.
-        var noteAt = Math.Clamp(kept.Count - Math.Max(0, noteDepth), 0, kept.Count);
         var firstOfModel = true;
 
-        for (var i = 0; i < kept.Count; i++)
+        for (var i = 0; i <= kept.Count; i++)
         {
             if (i == noteAt)
                 _ = prompt.Append(loreTurn).Append(noteTurn);
 
-            KeptMessage message = kept[i];
-            _ = prompt.Append(format.Turn(message.Role, message.Body, firstOfModel && message.Role == PromptRole.Model));
-            firstOfModel &= message.Role != PromptRole.Model;
+            if (i < kept.Count)
+            {
+                KeptMessage message = kept[i];
+                _ = prompt.Append(format.Turn(message.Role, message.Body, firstOfModel && message.Role == PromptRole.Model));
+                firstOfModel &= message.Role != PromptRole.Model;
+            }
         }
-
-        if (noteAt == kept.Count)
-            _ = prompt.Append(loreTurn).Append(noteTurn);
 
         return prompt.Append(postTurn).Append(instructionTurn).Append(opening).ToString();
     }

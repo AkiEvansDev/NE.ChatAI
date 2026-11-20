@@ -145,10 +145,6 @@ internal abstract partial class ShellController
 
     protected PictureContent Pictures => Context.Services.GetRequiredService<PictureContent>();
 
-    /// <summary>
-    /// Reads the chats, the characters, the personas, the default persona and the tags' colours, and shows them as the search, the
-    /// tags and the panel's character say.
-    /// </summary>
     protected async Task LoadChatsAsync(CancellationToken cancellationToken)
     {
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
@@ -203,6 +199,7 @@ internal abstract partial class ShellController
 
             if (TagFilterOptions.TryGet(tag, out OptionItem? existing))
             {
+                existing.BadgeTitle = tag;
                 existing.BadgeColor = colors.TryGetValue(tag, out UIThemeColor color) ? color : null;
 
                 if (!string.Equals(TagFilterOptions[i].Id, tag, StringComparison.Ordinal))
@@ -416,19 +413,16 @@ internal abstract partial class ShellController
         }
     }
 
-    /// <summary>
-    /// A chat just written to: its row takes the new last words and goes to the top; a message with no words yet — a thought cut
-    /// short — leaves the row's words as they were. Called under the runtime's lock.
-    /// </summary>
-    protected void ShowLastWords(string chatId, string lastText)
+    protected void ShowLastWords(string chatId, string lastText, bool bumpToTop = false)
     {
-        var preview = Preview(lastText);
+        if (!ChatEntries.TryGet(chatId, out MenuItem? entry))
+            return;
 
-        if (ChatEntries.TryGet(chatId, out MenuItem? entry))
+        entry.Description = UIPhrase.Text(Preview(lastText));
+
+        if (bumpToTop)
         {
-            if (preview.Length > 0)
-                entry.Description = UIPhrase.Text(preview);
-
+            entry.Title = UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(DateTimeOffset.UtcNow, UITimestampFormat.Relative)));
             _ = ChatEntries.Move(chatId, 0);
         }
     }
@@ -457,19 +451,9 @@ internal abstract partial class ShellController
         ShowTagFilter();
     }
 
-    /// <summary>Opens the confirmation dialog before deleting a card from its row in the panel's list.</summary>
     [UICommand]
     public UICommandResult AskDeletePanelCard(string cardId)
-    {
-        TagScope scope = PanelList switch
-        {
-            PersonasList => TagScope.Persona,
-            WorldsList => TagScope.World,
-            _ => TagScope.Character
-        };
-
-        return AskDeleteCardByScope(scope, cardId);
-    }
+        => AskDeleteCardByScope(PanelScopeOf(PanelList), cardId);
 
     private UICommandResult AskDeleteCardByScope(TagScope scope, string cardId)
     {
@@ -619,6 +603,16 @@ internal abstract partial class ShellController
         return await ShowChatAsync(chatId, cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<string?> StartPanelChatAsync(CancellationToken cancellationToken)
+    {
+        if (_panelCharacterId is not string characterId)
+            return null;
+
+        AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+
+        return await Chats.StartAsync(characterId, settings.Persona, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>A chat row clicked in the panel's chat list.</summary>
     [UICommand]
     public Task<UICommandResult> OpenPanelChatAsync(string chatId, CancellationToken cancellationToken)
@@ -662,22 +656,9 @@ internal abstract partial class ShellController
         return UICommandResult.Ok([new CloseDialogEffect(DeleteChatDialogKey), .. extra.Effects]);
     }
 
-    /// <summary>Lets the open page react when a chat is deleted from the panel's chat list.</summary>
     protected virtual Task<UICommandResult> OnPanelChatDeletedAsync(string chatId, CancellationToken cancellationToken)
         => Task.FromResult(UICommandResult.Ok());
 
-    /// <summary>A chat started with the panel's character; none where there is no such character.</summary>
-    private async Task<string?> StartPanelChatAsync(CancellationToken cancellationToken)
-    {
-        if (_panelCharacterId is not string characterId)
-            return null;
-
-        AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-
-        return await Chats.StartAsync(characterId, settings.Persona, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Back from a character's chats to the characters.</summary>
     [UICommand]
     public void ShowCharacterList()
     {

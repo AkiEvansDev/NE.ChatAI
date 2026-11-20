@@ -17,10 +17,11 @@ internal interface IDocumentDraft<T>
     T Apply(T kept);
 }
 
-/// <summary>One kind's editor on the settings page, whatever the kind: what the page asks of it by the kind's name.</summary>
+/// <summary>One kind's editor on the settings page.</summary>
 internal interface IDocumentEditor
 {
-    /// <summary>The name of the document shown; none when nothing is chosen.</summary>
+    string? Id { get; }
+
     string? Name { get; }
 
     Task ShowAsync(CancellationToken cancellationToken);

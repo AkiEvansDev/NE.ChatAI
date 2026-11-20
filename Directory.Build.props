@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <InMonorepo>true</InMonorepo>
-    <CoreVersion>1.5.1</CoreVersion>
+    <CoreVersion>1.5.2</CoreVersion>
     <Version>$(CoreVersion)</Version>
     <TargetFramework>net11.0</TargetFramework>
     <LangVersion>latest</LangVersion>

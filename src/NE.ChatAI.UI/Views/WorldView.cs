@@ -2,10 +2,6 @@ using NE.ChatAI.Controllers;
 
 namespace NE.ChatAI.Views;
 
-/// <summary>
-/// A world's wide editor dialog: the card's head (<see cref="CardEditor"/>), its overview, and its articles — a title, the words,
-/// where they go and whether they go — each kept as it lets go of its value.
-/// </summary>
 internal static class WorldView
 {
     public const string ArticleSearchId = "chatai-world-article-search";
@@ -54,7 +50,6 @@ internal static class WorldView
                 )
         );
 
-    /// <summary>The articles in an accordion, each its fields with its rename and remove in the header; then a new one.</summary>
     private static StackPanelComponent CreateArticles()
         => UILayout.Stack(12,
             new TextInputComponent(ArticleSearchId)
@@ -85,7 +80,6 @@ internal static class WorldView
                                 .SetTitle("chatai.world.article.enabled")
                                 .BindValue<ArticleItem>(static x => x.Enabled, UIBindingScope.Relative)
                                 .OnChange(nameof(ShellController.SaveCardAsync))
-                                .SetVerticalAlignment(UIAlignment.End)
                         ),
                         SettingsEditors.MacroInput("chatai.world.article.text", 12, expandable: true)
                             .SetPlaceholder("chatai.world.article.text")
