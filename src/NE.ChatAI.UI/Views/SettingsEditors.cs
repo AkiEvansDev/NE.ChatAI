@@ -69,25 +69,52 @@ internal static class SettingsEditors
         new() { Label = "{{/if}}", Detail = "End conditional block", Kind = "keyword" }
     ];
 
-    public static CardComponent CreateGeneral()
-        => Card(null,
-            UIForm.Row(
-                new LanguageSwitcherComponent().AsField(),
-                new ThemeSwitcherComponent().AsField()
+    public static StackPanelComponent CreateGeneral()
+        => UILayout.Stack(16,
+            Card(null,
+                UIForm.Row(
+                    new LanguageSwitcherComponent().AsField(),
+                    new ThemeSwitcherComponent().AsField()
+                ),
+                new SwitchComponent()
+                    .SetTitle("chatai.settings.general.message-background")
+                    .SetDescription("chatai.settings.general.message-background.hint")
+                    .BindValue<SettingsController>(static x => x.MessageBackground)
+                    .OnChange(nameof(SettingsController.SaveMessageBackgroundAsync)),
+                new SliderComponent(SettingsController.DimSliderId)
+                    .SetTitle("chatai.settings.general.background-dim")
+                    .SetRange(0, 1m)
+                    .SetStep(0.05m)
+                    .SetShowValue(true)
+                    .BindValue<SettingsController>(static x => x.BackgroundDim)
+                    .OnChange(nameof(SettingsController.SaveBackgroundDimAsync)),
+                PictureFields.Background<SettingsController>("chatai.settings.background", "chatai.settings.background.hint", static x => x.Background, nameof(SettingsController.SaveBackgroundAsync), nameof(SettingsController.RemoveBackground), dimSliderId: SettingsController.DimSliderId)
             ),
-            new SwitchComponent()
-                .SetTitle("chatai.settings.general.message-background")
-                .SetDescription("chatai.settings.general.message-background.hint")
-                .BindValue<SettingsController>(static x => x.MessageBackground)
-                .OnChange(nameof(SettingsController.SaveMessageBackgroundAsync)),
-            new SliderComponent(SettingsController.DimSliderId)
-                .SetTitle("chatai.settings.general.background-dim")
-                .SetRange(0, 1m)
-                .SetStep(0.05m)
-                .SetShowValue(true)
-                .BindValue<SettingsController>(static x => x.BackgroundDim)
-                .OnChange(nameof(SettingsController.SaveBackgroundDimAsync)),
-            PictureFields.Background<SettingsController>("chatai.settings.background", "chatai.settings.background.hint", static x => x.Background, nameof(SettingsController.SaveBackgroundAsync), nameof(SettingsController.RemoveBackground), dimSliderId: SettingsController.DimSliderId)
+            CreatePinCard()
+        );
+
+    private static CardComponent CreatePinCard()
+        => UICard.Create(
+            "chatai.settings.pin.title",
+            null,
+            UILayout.Stack(12,
+                UIText.Note().BindDescription<SettingsController>(static x => x.PinStatus),
+                UILayout.Ends(
+                    new TextInputComponent(SettingsController.PinInputId)
+                        .SetFormId(SettingsController.PinFormId)
+                        .SetTitle("chatai.settings.pin.field")
+                        .SetType(UITextInputType.Password)
+                        .SetAutocomplete(UIAutocomplete.NewPassword)
+                        .BindValue<SettingsController>(static x => x.NewPin, mode: UIBindingMode.OnSubmit),
+                    UIButtons.Primary("chatai.settings.pin.set")
+                        .BindTitle<SettingsController>(static x => x.PinSaveLabel)
+                        .OnSubmitShowingLoading(SettingsController.PinFormId, nameof(SettingsController.SavePinAsync)),
+                    UIButtons.Danger("chatai.settings.pin.remove")
+                        .OnClickShowingLoading(nameof(SettingsController.ClearPinAsync))
+                        .BindVisibility<SettingsController>(static x => x.PinClearVisibility)
+                )
+            ),
+            icon: AppIcons.Outline(AppIcons.Lock)
         );
 
     private static CardComponent Card(string? title, params IVisualComponent[] fields)

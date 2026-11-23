@@ -124,9 +124,13 @@ internal abstract partial class ShellController
     /// <summary>The world field's entry for none: an id no document can have.</summary>
     public const string NoWorld = "none";
 
+    /// <summary>The character persona field's entry for inheriting <see cref="AppSettings.Persona"/>.</summary>
+    public const string InheritedPersona = "default";
+
     private string? _creatingCardList;
     private TagScope _editingCardScope;
     private string? _editingCardId;
+    private string? _editingCardPersona;
     private string? _editingCardWorld;
     private bool _taggingGlobalGallery;
     private string? _taggingImageId;
@@ -146,6 +150,14 @@ internal abstract partial class ShellController
 
     [RecursiveMember]
     public partial string CardDescription { get; set; } = string.Empty;
+
+    /// <summary>The persona new chats with the character start as, by id; <see cref="InheritedPersona"/> for the default persona.</summary>
+    [RecursiveMember]
+    public partial string CardPersonaId { get; set; } = InheritedPersona;
+
+    /// <summary>Default persona entry, then every persona by name.</summary>
+    [RecursiveMember(false)]
+    public RecursiveCollection<OptionItem> CardPersonaOptions { get; } = [];
 
     /// <summary>The world the card is played in, by id; <see cref="NoWorld"/> for none.</summary>
     [RecursiveMember]
@@ -209,10 +221,13 @@ internal abstract partial class ShellController
     /// <summary>Opens the name dialog before creating a new character, persona or world.</summary>
     [UICommand]
     public UICommandResult AskCreateCard()
+        => AskCreateCardOf(PanelList);
+
+    protected UICommandResult AskCreateCardOf(string list)
     {
-        _creatingCardList = PanelList;
+        _creatingCardList = list;
         NewCardName = string.Empty;
-        CreateCardTitle = new UIPhrase(PanelList switch
+        CreateCardTitle = new UIPhrase(list switch
         {
             PersonasList => "chatai.persona.new-name",
             WorldsList => "chatai.world.new-name",
@@ -305,12 +320,15 @@ internal abstract partial class ShellController
 
                 baseCard = character;
                 avatar = Pictures.CharacterAvatarOf(cardId);
+                _editingCardPersona = character.Persona;
                 ShowCharacterCard(cardId, character);
                 break;
         }
 
         _editingCardScope = scope;
         _editingCardId = cardId;
+        if (scope != TagScope.Character)
+            _editingCardPersona = null;
         _editingCardWorld = baseCard.World;
         CardName = baseCard.Name;
         CardAvatar.Show(avatar);
@@ -369,7 +387,19 @@ internal abstract partial class ShellController
         CharacterPostHistoryInstructions = card.PostHistoryInstructions?.TrimEnd('\r', '\n') ?? string.Empty;
         CharacterAuthorsNote = card.AuthorsNote?.TrimEnd('\r', '\n') ?? string.Empty;
         CharacterBackground.Show(Pictures.CharacterBackgroundOf(cardId));
+        ShowCardPersonas(card.Persona);
         ShowCharacterGallery(cardId, card.ImageTags);
+    }
+
+    private void ShowCardPersonas(string? persona)
+    {
+        CardPersonaOptions.Clear();
+        CardPersonaOptions.Add(new OptionItem { Id = InheritedPersona, Title = "chatai.character.persona.default" });
+
+        foreach (StoredDocument<Persona> stored in KnownPersonas.OrderBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase))
+            CardPersonaOptions.Add(new OptionItem { Id = stored.Id, Title = stored.Document.Name, IsContent = true });
+
+        CardPersonaId = persona is not null && KnownPersonas.Any(stored => stored.Id == persona) ? persona : InheritedPersona;
     }
 
     private void ShowCharacterGallery(string cardId, IReadOnlyDictionary<string, string>? imageTags)
@@ -532,8 +562,9 @@ internal abstract partial class ShellController
                 if (await Data.Characters.ReadAsync(cardId, cancellationToken).ConfigureAwait(false) is not Character character)
                     return;
 
+                _editingCardPersona = CardPersonaId == InheritedPersona ? null : CardPersonaId;
                 var characterName = ResolveEditableCardName(name, character.Name, allowRename: !IsGenerating || cardId != OpenCharacterId);
-                Character updatedCharacter = ApplyCharacterFields(character with { Name = characterName, Description = description, World = _editingCardWorld });
+                Character updatedCharacter = ApplyCharacterFields(character with { Name = characterName, Description = description, Persona = _editingCardPersona, World = _editingCardWorld });
                 var newCharacterId = await DocumentRenames.SaveCharacterAsync(Data, cardId, updatedCharacter, cancellationToken).ConfigureAwait(false);
 
                 if (!string.Equals(newCharacterId, cardId, StringComparison.Ordinal))

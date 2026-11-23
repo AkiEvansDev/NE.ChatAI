@@ -63,7 +63,6 @@ internal abstract partial class ShellController
 
     /// <summary>What the last read found, so the panel turns between a character and the list without reading the folder again.</summary>
     private IReadOnlyList<ChatSummary> _chats = [];
-    private IReadOnlyList<StoredDocument<Character>> _characters = [];
     private Dictionary<string, UIThemeColor> _characterTagColors = [with(StringComparer.OrdinalIgnoreCase)];
     private Dictionary<string, UIThemeColor> _personaTagColors = [with(StringComparer.OrdinalIgnoreCase)];
     private Dictionary<string, UIThemeColor> _worldTagColors = [with(StringComparer.OrdinalIgnoreCase)];
@@ -76,6 +75,9 @@ internal abstract partial class ShellController
 
     /// <summary>The world active in the open chat.</summary>
     protected string? ActiveWorldId { get; set; }
+
+    /// <summary>Every character, as the last read of the chats found them.</summary>
+    protected IReadOnlyList<StoredDocument<Character>> KnownCharacters { get; private set; } = [];
 
     /// <summary>Every persona, as the last read of the chats found them.</summary>
     protected IReadOnlyList<StoredDocument<Persona>> KnownPersonas { get; private set; } = [];
@@ -149,8 +151,8 @@ internal abstract partial class ShellController
     {
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
-        _characters = (await Data.Characters.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
-        _chats = await Chats.ListAsync(_characters, cancellationToken).ConfigureAwait(false);
+        KnownCharacters = (await Data.Characters.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+        _chats = await Chats.ListAsync(KnownCharacters, cancellationToken).ConfigureAwait(false);
         KnownPersonas = (await Data.Personas.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
         KnownWorlds = (await Data.Worlds.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
         _characterTagColors = TagBadges.ColorsOf(settings, TagScope.Character);
@@ -164,6 +166,13 @@ internal abstract partial class ShellController
 
         if (_editingCardId is not null)
             ShowCardWorlds(_editingCardWorld);
+
+        OnCardsLoaded();
+    }
+
+    /// <summary>Notifies subclasses whenever characters, personas and worlds are reloaded.</summary>
+    protected virtual void OnCardsLoaded()
+    {
     }
 
     /// <summary>The filter menu's tags for the list currently shown; each kind of card keeps its own tags.</summary>
@@ -173,7 +182,7 @@ internal abstract partial class ShellController
         {
             PersonasList => (KnownPersonas.SelectMany(static stored => stored.Document.Tags), _personaTagColors),
             WorldsList => (KnownWorlds.SelectMany(static stored => stored.Document.Tags), _worldTagColors),
-            _ => (_characters.SelectMany(static stored => stored.Document.Tags), _characterTagColors)
+            _ => (KnownCharacters.SelectMany(static stored => stored.Document.Tags), _characterTagColors)
         };
         string[] knownTags = [.. source.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.CurrentCultureIgnoreCase)];
 
@@ -225,13 +234,13 @@ internal abstract partial class ShellController
     {
         List<StoredDocument<Character>> shown =
         [
-            .. _characters
+            .. KnownCharacters
                 .OrderByDescending(stored => stored.Id == OpenCharacterId)
                 .ThenBy(static stored => stored.Document.Name, StringComparer.CurrentCultureIgnoreCase)
         ];
 
         SyncCardRows(CharacterRows, shown, Pictures.CharacterAvatarOf, _characterTagColors, OpenCharacterId);
-        CharactersEmpty = new UIPhrase(_characters.Count == 0 ? "chatai.chats.no-characters" : "chatai.chats.no-match");
+        CharactersEmpty = new UIPhrase(KnownCharacters.Count == 0 ? "chatai.chats.no-characters" : "chatai.chats.no-match");
     }
 
     private static void SyncCardRows<TCard>(RecursiveCollection<CardRow> rows, List<StoredDocument<TCard>> shown, Func<string, string?> avatarOf, IReadOnlyDictionary<string, UIThemeColor> tagColors, string? activeId, string? defaultId = null)
@@ -318,7 +327,7 @@ internal abstract partial class ShellController
     /// <summary>The panel's character with its chats; a character gone, or none, and the panel shows the list instead.</summary>
     private void ShowPanelCharacter()
     {
-        if (_panelCharacterId is not string characterId || _characters.FirstOrDefault(stored => stored.Id == characterId) is not StoredDocument<Character> character)
+        if (_panelCharacterId is not string characterId || KnownCharacters.FirstOrDefault(stored => stored.Id == characterId) is not StoredDocument<Character> character)
         {
             if (ChatEntries.Count > 0)
                 ChatEntries.Clear();
@@ -486,7 +495,7 @@ internal abstract partial class ShellController
 
             case TagScope.Character:
             default:
-                name = _characters.FirstOrDefault(stored => stored.Id == cardId)?.Document.Name;
+                name = KnownCharacters.FirstOrDefault(stored => stored.Id == cardId)?.Document.Name;
                 questionKey = "chatai.character.delete.question";
                 dialogKey = DeleteCharacterDialogKey;
                 list = CharactersList;
@@ -543,6 +552,15 @@ internal abstract partial class ShellController
                 if (string.Equals(settings.Persona, cardId, StringComparison.Ordinal))
                     await Data.WriteSettingsAsync(settings with { Persona = null }, cancellationToken).ConfigureAwait(false);
 
+                if (_editingCardPersona == cardId)
+                    _editingCardPersona = null;
+
+                foreach (StoredDocument<Character> stored in KnownCharacters)
+                {
+                    if (string.Equals(stored.Document.Persona, cardId, StringComparison.Ordinal))
+                        await Data.Characters.WriteAsync(stored.Id, stored.Document with { Persona = null }, cancellationToken).ConfigureAwait(false);
+                }
+
                 break;
 
             case WorldsList:
@@ -596,7 +614,7 @@ internal abstract partial class ShellController
         if (await StartPanelChatAsync(cancellationToken).ConfigureAwait(false) is not string chatId)
             return Notify("chatai.chats.character-gone", UIColorStyle.Warning);
 
-        _chats = await Chats.ListAsync(_characters, cancellationToken).ConfigureAwait(false);
+        _chats = await Chats.ListAsync(KnownCharacters, cancellationToken).ConfigureAwait(false);
         ShowCards();
         ShowPanelCharacter();
 
@@ -609,8 +627,9 @@ internal abstract partial class ShellController
             return null;
 
         AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        Character? character = await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false);
 
-        return await Chats.StartAsync(characterId, settings.Persona, cancellationToken).ConfigureAwait(false);
+        return await Chats.StartAsync(characterId, ChatLibrary.ResolvePersonaId(Data, chat: null, character, settings.Persona), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>A chat row clicked in the panel's chat list.</summary>
@@ -679,7 +698,7 @@ internal abstract partial class ShellController
         if (await StartPanelChatAsync(cancellationToken).ConfigureAwait(false) is not string chatId)
             return Notify("chatai.chats.character-gone", UIColorStyle.Warning);
 
-        _chats = await Chats.ListAsync(_characters, cancellationToken).ConfigureAwait(false);
+        _chats = await Chats.ListAsync(KnownCharacters, cancellationToken).ConfigureAwait(false);
         ShowCards();
         ShowPanelCharacter();
 

@@ -193,6 +193,9 @@ internal sealed class PictureContent(DataFolder data, IUIContentAddressResolver 
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (!request.Session.IsAuthenticated)
+            return Task.FromResult<UIContent?>(null);
+
         var key = request.Key;
 
         if (key.Length >= 3 && key[0] == ImagePrefix)

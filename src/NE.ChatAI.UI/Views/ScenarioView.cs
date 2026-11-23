@@ -141,6 +141,6 @@ internal sealed class ScenarioView : ShellView, IUIViewDefinition
                     .BindTitle<ScenarioController>(static x => x.RenameDialogAction)
                     .OnClick(nameof(ScenarioController.RenameAsync))
             ),
-            BoundConfirmDialog<ScenarioController>(ScenarioController.DeleteDialogKey, "chatai.scenarios.delete.title", static x => x.DeleteQuestion, UIStandardAction.Delete.Title, nameof(ScenarioController.DeleteAsync))
+            UIDialogs.BoundConfirm<ScenarioController>(ScenarioController.DeleteDialogKey, "chatai.scenarios.delete.title", static x => x.DeleteQuestion, UIStandardAction.Delete.Title, nameof(ScenarioController.DeleteAsync))
         ];
 }

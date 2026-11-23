@@ -151,6 +151,7 @@ internal sealed partial class SettingsController : ShellController
         ApplyChatSurface(settings.MessageBackground);
         BackgroundDim = Math.Clamp(settings.BackgroundDim, 0, 1);
         MessageBackground = settings.MessageBackground;
+        ShowPinState(settings.PinHash);
         AuthorsNote = settings.AuthorsNote?.TrimEnd('\r', '\n') ?? string.Empty;
         NoteDepth = settings.AuthorsNotePlacement.Depth;
         NoteRole = settings.AuthorsNotePlacement.Role.ToString();

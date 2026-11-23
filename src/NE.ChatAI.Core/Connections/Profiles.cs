@@ -58,6 +58,7 @@ public static class Profiles
         {
             await MoveSystemPromptsOutAsync(data, cancellationToken).ConfigureAwait(false);
             await MoveNotePlacementOutAsync(data, cancellationToken).ConfigureAwait(false);
+            await UpgradeGemma4FormatAsync(data, cancellationToken).ConfigureAwait(false);
 
             if (!Directory.Exists(Path.Combine(data.Root, "graphs")))
                 await DefaultDocuments.LayDownScenariosAsync(data, cancellationToken).ConfigureAwait(false);
@@ -91,6 +92,22 @@ public static class Profiles
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
         await data.WriteSettingsAsync(settings with { Connection = DefaultDocuments.ConnectionId }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task UpgradeGemma4FormatAsync(DataFolder data, CancellationToken cancellationToken)
+    {
+        if (await data.ModelFormats.ReadAsync(DefaultDocuments.FormatId, cancellationToken).ConfigureAwait(false) is not ModelFormat format)
+            return;
+
+        if (format.Thought.OpensReply
+            || !string.Equals(format.Thought.Prefix, ModelFormat.Gemma4.Thought.Prefix, StringComparison.Ordinal)
+            || !string.Equals(format.Thought.Suffix, ModelFormat.Gemma4.Thought.Suffix, StringComparison.Ordinal)
+            || !string.Equals(format.Thought.SystemMark, ModelFormat.Gemma4.Thought.SystemMark, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await data.ModelFormats.WriteAsync(DefaultDocuments.FormatId, format with { Thought = format.Thought with { OpensReply = true } }, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task UpgradeImpersonateAsync(DataFolder data, Scenario impersonate, CancellationToken cancellationToken)

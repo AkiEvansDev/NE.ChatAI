@@ -92,7 +92,7 @@ public sealed record ModelFormat : NamedDocument
         ModelSuffix = "<turn|>\n",
         NamesBehavior = NamesBehavior.Force,
         StopSequences = ["<turn|>", "<|turn>"],
-        Thought = new ThoughtFormat { Enabled = false, Prefix = "<|channel>thought\n", Suffix = "<channel|>", SystemMark = "<|think|>\n" }
+        Thought = new ThoughtFormat { Enabled = false, Prefix = "<|channel>thought\n", Suffix = "<channel|>", SystemMark = "<|think|>\n", OpensReply = true }
     };
 
     /// <summary>Every sequence generation stops at: the stop sequences, and the turn markers where they count as stops.</summary>

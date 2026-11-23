@@ -114,7 +114,7 @@ internal sealed class PluginsView : ShellView, IUIViewDefinition
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
         =>
         [
-            BoundConfirmDialog<PluginsController>(
+            UIDialogs.BoundConfirm<PluginsController>(
                 PluginsController.UninstallDialogKey,
                 "chatai.plugins.uninstall.title",
                 static x => x.UninstallQuestion,

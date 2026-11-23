@@ -12,7 +12,10 @@ internal static class CharacterView
                     CardEditor.Scroll(
                         UILayout.Stack(16,
                             CardEditor.CreateHead(),
-                            CardEditor.WorldField("chatai.character.world.hint"),
+                            UIForm.Row(
+                                CardEditor.PersonaField("chatai.character.persona.hint"),
+                                CardEditor.WorldField("chatai.character.world.hint")
+                            ),
                             CardEditor.Area<ShellController>("chatai.character.description", static x => x.CardDescription, 20, expandable: true),
                             CardEditor.Area<ShellController>("chatai.character.personality", static x => x.CharacterPersonality, 6, expandable: true),
                             CardEditor.Area<ShellController>("chatai.character.scenario", static x => x.CharacterScenario, 6, expandable: true)

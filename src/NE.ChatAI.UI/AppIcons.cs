@@ -34,6 +34,9 @@ internal static class AppIcons
     public const string Cue = MaterialIcons.Lightbulb;
     public const string CueMenu = MaterialIcons.Checklist;
     public const string CuePick = MaterialIcons.FactCheck;
+    public const string Lock = MaterialIcons.Key;
+    public const string Bindings = MaterialIcons.Schema;
+    public const string Worlds = MaterialIcons.Public;
 
     public static string Outline(string icon)
         => MaterialIcons.Outlined(icon);

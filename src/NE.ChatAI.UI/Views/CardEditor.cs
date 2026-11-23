@@ -47,6 +47,15 @@ internal static class CardEditor
                 .SetPlacement(2, 1, 23, 1)
             );
 
+    public static StackPanelComponent PersonaField(string hint)
+        => UIForm.Field(new SelectComponent()
+                .SetTitle("chatai.persona.title")
+                .BindOptions<ShellController>(static x => x.CardPersonaOptions)
+                .BindValue<ShellController>(static x => x.CardPersonaId)
+                .OnChange(nameof(ShellController.SaveCardAsync)),
+            hint
+        );
+
     public static StackPanelComponent WorldField(string hint)
         => UIForm.Field(new SelectComponent()
                 .SetTitle("chatai.card.world")
@@ -153,9 +162,7 @@ internal static class CardEditor
         => UIDialogs.Fill(
             key,
             title,
-            new ContainerComponent(key)
-                .SetHeight(UILayoutLength.Fill())
-                .AddChild(body),
+            body,
             width: UIColumnWidth.Wide,
             trailing:
             [
@@ -181,7 +188,7 @@ internal static class CardEditor
         =>
         [
             CreateTagsDialog(),
-            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeleteTagDialogKey, "chatai.tags.delete.title", static x => x.DeleteTagQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeleteTagAsync))
+            UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteTagDialogKey, "chatai.tags.delete.title", static x => x.DeleteTagQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeleteTagAsync))
         ];
 
     // Color opacity allows resetting alpha to 0 to restore the default untinted badge.

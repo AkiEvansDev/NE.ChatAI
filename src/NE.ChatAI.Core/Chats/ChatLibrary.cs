@@ -130,6 +130,20 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
         return data.Characters.Delete(characterId);
     }
 
+    /// <summary>Resolves the active persona id for <paramref name="chat"/> and <paramref name="character"/>: the chat's own, else the character's override, else <paramref name="defaultPersonaId"/>.</summary>
+    public static string? ResolvePersonaId(DataFolder data, Chat? chat, Character? character, string? defaultPersonaId)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        foreach (var candidate in (string?[])[chat?.Persona, character?.Persona, defaultPersonaId])
+        {
+            if (candidate is not null && Slug.IsValidId(candidate) && data.Personas.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
     /// <summary>A message's id: sequential in time, so a chat's messages sort as they were written.</summary>
     public static string NewMessageId()
         => Guid.CreateVersion7().ToString("N", CultureInfo.InvariantCulture);

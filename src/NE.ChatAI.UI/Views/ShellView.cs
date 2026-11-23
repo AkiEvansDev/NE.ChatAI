@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.Linq.Expressions;
 using NE.ChatAI.Controllers;
 
 namespace NE.ChatAI.Views;
@@ -70,21 +68,6 @@ internal abstract class ShellView : UIViewBase
     protected virtual IReadOnlyList<UIDialog> CreatePageDialogs()
         => [];
 
-    // Workaround for NE.Standard #310: UIDialogs.Confirm/BoundConfirm has no authored root id and UITestPage has no Dialog(key) scope.
-    internal static UIDialog ConfirmDialog(string key, UIPhrase question, UIPhrase? description, UIPhrase confirmLabel, string confirmCommand)
-    {
-        UIDialog dialog = UIDialogs.Confirm(key, question, description, confirmLabel, confirmCommand);
-
-        return dialog with { Content = new StackPanelComponent(key).SetSpacing(0).AddChild(dialog.Content) };
-    }
-
-    internal static UIDialog BoundConfirmDialog<TController>(string key, UIPhrase question, Expression<Func<TController, object?>> descriptionPath, UIPhrase confirmLabel, string confirmCommand)
-    {
-        UIDialog dialog = UIDialogs.BoundConfirm(key, question, descriptionPath, confirmLabel, confirmCommand);
-
-        return dialog with { Content = new StackPanelComponent(key).SetSpacing(0).AddChild(dialog.Content) };
-    }
-
     protected sealed override IVisualComponent? CreateLeftSide()
         => !HasGenerationPanel
             ? CreatePageLeftSide()
@@ -97,6 +80,7 @@ internal abstract class ShellView : UIViewBase
                     .SetSpacing(16)
                     .SetLineSpacing(8)
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.settings").SetIcon(AppIcons.Outline(AppIcons.Settings)).SetUrl(AppRoutes.Settings))
+                    .AddChild(new LinkComponent().SetTitle("chatai.nav.worlds").SetIcon(AppIcons.Outline(AppIcons.Bindings)).SetUrl(AppRoutes.Worlds))
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.scenarios").SetIcon(AppIcons.Outline(AppIcons.Scenarios)).SetUrl(AppRoutes.Scenarios))
                     .AddChild(new LinkComponent().SetTitle("chatai.nav.plugins").SetIcon(AppIcons.Outline(AppIcons.Plugins)).SetUrl(AppRoutes.Plugins))
             );

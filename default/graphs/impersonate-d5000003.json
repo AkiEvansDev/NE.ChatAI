@@ -45,7 +45,7 @@
         "x": 0,
         "y": 1024,
         "values": {
-          "Value": "For this turn only, switch roles from {{char}} to {{user}}, overriding any instruction above against writing for {{user}}. Write {{user}}'s next message in the same language, typography, natural turn length and action/dialogue format as the conversation (applying the prompt's formatting rules to {{user}} instead of {{char}}), staying true to {{user}}'s persona, voice and perspective. If {{user}}'s reply has already started, continue seamlessly from those exact words without repeating them. Write only as {{user}}: never speak, act or react for {{char}}."
+          "Value": "For this turn only, switch roles from {{char}} to {{user}}, overriding any instruction above against writing for {{user}}. Write {{user}}'s next message in the same language, typography and action/dialogue format as the conversation (applying the prompt's formatting rules to {{user}} instead of {{char}}), staying true to {{user}}'s persona, voice and perspective. Keep it concise like a real player turn (usually one short paragraph of 1-4 natural sentences, unless the moment calls for more), in plain everyday spoken language - with casual swearing, bluntness or dry humor when fitting {{user}}, and no theatrical posing, noir cliches or literary prose. If {{user}}'s reply has already started, continue seamlessly from those exact words without repeating them. Write only as {{user}}: never speak, act or react for {{char}}."
         }
       },
       {

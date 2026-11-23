@@ -115,8 +115,8 @@ internal static class ScenarioExecutor
         AppSettings settings = await data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         ActiveProfile? activeProfile = await Profiles.LoadActiveAsync(data, cancellationToken).ConfigureAwait(false);
         Character? character = chat.Character is string characterId && Slug.IsValidId(characterId) ? await data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
-        var personaId = chat.Persona is string ownPersona && Slug.IsValidId(ownPersona) && data.Personas.Exists(ownPersona) ? ownPersona : settings.Persona;
-        Persona? persona = personaId is not null && Slug.IsValidId(personaId) ? await data.Personas.ReadAsync(personaId, cancellationToken).ConfigureAwait(false) : null;
+        var personaId = ChatLibrary.ResolvePersonaId(data, chat, character, settings.Persona);
+        Persona? persona = personaId is not null ? await data.Personas.ReadAsync(personaId, cancellationToken).ConfigureAwait(false) : null;
         World? world = await WorldInfo.OfAsync(data, character, persona, cancellationToken).ConfigureAwait(false);
         var characterName = string.IsNullOrWhiteSpace(character?.Name) ? Controllers.ShellController.AppName : character.Name;
         var userName = string.IsNullOrWhiteSpace(persona?.Name) ? "User" : persona.Name;

@@ -354,9 +354,9 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
                 ),
                 width: UIColumnWidth.Form
             ),
-            ConfirmDialog(ChatController.DeleteDialogKey, "chatai.chat.delete.title", "chatai.chat.delete.question", UIStandardAction.Delete.Title, nameof(ChatController.DeleteMessageAsync)),
-            ConfirmDialog(ChatController.DeleteFromDialogKey, "chatai.chat.delete-from.title", "chatai.chat.delete-from.question", UIStandardAction.Delete.Title, nameof(ChatController.DeleteFromAsync)),
-            ConfirmDialog(ChatController.RefreshDialogKey, "chatai.chat.refresh.title", "chatai.chat.refresh.question", "chatai.chat.regenerate", nameof(ChatController.RefreshMessageAsync))
+            UIDialogs.Confirm(ChatController.DeleteDialogKey, "chatai.chat.delete.title", "chatai.chat.delete.question", UIStandardAction.Delete.Title, nameof(ChatController.DeleteMessageAsync)),
+            UIDialogs.Confirm(ChatController.DeleteFromDialogKey, "chatai.chat.delete-from.title", "chatai.chat.delete-from.question", UIStandardAction.Delete.Title, nameof(ChatController.DeleteFromAsync)),
+            UIDialogs.Confirm(ChatController.RefreshDialogKey, "chatai.chat.refresh.title", "chatai.chat.refresh.question", "chatai.chat.regenerate", nameof(ChatController.RefreshMessageAsync))
         ];
 
     private static UIDialog CreatePromptDialog()

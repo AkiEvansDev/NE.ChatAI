@@ -14,6 +14,7 @@ internal static class Words
         ["chatai.title"] = "{page} · ChatAI",
 
         ["chatai.nav.settings"] = "Настройки",
+        ["chatai.nav.worlds"] = "Связи",
         ["chatai.nav.scenarios"] = "Сценарии",
         ["chatai.nav.plugins"] = "Плагины",
 
@@ -69,6 +70,8 @@ internal static class Words
         ["chatai.character.background.hint"] = "Картинка за чатами с персонажем; без неё — фон из настроек.",
         ["chatai.settings.background"] = "Фон чатов",
         ["chatai.settings.background.hint"] = "Картинка за чатом, у персонажа которого нет своей.",
+        ["chatai.character.persona.default"] = "По умолчанию",
+        ["chatai.character.persona.hint"] = "Новые чаты с персонажем начинаются от лица этой персоны вместо стандартной.",
         ["chatai.character.world.hint"] = "Статьи мира идут в промпт каждого чата с персонажем; мир персонажа важнее мира персоны.",
         ["chatai.persona.world.hint"] = "Статьи мира идут в промпт, если у персонажа чата своего мира нет.",
         ["chatai.world.title"] = "Мир",
@@ -458,6 +461,29 @@ internal static class Words
         ["chatai.plugins.error.duplicate-key"] = "Конфликт ключа ноды ({detail}).",
         ["chatai.plugins.error.load"] = "Не удалось загрузить сборку плагина: {detail}",
         ["chatai.plugins.error.network"] = "Ошибка обращения к GitHub: {detail}",
+
+        ["chatai.pin.title"] = "Введите PIN",
+        ["chatai.pin.description"] = "Доступ защищён PIN-кодом. Каждый браузер спрашивает его один раз и запоминает.",
+        ["chatai.pin.field"] = "PIN-код",
+        ["chatai.pin.unlock"] = "Войти",
+        ["chatai.pin.wrong"] = "Неверный PIN-код.",
+        ["chatai.pin.locked"] = "Слишком много попыток. Повторите через {seconds} с.",
+        ["chatai.settings.pin.title"] = "PIN-код",
+        ["chatai.settings.pin.off"] = "Выключен: любой браузер в сети открывает приложение сразу.",
+        ["chatai.settings.pin.on"] = "Включён: каждый браузер один раз запрашивает PIN и запоминает его.",
+        ["chatai.settings.pin.field"] = "Новый PIN-код",
+        ["chatai.settings.pin.set"] = "Установить",
+        ["chatai.settings.pin.change"] = "Изменить",
+        ["chatai.settings.pin.remove"] = "Отключить",
+        ["chatai.settings.pin.empty"] = "Введите PIN-код.",
+        ["chatai.settings.pin.saved"] = "PIN-код установлен.",
+        ["chatai.settings.pin.removed"] = "PIN-код отключён.",
+
+        ["chatai.worlds.empty"] = "Карточек пока нет",
+        ["chatai.worlds.empty.hint"] = "Создайте персонажа, персону или мир кнопкой сверху или в панели чатов, чтобы увидеть их связи на графе.",
+        ["chatai.worlds.kind.character"] = "Персонаж",
+        ["chatai.worlds.kind.persona"] = "Персона",
+        ["chatai.worlds.kind.world"] = "Мир · статей: {count}",
     };
 
     private static readonly Dictionary<string, string> English = new()
@@ -465,6 +491,7 @@ internal static class Words
         ["chatai.title"] = "{page} · ChatAI",
 
         ["chatai.nav.settings"] = "Settings",
+        ["chatai.nav.worlds"] = "Bindings",
         ["chatai.nav.scenarios"] = "Scenarios",
         ["chatai.nav.plugins"] = "Plugins",
 
@@ -520,6 +547,8 @@ internal static class Words
         ["chatai.character.background.hint"] = "The picture behind the chats with the character; without one, the settings' picture.",
         ["chatai.settings.background"] = "Chats' background",
         ["chatai.settings.background.hint"] = "The picture behind a chat whose character has none of its own.",
+        ["chatai.character.persona.default"] = "Default persona",
+        ["chatai.character.persona.hint"] = "New chats with the character start as this persona instead of the default one.",
         ["chatai.character.world.hint"] = "The world's articles go into the prompt of every chat with the character; the character's world wins over the persona's.",
         ["chatai.persona.world.hint"] = "The world's articles go into the prompt when the chat's character has no world of its own.",
         ["chatai.world.title"] = "World",
@@ -909,6 +938,29 @@ internal static class Words
         ["chatai.plugins.error.duplicate-key"] = "Duplicate node key ({detail}).",
         ["chatai.plugins.error.load"] = "Could not load plugin assembly: {detail}",
         ["chatai.plugins.error.network"] = "GitHub request failed: {detail}",
+
+        ["chatai.pin.title"] = "Enter PIN",
+        ["chatai.pin.description"] = "Access is protected by a PIN. Each browser asks once and remembers it.",
+        ["chatai.pin.field"] = "PIN",
+        ["chatai.pin.unlock"] = "Unlock",
+        ["chatai.pin.wrong"] = "Incorrect PIN.",
+        ["chatai.pin.locked"] = "Too many attempts. Try again in {seconds} s.",
+        ["chatai.settings.pin.title"] = "PIN",
+        ["chatai.settings.pin.off"] = "Off: any browser on the network opens the app right away.",
+        ["chatai.settings.pin.on"] = "On: each browser asks for the PIN once and remembers it.",
+        ["chatai.settings.pin.field"] = "New PIN",
+        ["chatai.settings.pin.set"] = "Set PIN",
+        ["chatai.settings.pin.change"] = "Change PIN",
+        ["chatai.settings.pin.remove"] = "Turn off",
+        ["chatai.settings.pin.empty"] = "Enter a PIN first.",
+        ["chatai.settings.pin.saved"] = "PIN saved.",
+        ["chatai.settings.pin.removed"] = "PIN turned off.",
+
+        ["chatai.worlds.empty"] = "No cards yet",
+        ["chatai.worlds.empty.hint"] = "Create a character, persona or world from the header or the chats panel to see how they connect.",
+        ["chatai.worlds.kind.character"] = "Character",
+        ["chatai.worlds.kind.persona"] = "Persona",
+        ["chatai.worlds.kind.world"] = "World · {count} articles",
     };
 
     /// <summary>Every language's table; the framework's own words come from <c>AddFrameworkWords</c>, below these.</summary>

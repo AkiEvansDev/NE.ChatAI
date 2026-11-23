@@ -26,6 +26,11 @@ public abstract record Card : NamedDocument
 /// <summary>A character the model plays: a card, its first messages, examples and instructions of its own.</summary>
 public sealed record Character : Card
 {
+    /// <summary>The persona new chats with this character are started as, overriding <see cref="Settings.AppSettings.Persona"/>; <c>null</c> uses the default persona.</summary>
+    [JsonPropertyOrder(1)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Persona { get; init; }
+
     [JsonPropertyOrder(1)]
     public string ExampleMessages { get; init; } = string.Empty;
 

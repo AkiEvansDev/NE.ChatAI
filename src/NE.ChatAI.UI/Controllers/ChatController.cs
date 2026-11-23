@@ -344,9 +344,7 @@ internal sealed partial class ChatController : ShellController
             : null;
         Chat? effectiveChat = persisted ?? snapshotChat;
         Character? character = effectiveChat?.Character is string characterId ? await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
-        var personaId = effectiveChat is null
-            ? null
-            : effectiveChat.Persona is string own && Slug.IsValidId(own) && Data.Personas.Exists(own) ? own : DefaultPersonaId;
+        var personaId = effectiveChat is null ? null : ChatLibrary.ResolvePersonaId(Data, effectiveChat, character, DefaultPersonaId);
         Persona? persona = personaId is null ? null : await Data.Personas.ReadAsync(personaId, cancellationToken).ConfigureAwait(false);
         var needsWindow = false;
 
@@ -371,7 +369,7 @@ internal sealed partial class ChatController : ShellController
 
             OpenCharacterId = _chat.Character;
             _character = character;
-            _personaId = _chat.Persona is string ownPersona && Slug.IsValidId(ownPersona) && Data.Personas.Exists(ownPersona) ? ownPersona : DefaultPersonaId;
+            _personaId = ChatLibrary.ResolvePersonaId(Data, _chat, _character, DefaultPersonaId);
             _persona = _personaId == personaId ? persona : _persona;
             ActivePersonaId = _personaId;
             ActiveWorldId = ResolveActiveWorldId();
@@ -505,7 +503,7 @@ internal sealed partial class ChatController : ShellController
         ApplyChatSurface(settings.MessageBackground);
 
         _character = chat.Character is string characterId ? await Data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
-        _personaId = chat.Persona is string own && Slug.IsValidId(own) && Data.Personas.Exists(own) ? own : DefaultPersonaId;
+        _personaId = ChatLibrary.ResolvePersonaId(Data, chat, _character, DefaultPersonaId);
         OpenChatId = chatId;
         ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
         RefreshVisuals();

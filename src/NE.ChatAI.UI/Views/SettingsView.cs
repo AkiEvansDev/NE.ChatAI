@@ -57,7 +57,7 @@ internal sealed class SettingsView : ShellView, IUIViewDefinition
                 ),
                 UIButtons.Primary(UIStandardAction.Save).OnClickShowingLoading(nameof(SettingsController.SaveSecretAsync))
             ),
-            BoundConfirmDialog<SettingsController>(SettingsController.DeleteDialogKey, "chatai.settings.delete.title", static x => x.DeleteQuestion, UIStandardAction.Delete.Title, nameof(SettingsController.DeleteAsync)),
-            ConfirmDialog(SettingsController.RestoreDefaultsDialogKey, "chatai.import.defaults.restore.title", "chatai.import.defaults.restore.question", "chatai.import.defaults.restore.confirm", nameof(SettingsController.RestoreDefaultsAsync))
+            UIDialogs.BoundConfirm<SettingsController>(SettingsController.DeleteDialogKey, "chatai.settings.delete.title", static x => x.DeleteQuestion, UIStandardAction.Delete.Title, nameof(SettingsController.DeleteAsync)),
+            UIDialogs.Confirm(SettingsController.RestoreDefaultsDialogKey, "chatai.import.defaults.restore.title", "chatai.import.defaults.restore.question", "chatai.import.defaults.restore.confirm", nameof(SettingsController.RestoreDefaultsAsync))
         ];
 }

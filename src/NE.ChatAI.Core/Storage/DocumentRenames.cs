@@ -81,7 +81,7 @@ public static class DocumentRenames
         return newId;
     }
 
-    /// <summary>Saves a persona, renaming its folder and updating default/chat persona references when its name slug changed.</summary>
+    /// <summary>Saves a persona, renaming its folder and updating default, character and chat persona references when its name slug changed.</summary>
     public static async Task<string> SavePersonaAsync(DataFolder data, string id, Persona persona, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -95,6 +95,16 @@ public static class DocumentRenames
 
             if (string.Equals(settings.Persona, id, StringComparison.Ordinal))
                 await data.WriteSettingsAsync(settings with { Persona = newId }, cancellationToken).ConfigureAwait(false);
+
+            DocumentListing<Character> characters = await data.Characters.ListAsync(cancellationToken).ConfigureAwait(false);
+
+            for (var i = 0; i < characters.Items.Count; i++)
+            {
+                StoredDocument<Character> stored = characters.Items[i];
+
+                if (string.Equals(stored.Document.Persona, id, StringComparison.Ordinal))
+                    await data.Characters.WriteAsync(stored.Id, stored.Document with { Persona = newId }, cancellationToken).ConfigureAwait(false);
+            }
 
             DocumentListing<Chat> chats = await data.Chats.ListAsync(cancellationToken).ConfigureAwait(false);
 

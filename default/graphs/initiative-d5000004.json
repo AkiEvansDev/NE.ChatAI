@@ -22,7 +22,7 @@
         "values": {
           "Tag": "ambient-shift",
           "When": "the surroundings have faded into the background for several turns",
-          "Cue": "Let one concrete detail of the immediate environment shift (light, weather, temperature, a sound outside, or a nearby surface) and have {{char}} react to or use it in passing."
+          "Cue": "Let one concrete practical detail of the immediate environment shift (a draft, cold or heat, glare, noise outside, or an uncomfortable seat) and have {{char}} react to or use it directly in plain action or speech, with no atmospheric scenery description."
         }
       },
       {
@@ -110,7 +110,7 @@
         "values": {
           "Tag": "unspoken-tell",
           "When": "tension or guarded feeling sits underneath plain dialogue without showing physically",
-          "Cue": "Show what {{char}} is holding back strictly through visible behavior (a brief pause, an averted glance, occupied hands, or an action that contradicts {{char}}'s words), without explaining {{char}}'s thoughts or feelings."
+          "Cue": "Let what {{char}} is holding back show strictly through concrete everyday behavior - keeping {{char}}'s hands busy with an object, changing the subject clumsily, or doing the opposite of what {{char}} just claimed - with no theatrical pauses, averted-gaze cliches, or explaining {{char}}'s thoughts or feelings."
         }
       },
       {
@@ -121,7 +121,7 @@
         "values": {
           "Tag": "tempo-change",
           "When": "several turns in a row have kept the exact same rhythm, length, and tone",
-          "Cue": "Break the rhythm in a way true to {{char}}: cut a long back-and-forth short with a blunt line, hold a quiet beat before answering, or pivot sharply to the practical point."
+          "Cue": "Break the conversational rhythm in {{char}}'s natural everyday manner: interrupt, drop a casual offhand remark or complaint, switch from talk to doing something concrete, or cut straight to the practical point without dramatic pauses."
         }
       },
       {
@@ -173,7 +173,7 @@
         "x": 768,
         "y": 1408,
         "values": {
-          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Act as a scene director evaluating the candidate cues above ('- tag: condition'). Choose 'none' whenever {{user}} just asked a direct question, escalated the moment, or the exchange already has strong momentum; otherwise choose the single tag whose condition clearly matches the latest turns and fits {{char}}. Output only the exact tag or none, with no explanation or punctuation."
+          "Value": "Pause the roleplay and ignore the roleplay formatting and language instructions above. Act as a scene director evaluating the candidate cues above ('- tag: condition') against the actual conversation turns (ignoring any example dialogues in the character card). Choose 'none' whenever {{user}} just asked a direct question, escalated the moment, or the exchange already has strong momentum; otherwise choose the single tag whose condition clearly matches the latest turns and fits {{char}}. Output only the exact English ASCII tag from the list or none, with no translation, explanation or punctuation."
         }
       },
       {
@@ -253,7 +253,7 @@
         "values": {
           "Role": "System",
           "Tag": "initiative",
-          "Template": "[Narrative direction for this reply only (subordinate to {{char}}'s personality, current state and reply format; never mention this note): {0}]",
+          "Template": "[Narrative direction for this reply only (subordinate to {{char}}'s personality, spoken voice, current state and reply format; never mention this note): {0}]",
           "OneTurn": true,
           "IgnoreEmpty": true
         }

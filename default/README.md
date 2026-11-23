@@ -12,7 +12,7 @@ or `tokenizer_config.json` on Hugging Face) and, where SillyTavern ships one, it
 
 | File | Name | For | Checked against |
 | --- | --- | --- | --- |
-| `gemma-4-d1000001` | Gemma 4 | Gemma 4 and its fine-tunes; thinking on puts `<\|think\|>` at the top of the system turn | `google/gemma-4-31b-it` `chat_template.jinja`, `tokenizer_config.json`; ST "Gemma 4" |
+| `gemma-4-d1000001` | Gemma 4 | Gemma 4 and its fine-tunes; thinking on puts `<\|think\|>` at the top of the system turn and opens the reply inside `<\|channel>thought\n` | `google/gemma-4-31b-it` `chat_template.jinja`, `tokenizer_config.json`; ST "Gemma 4" |
 | `gemma-3-d1000003` | Gemma 3 | Gemma 3 (and 2); no system role, the system text goes in a user turn | `google/gemma-3-27b-it` `chat_template.json` (via the `unsloth` mirror); ST "Gemma 2" |
 | `qwen-3-thinking-d1000004` | Qwen 3 (thinking) | Qwen 3 hybrid, 3.5, 3.8: the reply opens inside `<think>` | `Qwen/Qwen3-8B` `tokenizer_config.json`, `Qwen/Qwen3.5-27B` and `Qwen/Qwen3.8-27B` `chat_template.jinja` |
 | `chatml-d1000005` | ChatML | Qwen 2.5, Qwen 3 Instruct-2507, and the many fine-tunes trained on ChatML | `Qwen/Qwen2.5-7B-Instruct`, `Qwen/Qwen3-30B-A3B-Instruct-2507` `tokenizer_config.json`; ST "ChatML" |
@@ -77,6 +77,6 @@ All but Deterministic keep one seed per chat; a reply may be up to 1024 tokens, 
 | File | Name | Default | Trigger | What it does |
 | --- | --- | --- | --- | --- |
 | `summary-d5000001` | Summary | On | After a reply (`Context` crossing 50% -> `Model call.When`) | Replaces the middle messages (skipping the first 2 and the last 4) with a concise past-tense summary in the chat's language (`Precise`, thinking off, reply length 2048, temperature 0.65) under tag `summary` |
-| `scene-report-d5000002` | Scene report | Off | After a reply | Updates a telegraphic four-line `Location` / `Clothing` / `Pose` / `Mood` note in the chat's language from the previous `scene` record, preceding two raw messages and isolated latest message (`Precise`, thinking off, reply length 256, temperature 0.4), inserted under tag `scene` |
+| `scene-report-d5000002` | Scene report | Off | After a reply | Updates a telegraphic three-line `Location` / `Clothing` / `Pose` note in the chat's language from the previous `scene` record, preceding two raw messages and isolated latest message (`Precise`, thinking off, reply length 256, temperature 0.4), inserted under tag `scene` |
 | `impersonate-d5000003` | Impersonate | System | By hand | Writes `{{user}}`'s next message into the composer draft from the character, persona, world and history (`Thinking: Off`) |
 | `initiative-d5000004` | Initiative | Off | Before a reply (`Gate`: 40% chance, cooldown 2, minimum turns 2) | Samples 6 of 12 setting-agnostic RP director `Cue` nodes across three groups, asks the model for the best fitting tag or `none` (`Precise`, thinking off, reply length 64, temperature 0.4), and injects the chosen cue as a `OneTurn` record under tag `initiative` |

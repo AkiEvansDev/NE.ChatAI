@@ -77,6 +77,7 @@ internal sealed class ChatAIStartup : UIStartupBase
         _ = services.AddSingleton<ChatLibrary>();
         _ = services.AddSingleton<PictureContent>();
         _ = services.AddSingleton<IUIContentProvider>(static provider => provider.GetRequiredService<PictureContent>());
+        _ = services.AddSingleton<PinAttemptThrottle>();
         _ = services.AddSingleton<UserSessionResolver>();
         _ = services.AddSingleton<IUserSessionResolver>(static provider => provider.GetRequiredService<UserSessionResolver>());
 
@@ -124,7 +125,17 @@ internal sealed class ChatAIStartup : UIStartupBase
         ArgumentNullException.ThrowIfNull(application);
 
         _ = application.ConfigurePersistence(static persistence => persistence.Lifetime = UIRuntimeLifetime.PerClient);
-        _ = application.ConfigureSessions(static sessions => sessions.ClientKey = UserSessionResolver.CookieName);
+        _ = application.ConfigureSessions(static sessions =>
+        {
+            sessions.ClientKey = UserSessionResolver.CookieName;
+            sessions.ClientKeyLifetime = UserSessionResolver.CookieLifetime;
+            sessions.IdleTimeout = UserSessionResolver.CookieLifetime;
+        });
+        _ = application.ConfigureSecurity(static security =>
+        {
+            security.DefaultPolicy = UIAuthorizationDefault.Authenticated;
+            security.RecheckRouteOnActivity = true;
+        });
 
         _ = application.ConfigureLocalization(static localization =>
         {
@@ -148,8 +159,10 @@ internal sealed class ChatAIStartup : UIStartupBase
             static file => file.MinimumLevel = LogLevel.Warning
         ));
 
+        _ = application.SignInView<PinView, PinController>(AppRoutes.Pin);
         _ = application.Route<ChatView, ChatController>(AppRoutes.Home);
         _ = application.Route<SettingsView, SettingsController>(AppRoutes.Settings);
+        _ = application.Route<WorldsView, WorldsController>(AppRoutes.Worlds);
         _ = application.Route<ScenarioView, ScenarioController>(AppRoutes.Scenarios);
         _ = application.Route<PluginsView, PluginsController>(AppRoutes.Plugins);
     }

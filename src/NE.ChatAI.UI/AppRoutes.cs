@@ -16,6 +16,12 @@ internal static class AppRoutes
     /// <summary>Installed scenario plugins and updates from GitHub releases.</summary>
     public const string Plugins = "/plugins";
 
+    /// <summary>Layered graph of personas, characters and the worlds they are bound to.</summary>
+    public const string Worlds = "/worlds";
+
+    /// <summary>The PIN unlock page shown when a network PIN is configured.</summary>
+    public const string Pin = "/pin";
+
     /// <summary>Which chat the home page shows.</summary>
     public const string ChatParameter = "chat";
 

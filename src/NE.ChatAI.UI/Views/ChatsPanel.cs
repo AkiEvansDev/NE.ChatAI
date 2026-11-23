@@ -189,6 +189,10 @@ internal static class ChatsPanel
     public static IVisualComponent[] CreateActions()
         =>
         [
+            UIButtons.Icon(AppIcons.Outline(AppIcons.Bindings), "chatai.nav.worlds")
+                .SetSize(UISize.Small)
+                .SetUrl(AppRoutes.Worlds)
+                .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility),
             UIIconButtons.New()
                 .SetSize(UISize.Small)
                 .OnClick(nameof(ShellController.StartChatAsync))
@@ -227,9 +231,9 @@ internal static class ChatsPanel
                 UIButtons.Primary(UIStandardAction.Save).OnClick(nameof(ShellController.SaveGalleryTagAsync))
             ),
             .. CardEditor.CreateTagsDialogs(),
-            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeleteCharacterDialogKey, "chatai.character.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
-            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeletePersonaDialogKey, "chatai.persona.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
-            ShellView.BoundConfirmDialog<ShellController>(ShellController.DeleteWorldDialogKey, "chatai.world.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
-            ShellView.ConfirmDialog(ShellController.DeleteChatDialogKey, "chatai.chat.delete-chat.title", "chatai.chat.delete-chat.question", UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelChatAsync))
+            UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteCharacterDialogKey, "chatai.character.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
+            UIDialogs.BoundConfirm<ShellController>(ShellController.DeletePersonaDialogKey, "chatai.persona.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
+            UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteWorldDialogKey, "chatai.world.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
+            UIDialogs.Confirm(ShellController.DeleteChatDialogKey, "chatai.chat.delete-chat.title", "chatai.chat.delete-chat.question", UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelChatAsync))
         ];
 }

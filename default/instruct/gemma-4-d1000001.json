@@ -20,6 +20,6 @@
     "prefix": "<|channel>thought\n",
     "suffix": "<channel|>",
     "systemMark": "<|think|>\n",
-    "opensReply": false
+    "opensReply": true
   }
 }
