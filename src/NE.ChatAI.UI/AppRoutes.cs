@@ -25,6 +25,9 @@ internal static class AppRoutes
     /// <summary>Which chat the home page shows.</summary>
     public const string ChatParameter = "chat";
 
+    /// <summary>Which tab the settings page shows.</summary>
+    public const string TabParameter = "tab";
+
     /// <summary>Which scenario the scenarios page shows.</summary>
     public const string CardParameter = "id";
 

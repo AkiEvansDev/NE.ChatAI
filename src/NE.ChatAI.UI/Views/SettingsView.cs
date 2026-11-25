@@ -12,19 +12,20 @@ internal sealed class SettingsView : ShellView, IUIViewDefinition
     protected override IVisualComponent CreatePage()
         => UIPage.Column(UIColumnWidth.Wide, CreateTabs(), centered: true);
 
-    private static TabsComponent CreateTabs()
-        => new TabsComponent("chatai-settings-tabs")
-            .AddTab("general", "chatai.settings.general", SettingsEditors.CreateGeneral())
-            .AddTab("connections", "chatai.settings.connections", SettingsEditors.CreateConnection())
-            .AddTab("formats", "chatai.settings.formats", SettingsEditors.CreateFormat())
-            .AddTab("system-prompts", "chatai.settings.system-prompts", SettingsEditors.CreateSystemPrompt())
-            .AddTab("prompts", "chatai.settings.prompts", SettingsEditors.CreatePrompt())
-            .AddTab("samplers", "chatai.settings.samplers", SettingsEditors.CreateSamplers())
-            .AddTab("notes", "chatai.settings.notes", SettingsEditors.CreateAuthorsNote())
-            .AddTab("phrases", "chatai.settings.phrases", SettingsEditors.CreatePhrases())
-            .AddTab("gallery", "chatai.settings.gallery", SettingsEditors.CreateGallery())
-            .AddTab("secrets", "chatai.settings.secrets", SettingsEditors.CreateSecrets())
-            .AddTab("import", "chatai.settings.import", SettingsEditors.CreateImport());
+    internal static TabsComponent CreateTabs()
+        => new TabsComponent(SettingsController.TabsId)
+            .BindSelectedKey<SettingsController>(static x => x.Tab)
+            .AddTab(SettingsController.ConnectionsTab, "chatai.settings.connections", SettingsEditors.CreateConnection())
+            .AddTab(SettingsController.GeneralTab, "chatai.settings.general", SettingsEditors.CreateGeneral())
+            .AddTab(SettingsController.FormatsTab, "chatai.settings.formats", SettingsEditors.CreateFormat())
+            .AddTab(SettingsController.SystemPromptsTab, "chatai.settings.system-prompts", SettingsEditors.CreateSystemPrompt())
+            .AddTab(SettingsController.PromptsTab, "chatai.settings.prompts", SettingsEditors.CreatePrompt())
+            .AddTab(SettingsController.SamplersTab, "chatai.settings.samplers", SettingsEditors.CreateSamplers())
+            .AddTab(SettingsController.NotesTab, "chatai.settings.notes", SettingsEditors.CreateAuthorsNote())
+            .AddTab(SettingsController.PhrasesTab, "chatai.settings.phrases", SettingsEditors.CreatePhrases())
+            .AddTab(SettingsController.GalleryTab, "chatai.settings.gallery", SettingsEditors.CreateGallery())
+            .AddTab(SettingsController.SecretsTab, "chatai.settings.secrets", SettingsEditors.CreateSecrets())
+            .AddTab(SettingsController.ImportTab, "chatai.settings.import", SettingsEditors.CreateImport());
 
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
         =>

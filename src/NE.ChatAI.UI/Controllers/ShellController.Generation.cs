@@ -60,6 +60,9 @@ internal abstract partial class ShellController
     public partial string? SamplersId { get; set; }
 
     [RecursiveMember]
+    public partial string? ModelName { get; set; }
+
+    [RecursiveMember]
     public partial UIPhrase? ModelLine { get; set; }
 
     [RecursiveMember]
@@ -182,6 +185,7 @@ internal abstract partial class ShellController
         SystemPromptId = profile?.Connection.SystemPrompt;
         PromptId = profile?.Connection.Prompt;
         SamplersId = profile?.Connection.Samplers;
+        ModelName = null;
         ModelLine = profile is null ? new UIPhrase("chatai.connection.none") : null;
 
         if (profile is null)
@@ -209,16 +213,19 @@ internal abstract partial class ShellController
 
     private async Task DescribeModelAsync(Uri address, CancellationToken lifetime)
     {
-        (UIPhrase line, _, _) = await QueryModelAsync(address, lifetime).ConfigureAwait(false);
+        (var model, UIPhrase line, _, _) = await QueryModelAsync(address, lifetime).ConfigureAwait(false);
 
         await Context.Runtime.InvokeAsync(() =>
         {
-            if (_profile?.Connection.Address == address)
-                ModelLine = line;
+            if (_profile?.Connection.Address != address)
+                return;
+
+            ModelName = model;
+            ModelLine = line;
         }, lifetime).ConfigureAwait(false);
     }
 
-    private async Task<(UIPhrase Line, UIPhrase Toast, UIColorStyle Style)> QueryModelAsync(Uri address, CancellationToken cancellationToken)
+    private async Task<(string? Model, UIPhrase Line, UIPhrase Toast, UIColorStyle Style)> QueryModelAsync(Uri address, CancellationToken cancellationToken)
     {
         try
         {
@@ -230,10 +237,12 @@ internal abstract partial class ShellController
             Backends.KoboldCpp.KoboldCppClient kobold = clients.For(address);
             var rawModel = await kobold.GetModelAsync(timeout.Token).ConfigureAwait(false);
             clients.CacheFor(address).UseModel(rawModel);
-            var model = ShortModelName(rawModel);
+            var model = ShortModelName(rawModel).Trim();
+            var modelName = model.Length > 0 ? model : null;
             var context = await kobold.GetContextLengthAsync(timeout.Token).ConfigureAwait(false);
 
             return (
+                modelName,
                 UIPhrase.Of("chatai.model.line", ("model", model), ("context", context)),
                 UIPhrase.Of("chatai.connection.connected", ("model", model), ("context", context)),
                 UIColorStyle.Success
@@ -243,12 +252,39 @@ internal abstract partial class ShellController
         {
             UIPhrase unreachable = new("chatai.backend.unreachable");
 
-            return (unreachable, unreachable, UIColorStyle.Danger);
+            return (null, unreachable, unreachable, UIColorStyle.Danger);
         }
     }
 
     protected static string ShortModelName(string model)
         => model.StartsWith("koboldcpp/", StringComparison.Ordinal) ? model["koboldcpp/".Length..] : model;
+
+    protected Task ShowConnectedModelAsync(Uri address, string? rawModel, int? serverContextLength, CancellationToken cancellationToken)
+        => Context.Runtime.InvokeAsync(() =>
+        {
+            if (_profile?.Connection.Address != address)
+                return;
+
+            if (rawModel is null)
+            {
+                ModelName = null;
+                ModelLine = new UIPhrase("chatai.backend.unreachable");
+                return;
+            }
+
+            var model = ShortModelName(rawModel).Trim();
+            ModelName = model.Length > 0 ? model : null;
+
+            if (ModelName is not null && serverContextLength is int context)
+                ModelLine = UIPhrase.Of("chatai.model.line", ("model", model), ("context", context));
+        }, cancellationToken);
+
+    [UICommand]
+    public void LoadGenerationPanel()
+    {
+        if (_profile?.Connection.Address is Uri address)
+            Context.Runtime.Start(lifetime => DescribeModelAsync(address, lifetime));
+    }
 
     [UICommand]
     public async Task SelectConnectionAsync(CancellationToken cancellationToken)
@@ -269,10 +305,13 @@ internal abstract partial class ShellController
     {
         ArgumentNullException.ThrowIfNull(address);
 
-        (UIPhrase line, UIPhrase toast, UIColorStyle style) = await QueryModelAsync(address, cancellationToken).ConfigureAwait(false);
+        (var model, UIPhrase line, UIPhrase toast, UIColorStyle style) = await QueryModelAsync(address, cancellationToken).ConfigureAwait(false);
 
         if (updateModelLine)
+        {
+            ModelName = model;
             ModelLine = line;
+        }
 
         return UICommandResult.Ok([new ShowNotificationEffect(toast, style)]);
     }

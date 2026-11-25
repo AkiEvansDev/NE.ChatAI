@@ -57,7 +57,7 @@
         "x": 0,
         "y": 1248,
         "values": {
-          "Value": "Pause the roleplay and ignore the roleplay formatting instructions above. Summarize only what actually happened in [Summary of earlier events] and the conversation turns above (ignoring any example dialogues in the character card). Merge them into one concise chronological summary in past tense, in the same language as the dialogue and using the character names from the dialogue. Preserve established facts, promises, secrets, conflicts, injuries, locations, attire changes, items, intimate acts and relationship shifts without compressing earlier events away. Use plain, direct everyday language: no literary phrasing, no bureaucratic tone, and no euphemisms or sanitization for sex, profanity or rough behavior. Output only plain summary prose, with no headings, bullets, commentary or new dialogue."
+          "Value": "Stop roleplaying and ignore the style rules above. Write in the dialogue's language, in past tense, using the character names.\nMerge [Summary of earlier events] (if present) and the conversation turns above into one chronological summary (ignore any example dialogues in the character card).\n\nKeep: timeline and location shifts, relationship changes, promises, secrets learned, conflicts, injuries, key items, lasting outfit changes, and intimate acts.\nDrop: small talk, repeated gestures, atmosphere.\nFormat: output only plain summary prose in direct everyday words, with no headings, bullets, quotes, commentary, or euphemisms/censorship for sex or violence."
         }
       },
       {

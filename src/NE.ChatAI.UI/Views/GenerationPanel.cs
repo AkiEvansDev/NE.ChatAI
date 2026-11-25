@@ -7,6 +7,14 @@ namespace NE.ChatAI.Views;
 
 internal static class GenerationPanel
 {
+    public static TextComponent CreateHeading()
+        => UIText.Subtitle("chatai.panel.generation")
+            .SetDescriptionPlain(true)
+            .SetTooltipPlain(true)
+            .AsContent(TextComponent.DescriptionProperty, ITooltipComponent.TooltipProperty)
+            .BindDescription<ShellController>(static x => x.ModelName)
+            .BindTooltip<ShellController>(static x => x.ModelName);
+
     public static StackPanelComponent Create()
     {
         SwitchComponent contextAuto = CreateContextAuto();

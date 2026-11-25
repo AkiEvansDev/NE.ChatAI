@@ -72,18 +72,21 @@ internal abstract class ShellView : UIViewBase
         => !HasGenerationPanel
             ? CreatePageLeftSide()
             : UIPage.Drawer(
-                GenerationPanelId,
-                UISide.Left,
-                "chatai.panel.generation",
-                GenerationPanel.Create(),
-                footer: new WrapPanelComponent()
-                    .SetSpacing(16)
-                    .SetLineSpacing(8)
-                    .AddChild(new LinkComponent().SetTitle("chatai.nav.settings").SetIcon(AppIcons.Outline(AppIcons.Settings)).SetUrl(AppRoutes.Settings))
-                    .AddChild(new LinkComponent().SetTitle("chatai.nav.worlds").SetIcon(AppIcons.Outline(AppIcons.Bindings)).SetUrl(AppRoutes.Worlds))
-                    .AddChild(new LinkComponent().SetTitle("chatai.nav.scenarios").SetIcon(AppIcons.Outline(AppIcons.Scenarios)).SetUrl(AppRoutes.Scenarios))
-                    .AddChild(new LinkComponent().SetTitle("chatai.nav.plugins").SetIcon(AppIcons.Outline(AppIcons.Plugins)).SetUrl(AppRoutes.Plugins))
-            );
+                    GenerationPanelId,
+                    UISide.Left,
+                    GenerationPanel.CreateHeading(),
+                    subheader: null,
+                    GenerationPanel.Create(),
+                    footer: new WrapPanelComponent()
+                        .SetSpacing(16)
+                        .SetLineSpacing(8)
+                        .AddChild(new LinkComponent().SetTitle("chatai.nav.settings").SetIcon(AppIcons.Outline(AppIcons.Settings)).SetUrl(AppRoutes.Settings))
+                        .AddChild(new LinkComponent().SetTitle("chatai.nav.worlds").SetIcon(AppIcons.Outline(AppIcons.Bindings)).SetUrl(AppRoutes.Worlds))
+                        .AddChild(new LinkComponent().SetTitle("chatai.nav.scenarios").SetIcon(AppIcons.Outline(AppIcons.Scenarios)).SetUrl(AppRoutes.Scenarios))
+                        .AddChild(new LinkComponent().SetTitle("chatai.nav.plugins").SetIcon(AppIcons.Outline(AppIcons.Plugins)).SetUrl(AppRoutes.Plugins)),
+                    pinnable: true
+                )
+                .OnDrawerOpen(nameof(ShellController.LoadGenerationPanel));
 
     protected virtual IVisualComponent? CreatePageLeftSide()
         => null;

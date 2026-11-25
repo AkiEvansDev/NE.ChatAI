@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using NE.ChatAI.Characters;
@@ -16,6 +17,19 @@ namespace NE.ChatAI.Controllers;
 /// </summary>
 internal sealed partial class SettingsController : ShellController
 {
+    public const string TabsId = "chatai-settings-tabs";
+    public const string ConnectionsTab = "connections";
+    public const string GeneralTab = "general";
+    public const string FormatsTab = "formats";
+    public const string SystemPromptsTab = "system-prompts";
+    public const string PromptsTab = "prompts";
+    public const string SamplersTab = "samplers";
+    public const string NotesTab = "notes";
+    public const string PhrasesTab = "phrases";
+    public const string GalleryTab = "gallery";
+    public const string SecretsTab = "secrets";
+    public const string ImportTab = "import";
+
     public const string DeleteDialogKey = "chatai-settings-delete";
     public const string RenameDialogKey = "chatai-settings-rename";
     public const string RestoreDefaultsDialogKey = "chatai-settings-restore-defaults";
@@ -32,6 +46,25 @@ internal sealed partial class SettingsController : ShellController
     public const string DeleteAction = "delete";
 
     private static readonly string[] Kinds = [ConnectionKind, FormatKind, SystemPromptKind, PromptKind, SamplersKind];
+    private static readonly PathSegment TabSegment = PathSegment.ForProperty(nameof(Tab));
+
+    private static readonly HashSet<string> KnownTabs =
+    [
+        with(StringComparer.Ordinal),
+        ConnectionsTab,
+        GeneralTab,
+        FormatsTab,
+        SystemPromptsTab,
+        PromptsTab,
+        SamplersTab,
+        NotesTab,
+        PhrasesTab,
+        GalleryTab,
+        SecretsTab,
+        ImportTab
+    ];
+
+    private bool _syncingTab;
 
     /// <summary>What the delete dialog was opened for.</summary>
     private string? _deleting;
@@ -42,6 +75,26 @@ internal sealed partial class SettingsController : ShellController
     /// <summary>The kind for which the name dialog is creating a new document or a copy.</summary>
     private string? _creatingKind;
     private bool _creatingCopy;
+
+    [RecursiveMember(false)]
+    public string Tab
+    {
+        get;
+        set
+        {
+            var normalized = NormalizeTab(value);
+
+            if (!SetRecursiveProperty(ref field, normalized, TabSegment) || _syncingTab || !HasViewers)
+                return;
+
+            Context.Runtime.Post(async cancellationToken =>
+            {
+                var activeTab = ConnectionsTab;
+                await Context.Runtime.InvokeAsync(() => activeTab = Tab, cancellationToken).ConfigureAwait(false);
+                await Context.SendEffectsToAllAsync([new ReplaceAddressEffect(TabParameters(activeTab))], cancellationToken).ConfigureAwait(false);
+            });
+        }
+    } = ConnectionsTab;
 
     [RecursiveMember]
     public partial DocumentEditor<ConnectionProfile, ConnectionDraft> Connection { get; set; } = new();
@@ -87,6 +140,38 @@ internal sealed partial class SettingsController : ShellController
     /// <summary>Whose turn the notes are written as, a <see cref="PromptRole"/>'s name.</summary>
     [RecursiveMember]
     public partial string NoteRole { get; set; } = nameof(PromptRole.System);
+
+    protected override Task OnNavigatedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(navigation);
+
+        var requested = navigation.TryGetParameter(AppRoutes.TabParameter, out var tab) ? NormalizeTab(tab) : ConnectionsTab;
+        SetTabSilently(requested);
+
+        return Task.CompletedTask;
+    }
+
+    private static string NormalizeTab(string? tab)
+        => tab is not null && KnownTabs.Contains(tab) ? tab : ConnectionsTab;
+
+    private static Dictionary<string, object?> TabParameters(string tab)
+        => string.Equals(tab, ConnectionsTab, StringComparison.Ordinal)
+            ? []
+            : new Dictionary<string, object?> { [AppRoutes.TabParameter] = tab };
+
+    private void SetTabSilently(string tab)
+    {
+        _syncingTab = true;
+
+        try
+        {
+            Tab = tab;
+        }
+        finally
+        {
+            _syncingTab = false;
+        }
+    }
 
     /// <summary>Opens each editor on the document the active connection uses, or the first of its kind.</summary>
     protected override async Task OnAttachedAsync(UINavigationRequest navigation, CancellationToken cancellationToken)

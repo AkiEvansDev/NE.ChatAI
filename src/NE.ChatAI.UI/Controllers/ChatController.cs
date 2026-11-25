@@ -986,6 +986,10 @@ internal sealed partial class ChatController : ShellController
 
             contextLength = context.Length;
             model = await KoboldCppClients.TryGetModelNameAsync(kobold, generation.Token).ConfigureAwait(false);
+
+            if (model is not null)
+                await ShowConnectedModelAsync(address, model, context.FromServer ? context.Length : null, lifetime).ConfigureAwait(false);
+
             prompt = await BuildPromptAsync(job, context.Length, kobold, model, generation.Token).ConfigureAwait(false);
             Context.Logger.LogPrompt(prompt.Tokens, prompt.Counts, context.Length, prompt.MessagesSent, job.History.Count);
             KoboldGenerateRequest request = KoboldGenerateRequest.From(prompt.Text, profile.Samplers, context.Length, seed.Seed, profile.Format.AllStopSequences(), genKey);
@@ -1027,6 +1031,7 @@ internal sealed partial class ChatController : ShellController
         {
             backendFailed = true;
             Context.Logger.LogBackendFailure(exception);
+            await ShowConnectedModelAsync(address, rawModel: null, serverContextLength: null, CancellationToken.None).ConfigureAwait(false);
             await Context.SendEffectsToAllAsync([new ShowNotificationEffect("chatai.backend.unreachable", UIColorStyle.Danger)], CancellationToken.None).ConfigureAwait(false);
         }
         finally
