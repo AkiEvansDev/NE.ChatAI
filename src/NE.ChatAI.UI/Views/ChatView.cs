@@ -154,26 +154,17 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
 
     private static StackPanelComponent CreateAuthorColumn()
         => UILayout.Stack(4,
-                new SurfaceComponent()
+                new ImageComponent()
                     .BindAccessibleName<ChatMessageItem>(static x => x.Author, UIBindingScope.Relative)
-                    .AsContent(SurfaceComponent.AccessibleNameProperty)
-                    .SetBackground(UIThemeColor.Transparent)
-                    .SetBorderThickness(UIThickness.Uniform(0))
-                    .SetBorderRadius(UICornerRadius.Uniform(AvatarSize / 2))
-                    .SetPadding(UIThickness.Uniform(0))
-                    .SetOverflow(UIOverflow.Hidden)
+                    .AsContent(ImageComponent.AccessibleNameProperty)
+                    .BindSource<ChatMessageItem>(static x => x.Avatar, UIBindingScope.Relative)
+                    .SetAltText("chatai.chat.avatar")
+                    .SetShape(UIShape.Circle)
                     .SetWidth(UILayoutLength.Absolute(AvatarSize))
-                    .SetHeight(UILayoutLength.Absolute(AvatarSize))
                     .SetHorizontalAlignment(UIAlignment.Center)
                     .SetMargin(UIThickness.All(0, 2, 0, 0))
                     .OnClickWithItemKey(nameof(ChatController.OpenAuthorCardAsync), "messageId")
-                    .BindClickable<ChatMessageItem>(static x => x.CanOpenAuthor, UIBindingScope.Relative)
-                    .SetContent(new ImageComponent()
-                        .BindSource<ChatMessageItem>(static x => x.Avatar, UIBindingScope.Relative)
-                        .SetAltText("chatai.chat.avatar")
-                        .SetShape(UIShape.Circle)
-                        .SetWidth(UILayoutLength.Absolute(AvatarSize))
-                    ),
+                    .BindClickable<ChatMessageItem>(static x => x.CanOpenAuthor, UIBindingScope.Relative),
                 new TextComponent()
                     .BindTitle<ChatMessageItem>(static x => x.TokenCount, UIBindingScope.Relative)
                     .BindTooltip<ChatMessageItem>(static x => x.TokenCountTooltip, UIBindingScope.Relative)
@@ -312,32 +303,128 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
             .BindEnabled(enabled, UIBindingScope.Relative)
             .OnClick(command, UIAction.ArgCurrentItemKey("messageId"));
 
-    // Send and Stop share one trailing button slot inside the composer field.
+    // Rounded composer card with a borderless auto-growing field above a compact action bar separating drawer toggles and connection picker from message tools.
     private static SurfaceComponent CreateComposer()
-        => UIForm.Composer(new TextAreaComponent(ChatController.ComposerId)
-                .SetPlaceholder("chatai.chat.placeholder")
-                .SetAutoGrow(8)
-                .OnEnter(nameof(ChatController.SendAsync))
-                .SetFormId(ChatController.ComposerFormId)
-                .BindValue<ChatController>(static x => x.Draft)
-                .AddLeadingAction(CreateExtrasMenu(), inField: true)
-                .AddLeadingAction(CreateGenerationButton())
-                .AddLeadingAction(CreateChatsButton(), belowAt: UIAlignment.End)
-                .AddTrailingAction(UIIconButtons.Send()
-                        .BindIcon<ChatController>(static x => x.SendIcon)
-                        .BindTooltip<ChatController>(static x => x.SendTooltip)
-                        .OnSubmit(ChatController.ComposerFormId, nameof(ChatController.SendOrStopAsync)),
-                    inField: true
+        => new SurfaceComponent()
+            .SetSurface(UISurfaceStyle.Surface)
+            .SetBorderThickness(UIThickness.Uniform(1))
+            .SetBorderRadius(UICornerRadius.Uniform(8))
+            .SetPadding(UIThickness.Uniform(8))
+            .SetMargin(UIResponsive<UIThickness>.Create(UIThickness.All(12, 0, 12, 12), xl: UIThickness.All(16, 0, 16, 12)))
+            .SetContent(UILayout.Stack(6,
+                new TextAreaComponent(ChatController.ComposerId)
+                    .SetAppearance(UIInputAppearance.Ghost)
+                    .SetShowFocusEdge(false)
+                    .SetPlaceholder("chatai.chat.placeholder")
+                    .SetRows(1)
+                    .SetAutoGrow(8)
+                    .SetDebounceMilliseconds(80)
+                    .OnEnter(nameof(ChatController.SendAsync))
+                    .SetFormId(ChatController.ComposerFormId)
+                    .BindValue<ChatController>(static x => x.Draft),
+                CreateComposerBar()
+            ));
+
+    private static ContainerComponent CreateComposerBar()
+    {
+        ButtonComponent sendDraft = CreateSendDraftButton();
+        ButtonComponent sendEmpty = CreateSendEmptyButton();
+
+        return new ContainerComponent()
+            .SetColumn(24, UIGridUnit.Auto())
+            .AddChild(UILayout.Row(4,
+                    CreateGenerationButton().SetSize(UISize.Small).SetVerticalAlignment(UIAlignment.Center),
+                    CreateChatsButton().SetSize(UISize.Small).SetVerticalAlignment(UIAlignment.Center),
+                    CreateConnectionSelect()
                 )
+                .SetMinWidth(UILayoutLength.Absolute(0))
+                .SetVerticalAlignment(UIAlignment.Center)
+                .SetPlacement(1, 1, 23, 1)
             )
-            .SetBorderRadius(UICornerRadius.Uniform(0));
+            .AddChild(UILayout.Row(4,
+                    CreateExtrasMenu(),
+                    sendDraft,
+                    sendEmpty,
+                    CreateStopButton(sendDraft, sendEmpty)
+                )
+                .SetVerticalAlignment(UIAlignment.Center)
+                .SetMargin(UIThickness.All(8, 0, 0, 0))
+                .SetPlacement(24, 1, 1, 1)
+            );
+    }
+
+    private static SelectComponent CreateConnectionSelect()
+        => new SelectComponent()
+            .SetVariant(UISelectVariant.Quiet)
+            .SetSize(UISize.Small)
+            .SetAccessibleName("chatai.generation.connection")
+            .SetTooltip("chatai.generation.connection")
+            .SetPopupPlacement(UIPopupPlacement.TopStart)
+            .SetGroupTemplate(new DefaultGroupTemplate())
+            .SetVerticalAlignment(UIAlignment.Center)
+            .BindOptions<ShellController>(static x => x.ConnectionOptions)
+            .BindValue<ShellController>(static x => x.ConnectionId)
+            .OnChange(nameof(ShellController.SelectConnectionAsync));
 
     private static SplitButtonComponent CreateExtrasMenu()
         => UIIconButtons.More()
-            .SetPopupPlacement(UIPopupPlacement.TopStart)
+            .SetSize(UISize.Small)
+            .SetVerticalAlignment(UIAlignment.Center)
+            .SetPopupPlacement(UIPopupPlacement.TopEnd)
             .BindItems<ChatController>(static x => x.Extras)
             .OnItemClick(ChatController.PhrasesAction, InsertTextEffect.CurrentItemValue(ChatController.ComposerId))
             .OnItemClick(nameof(ChatController.ExtraActionAsync), UIAction.ArgCurrentItemKey("action"));
+
+    private static ButtonComponent CreateSendDraftButton()
+        => AddOptimisticStopFeedback(CreateComposerPrimaryButton(UIIconButtons.Send()))
+            .EnabledWhen(ChatController.ComposerId)
+            .BindVisibility<ChatController>(static x => x.SendDraftVisibility)
+            .OnSubmit(ChatController.ComposerFormId, nameof(ChatController.SendOrStopAsync));
+
+    private static ButtonComponent CreateSendEmptyButton()
+        => AddOptimisticStopFeedback(CreateComposerPrimaryButton(UIIconButtons.Send()))
+            .BindVisibility<ChatController>(static x => x.SendEmptyVisibility)
+            .OnSubmit(ChatController.ComposerFormId, nameof(ChatController.SendOrStopAsync));
+
+    private static ButtonComponent AddOptimisticStopFeedback(ButtonComponent button)
+        => button
+            .InteractBeforeClick(IButtonComponent.VariantProperty, UIButtonVariant.Ghost)
+            .InteractBeforeClick(ITextBaseComponent.IconProperty, UIStandardAction.Stop.Icon)
+            .InteractBeforeClick(ITextBaseComponent.IconColorProperty, UIThemeColor.Danger)
+            .InteractAfterClick(IButtonComponent.VariantProperty, UIButtonVariant.Primary)
+            .InteractAfterClick(ITextBaseComponent.IconProperty, UIStandardAction.Send.Icon)
+            .InteractAfterClick(ITextBaseComponent.IconColorProperty, null)
+            .InteractBefore(ChatController.ComposerId, EventNames.Enter, IButtonComponent.VariantProperty, UIButtonVariant.Ghost)
+            .InteractBefore(ChatController.ComposerId, EventNames.Enter, ITextBaseComponent.IconProperty, UIStandardAction.Stop.Icon)
+            .InteractBefore(ChatController.ComposerId, EventNames.Enter, ITextBaseComponent.IconColorProperty, UIThemeColor.Danger)
+            .InteractAfter(ChatController.ComposerId, EventNames.Enter, IButtonComponent.VariantProperty, UIButtonVariant.Primary)
+            .InteractAfter(ChatController.ComposerId, EventNames.Enter, ITextBaseComponent.IconProperty, UIStandardAction.Send.Icon)
+            .InteractAfter(ChatController.ComposerId, EventNames.Enter, ITextBaseComponent.IconColorProperty, null);
+
+    private static ButtonComponent CreateStopButton(ButtonComponent sendDraft, ButtonComponent sendEmpty)
+        => new ButtonComponent(ChatController.StopButtonId)
+            .SetIcon(UIStandardAction.Stop.Icon)
+            .SetTooltip(UIStandardAction.Stop.Title)
+            .SetVariant(UIButtonVariant.Ghost)
+            .SetIconColor(UIThemeColor.Danger)
+            .SetSize(UISize.Small)
+            .SetShape(UIShape.Circle)
+            .SetVerticalAlignment(UIAlignment.Center)
+            .BindVisibility<ChatController>(static x => x.StopVisibility)
+            .OnClick(nameof(ChatController.StopAsync))
+            .InteractBeforeClick(sendDraft, IButtonComponent.VariantProperty, UIButtonVariant.Ghost)
+            .InteractBeforeClick(sendDraft, ITextBaseComponent.IconColorProperty, UIThemeColor.Danger)
+            .InteractBeforeClick(sendEmpty, IButtonComponent.VariantProperty, UIButtonVariant.Ghost)
+            .InteractBeforeClick(sendEmpty, ITextBaseComponent.IconColorProperty, UIThemeColor.Danger)
+            .InteractBefore(ChatController.ComposerId, EventNames.Enter, IButtonComponent.VariantProperty, UIButtonVariant.Ghost)
+            .InteractBefore(ChatController.ComposerId, EventNames.Enter, ITextBaseComponent.IconColorProperty, UIThemeColor.Danger);
+
+    private static ButtonComponent CreateComposerPrimaryButton(ButtonComponent button)
+        => button
+            .SetVariant(UIButtonVariant.Primary)
+            .SetSize(UISize.Small)
+            .SetShape(UIShape.Circle)
+            .SetVerticalAlignment(UIAlignment.Center);
 
     protected override IReadOnlyList<UIDialog> CreatePageDialogs()
         =>

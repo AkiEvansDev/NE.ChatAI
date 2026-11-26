@@ -59,6 +59,7 @@ internal abstract partial class ShellController
     public const string DeleteCharacterDialogKey = "chatai-panel-delete-character";
     public const string DeletePersonaDialogKey = "chatai-panel-delete-persona";
     public const string DeleteWorldDialogKey = "chatai-panel-delete-world";
+    public const string RenameChatDialogKey = "chatai-panel-rename-chat";
     public const string DeleteChatDialogKey = "chatai-panel-delete-chat";
 
     /// <summary>What the last read found, so the panel turns between a character and the list without reading the folder again.</summary>
@@ -90,9 +91,11 @@ internal abstract partial class ShellController
 
     /// <summary>The character whose chats the panel shows; none, and it shows the characters.</summary>
     private string? _panelCharacterId;
+    private bool _panelShowingList;
 
     private string? _deletingCardId;
     private string? _deletingCardList;
+    private string? _renamingChatId;
     private string? _deletingChatId;
 
     [RecursiveMember(false)]
@@ -101,12 +104,18 @@ internal abstract partial class ShellController
     [RecursiveMember]
     public partial IReadOnlyList<string> TagFilter { get; set; } = [];
 
+    [RecursiveMember]
+    public partial string ChatSearch { get; set; } = string.Empty;
+
     /// <summary>Which list the panel shows, the switch over it writing it.</summary>
     [RecursiveMember]
     public partial string PanelList { get; set; } = CharactersList;
 
     [RecursiveMember]
     public partial UIPhrase? DeleteCardQuestion { get; set; }
+
+    [RecursiveMember]
+    public partial string RenameChatTitle { get; set; } = string.Empty;
 
     [RecursiveMember(false)]
     public RecursiveCollection<CardRow> CharacterRows { get; } = [];
@@ -333,6 +342,7 @@ internal abstract partial class ShellController
                 ChatEntries.Clear();
 
             _panelCharacterId = null;
+            ChatSearch = string.Empty;
             ChatsPanes.ShowList();
             return;
         }
@@ -346,6 +356,7 @@ internal abstract partial class ShellController
         }
         else
         {
+            ChatSearch = string.Empty;
             PanelCharacter = new CardRow { Id = characterId, Name = character.Document.Name, Avatar = avatar };
         }
 
@@ -392,7 +403,11 @@ internal abstract partial class ShellController
     }
 
     private static UIPhrase EntryTitle(ChatSummary chat)
-        => chat.LastAt == DateTimeOffset.MinValue ? UIPhrase.Text(chat.Name) : UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(chat.LastAt, UITimestampFormat.Relative)));
+        => !string.IsNullOrWhiteSpace(chat.Title)
+            ? UIPhrase.Text(chat.Title)
+            : chat.LastAt == DateTimeOffset.MinValue
+                ? UIPhrase.Text(chat.Name)
+                : UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(chat.LastAt, UITimestampFormat.Relative)));
 
     /// <summary>The chat's last words on one line, with the markup a message is written in taken off.</summary>
     private static string Preview(string lastText)
@@ -410,6 +425,7 @@ internal abstract partial class ShellController
     {
         OpenCharacterId = characterId;
         _panelCharacterId = characterId;
+        _panelShowingList = false;
 
         if (_chats.Any(chat => chat.Id == chatId))
         {
@@ -431,16 +447,21 @@ internal abstract partial class ShellController
 
         if (bumpToTop)
         {
-            entry.Title = UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(DateTimeOffset.UtcNow, UITimestampFormat.Relative)));
+            ChatSummary? summary = _chats.FirstOrDefault(chat => chat.Id == chatId);
+
+            if (string.IsNullOrWhiteSpace(summary?.Title))
+                entry.Title = UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(DateTimeOffset.UtcNow, UITimestampFormat.Relative)));
+
             _ = ChatEntries.Move(chatId, 0);
         }
     }
 
-    /// <summary>The chats panel opening reads the chats as they are now and shows the open chat's character.</summary>
+    /// <summary>The chats panel opening reads the chats as they are now and restores the open chat's character unless the reader stepped back to the list.</summary>
     [UICommand]
     public Task LoadChatsPanelAsync(CancellationToken cancellationToken)
     {
-        _panelCharacterId = OpenCharacterId;
+        if (!_panelShowingList)
+            _panelCharacterId = OpenCharacterId;
 
         return LoadChatsAsync(cancellationToken);
     }
@@ -449,6 +470,7 @@ internal abstract partial class ShellController
     [UICommand]
     public void SwitchList(string list)
     {
+        _panelShowingList = true;
         var next = list is PersonasList or WorldsList ? list : CharactersList;
 
         if (PanelList != next)
@@ -600,6 +622,7 @@ internal abstract partial class ShellController
             return Notify("chatai.chat.busy", UIColorStyle.Info);
 
         _panelCharacterId = characterId;
+        _panelShowingList = false;
         ShowPanelCharacter();
 
         if (_panelCharacterId is null)
@@ -640,6 +663,47 @@ internal abstract partial class ShellController
     /// <summary>A chat opened from the panel with the panel left open; a page that is not the chat goes to it.</summary>
     protected virtual Task<UICommandResult> ShowChatAsync(string chatId, CancellationToken cancellationToken)
         => Task.FromResult(UICommandResult.Ok([new NavigateEffect(AppRoutes.ChatOf(chatId))]));
+
+    /// <summary>Opens the rename dialog for a chat in the panel's chat list.</summary>
+    [UICommand]
+    public UICommandResult AskRenameChat(string chatId)
+    {
+        if (!Slug.IsValidId(chatId) || _chats.FirstOrDefault(chat => chat.Id == chatId) is not ChatSummary summary)
+            return UICommandResult.Ok();
+
+        if (IsGenerating && chatId == OpenChatId)
+            return Notify("chatai.chat.busy", UIColorStyle.Info);
+
+        _renamingChatId = chatId;
+        RenameChatTitle = summary.Title ?? string.Empty;
+
+        return UICommandResult.Ok([new OpenDialogEffect(RenameChatDialogKey)]);
+    }
+
+    /// <summary>Saves or clears the custom title of a chat in the panel's chat list.</summary>
+    [UICommand]
+    public async Task<UICommandResult> RenamePanelChatAsync(CancellationToken cancellationToken)
+    {
+        var chatId = _renamingChatId;
+        var rawTitle = RenameChatTitle.Trim();
+        _renamingChatId = null;
+
+        if (IsGenerating && chatId == OpenChatId)
+            return UICommandResult.Ok([new CloseDialogEffect(RenameChatDialogKey), new ShowNotificationEffect("chatai.chat.busy", UIColorStyle.Info)]);
+
+        if (chatId is null || !Slug.IsValidId(chatId) || await Chats.ReadAsync(chatId, cancellationToken).ConfigureAwait(false) is not Chat chat)
+            return UICommandResult.Ok([new CloseDialogEffect(RenameChatDialogKey)]);
+
+        var title = rawTitle.Length == 0 ? null : rawTitle;
+        await Chats.WriteAsync(chatId, chat with { Title = title }, cancellationToken).ConfigureAwait(false);
+        await OnPanelChatRenamedAsync(chatId, title, cancellationToken).ConfigureAwait(false);
+        await LoadChatsAsync(cancellationToken).ConfigureAwait(false);
+
+        return UICommandResult.Ok([new CloseDialogEffect(RenameChatDialogKey)]);
+    }
+
+    protected virtual Task OnPanelChatRenamedAsync(string chatId, string? title, CancellationToken cancellationToken)
+        => Task.CompletedTask;
 
     /// <summary>Opens the confirmation dialog before deleting a chat from the panel's chat list.</summary>
     [UICommand]
@@ -682,6 +746,7 @@ internal abstract partial class ShellController
     public void ShowCharacterList()
     {
         _panelCharacterId = null;
+        _panelShowingList = true;
         ShowPanelCharacter();
     }
 

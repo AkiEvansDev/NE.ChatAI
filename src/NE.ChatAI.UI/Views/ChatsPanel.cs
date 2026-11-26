@@ -11,13 +11,13 @@ internal static class ChatsPanel
     private const double AvatarSize = 44;
     private const double HeaderAvatarSize = 34;
     public const string SearchId = "chatai-card-search";
+    public const string ChatSearchId = "chatai-chat-search";
     public const string TagFilterId = "chatai-tag-filter";
     private const string ListSwitchId = "chatai-list-switch";
 
-    public static StackPanelComponent CreateHeading()
-        => UILayout.Stack(0, CreateListSwitch(), CreateCharacterTitle())
-            .SetMinHeight(UILayoutLength.Absolute(HeaderAvatarSize))
-            .SetGlyphEdge(UIAlignment.Start);
+    public static ContainerComponent CreateHeading()
+        => UILayout.Panes<ShellController>(CreateListSwitch(), CreateCharacterTitle(), static x => x.ChatsPanes, stacked: true)
+            .SetMinHeight(UILayoutLength.Absolute(HeaderAvatarSize));
 
     private static ButtonGroupComponent CreateListSwitch()
         => new ButtonGroupComponent(ListSwitchId)
@@ -30,7 +30,7 @@ internal static class ChatsPanel
             .BindSelectedKey<ShellController>(static x => x.PanelList, mode: UIBindingMode.OneWay)
             .OnItemClick(nameof(ShellController.SwitchList), UIAction.ArgCurrentItemKey("list"))
             .SetHorizontalAlignment(UIAlignment.Start)
-            .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility);
+            .SetVerticalAlignment(UIAlignment.Center);
 
     private static StackPanelComponent CreateCharacterTitle()
         => UILayout.Row(8,
@@ -45,8 +45,7 @@ internal static class ChatsPanel
                     .SetVerticalAlignment(UIAlignment.Center)
             )
             .SetMinHeight(UILayoutLength.Absolute(HeaderAvatarSize))
-            .SetGlyphEdge(UIAlignment.Start)
-            .BindVisibility<ShellController>(static x => x.ChatsPanes.DetailVisibility);
+            .SetGlyphEdge(UIAlignment.Start);
 
     private static ImageComponent Avatar<TSource>(Expression<Func<TSource, object?>> source, UIBindingScope scope, double size = AvatarSize)
         => new ImageComponent()
@@ -57,13 +56,26 @@ internal static class ChatsPanel
             .SetWidth(UILayoutLength.Absolute(size))
             .SetVerticalAlignment(UIAlignment.Center);
 
-    public static TextInputComponent CreateSearch()
+    public static ContainerComponent CreateBody()
+        => UILayout.Panes<ShellController>(CreateLists(), CreateCharacterChats(), static x => x.ChatsPanes, stacked: true);
+
+    private static StackPanelComponent CreateLists()
+        => UILayout.Stack(12,
+            CreateSearch(),
+            CreateList("chatai-character-list", ShellController.CharactersList, static x => x.CharacterRows, static x => x.CharactersEmpty, showEdit: true)
+                .OnItemClick(nameof(ShellController.OpenCharacterAsync), UIAction.ArgCurrentItemKey("characterId")),
+            CreateList("chatai-persona-list", ShellController.PersonasList, static x => x.PersonaRows, static x => x.PersonasEmpty, showEdit: false)
+                .OnItemClick(nameof(ShellController.OpenPersonaAsync), UIAction.ArgCurrentItemKey("personaId")),
+            CreateList("chatai-world-list", ShellController.WorldsList, static x => x.WorldRows, static x => x.WorldsEmpty, showEdit: false)
+                .OnItemClick(nameof(ShellController.OpenWorldAsync), UIAction.ArgCurrentItemKey("worldId"))
+        );
+
+    private static TextInputComponent CreateSearch()
         => new TextInputComponent(SearchId)
             .SetSearch()
             .SetDebounceMilliseconds(200)
             .AddTrailingAction(CreateTagFilter())
-            .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ShellController.AskCreateCard)))
-            .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility);
+            .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ShellController.AskCreateCard)));
 
     private static MultiSelectComponent CreateTagFilter()
         => new MultiSelectComponent(TagFilterId)
@@ -74,19 +86,6 @@ internal static class ChatsPanel
             .ConfigureDefaultEmptyTemplate(empty => empty.SetTitle("chatai.tags.none").SetTitleWrap(true))
             .BindOptions<ShellController>(static x => x.TagFilterOptions)
             .BindValue<ShellController>(static x => x.TagFilter);
-
-    public static ContainerComponent CreateBody()
-        => UILayout.Panes<ShellController>(CreateLists(), CreateCharacterChats(), static x => x.ChatsPanes, stacked: true);
-
-    private static StackPanelComponent CreateLists()
-        => UILayout.Stack(12,
-            CreateList("chatai-character-list", ShellController.CharactersList, static x => x.CharacterRows, static x => x.CharactersEmpty, showEdit: true)
-                .OnItemClick(nameof(ShellController.OpenCharacterAsync), UIAction.ArgCurrentItemKey("characterId")),
-            CreateList("chatai-persona-list", ShellController.PersonasList, static x => x.PersonaRows, static x => x.PersonasEmpty, showEdit: false)
-                .OnItemClick(nameof(ShellController.OpenPersonaAsync), UIAction.ArgCurrentItemKey("personaId")),
-            CreateList("chatai-world-list", ShellController.WorldsList, static x => x.WorldRows, static x => x.WorldsEmpty, showEdit: false)
-                .OnItemClick(nameof(ShellController.OpenWorldAsync), UIAction.ArgCurrentItemKey("worldId"))
-        );
 
     private static ItemsViewComponent CreateList(string id, string listKey, Expression<Func<ShellController, object?>> rows, Expression<Func<ShellController, object?>> empty, bool showEdit)
         => new ItemsViewComponent(id)
@@ -160,31 +159,57 @@ internal static class ChatsPanel
             .BindTitle<TagBadge>(static x => x.Text, UIBindingScope.Relative)
             .BindColor<TagBadge>(static x => x.Color, UIBindingScope.Relative);
 
-    private static ItemsViewComponent CreateCharacterChats()
-        => new ItemsViewComponent("chatai-chat-list")
-            .SetVerticalScroll(UIScrollMode.Disabled)
-            .SetRowHoverable(true)
-            .SetRowBleed(true)
-            .SetSelectionMode(UISelectionMode.One)
-            .BindSelectedKey<ShellController>(static x => x.OpenChatId, mode: UIBindingMode.OneWay)
-            .BindItems<ShellController>(static x => x.ChatEntries)
-            .SetSpacing(4)
-            .ConfigureDefaultEmptyTemplate(static empty => empty.SetTitle("chatai.chats.none").SetTitleWrap(true))
-            .SetTemplate(CreateChatRow())
-            .OnItemClick(nameof(ShellController.OpenPanelChatAsync), UIAction.ArgCurrentItemKey("chatId"));
+    private static StackPanelComponent CreateCharacterChats()
+        => UILayout.Stack(12,
+            CreateChatSearch(),
+            new ItemsViewComponent("chatai-chat-list")
+                .SetVerticalScroll(UIScrollMode.Disabled)
+                .SetRowHoverable(true)
+                .SetRowBleed(true)
+                .SetSelectionMode(UISelectionMode.One)
+                .BindSelectedKey<ShellController>(static x => x.OpenChatId, mode: UIBindingMode.OneWay)
+                .BindItems<ShellController>(static x => x.ChatEntries)
+                .FilterBy(ChatSearchId, IInputComponent.ValueProperty, nameof(MenuItem.Title))
+                .SetSpacing(4)
+                .ConfigureDefaultEmptyTemplate(static empty => empty.SetTitle("chatai.chats.none").SetTitleWrap(true))
+                .SetTemplate(CreateChatRow())
+                .OnItemClick(nameof(ShellController.OpenPanelChatAsync), UIAction.ArgCurrentItemKey("chatId"))
+        );
+
+    private static TextInputComponent CreateChatSearch()
+        => new TextInputComponent(ChatSearchId)
+            .SetSearch()
+            .SetDebounceMilliseconds(200)
+            .BindValue<ShellController>(static x => x.ChatSearch)
+            .AddTrailingAction(UIIconButtons.New().OnClick(nameof(ShellController.StartChatAsync)));
 
     private static ContainerComponent CreateChatRow()
-        => UILayout.Ends(
-                new TextComponent()
-                    .AsBody()
-                    .SetDescriptionPlain(true)
-                    .BindTitle<MenuItem>(static x => x.Title, UIBindingScope.Relative)
-                    .BindDescription<MenuItem>(static x => x.Description, UIBindingScope.Relative),
-                UIIconButtons.Delete()
-                    .SetSize(UISize.Small)
-                    .OnClick(nameof(ShellController.AskDeleteChat), UIAction.ArgCurrentItemKey("chatId"))
+        => new ContainerComponent()
+            .SetColumn(24, UIGridUnit.Auto())
+            .SetPadding(UIThickness.Symmetric(0, 2))
+            .SetMinHeight(UILayoutLength.Absolute(AvatarSize + 4))
+            .AddChild(new TextComponent()
+                .AsSubtitle()
+                .SetTitleWrap(false)
+                .SetWrapMode(UITextWrapMode.NoWrap)
+                .SetDescriptionPlain(true)
+                .BindTitle<MenuItem>(static x => x.Title, UIBindingScope.Relative)
+                .BindDescription<MenuItem>(static x => x.Description, UIBindingScope.Relative)
+                .SetVerticalAlignment(UIAlignment.Center)
+                .SetPlacement(1, 1, 23, 1)
             )
-            .SetPadding(UIThickness.Symmetric(0, 2));
+            .AddChild(UILayout.Row(4,
+                    UIIconButtons.Rename()
+                        .SetSize(UISize.Small)
+                        .OnClick(nameof(ShellController.AskRenameChat), UIAction.ArgCurrentItemKey("chatId")),
+                    UIIconButtons.Delete()
+                        .SetSize(UISize.Small)
+                        .OnClick(nameof(ShellController.AskDeleteChat), UIAction.ArgCurrentItemKey("chatId"))
+                )
+                .SetVerticalAlignment(UIAlignment.Center)
+                .SetMargin(UIThickness.All(8, 0, 0, 0))
+                .SetPlacement(24, 1, 1, 1)
+            );
 
     public static IVisualComponent[] CreateActions()
         =>
@@ -193,10 +218,6 @@ internal static class ChatsPanel
                 .SetSize(UISize.Small)
                 .SetUrl(AppRoutes.Worlds)
                 .BindVisibility<ShellController>(static x => x.ChatsPanes.ListVisibility),
-            UIIconButtons.New()
-                .SetSize(UISize.Small)
-                .OnClick(nameof(ShellController.StartChatAsync))
-                .BindVisibility<ShellController>(static x => x.ChatsPanes.DetailVisibility),
             UIIconButtons.Edit()
                 .SetSize(UISize.Small)
                 .OnClick(nameof(ShellController.EditCharacterAsync))
@@ -234,6 +255,15 @@ internal static class ChatsPanel
             UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteCharacterDialogKey, "chatai.character.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
             UIDialogs.BoundConfirm<ShellController>(ShellController.DeletePersonaDialogKey, "chatai.persona.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
             UIDialogs.BoundConfirm<ShellController>(ShellController.DeleteWorldDialogKey, "chatai.world.delete.title", static x => x.DeleteCardQuestion, UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelCardAsync)),
+            UIDialogs.Form(
+                ShellController.RenameChatDialogKey,
+                "chatai.chat.rename.title",
+                (UIPhrase?)"chatai.chat.rename.description",
+                new TextInputComponent()
+                    .SetTitle("chatai.chat.rename.field")
+                    .BindValue<ShellController>(static x => x.RenameChatTitle, mode: UIBindingMode.OnSubmit),
+                UIButtons.Primary(UIStandardAction.Save).OnClick(nameof(ShellController.RenamePanelChatAsync))
+            ),
             UIDialogs.Confirm(ShellController.DeleteChatDialogKey, "chatai.chat.delete-chat.title", "chatai.chat.delete-chat.question", UIStandardAction.Delete.Title, nameof(ShellController.DeletePanelChatAsync))
         ];
 }

@@ -122,16 +122,16 @@ internal static class SettingsEditors
 
     public static StackPanelComponent CreateConnection()
     {
-        SwitchComponent contextAuto = Switch("chatai.generation.context.auto", static x => x.Connection.Draft.ContextAuto, SettingsController.ConnectionKind);
+        SwitchComponent contextAuto = Switch("chatai.generation.context.auto", static x => x.Connection.Draft.ContextAuto, SettingsController.ConnectionKind)
+            .SetDescription("chatai.generation.context.auto.description");
 
         return Editor(SettingsController.ConnectionKind, static x => x.ConnectionOptions, static x => x.Connection,
             Card(null,
                 Text("chatai.settings.connection.address", static x => x.Connection.Draft.Address, SettingsController.ConnectionKind)
                     .AddTrailingAction(UIButtons.Icon(AppIcons.Outline(AppIcons.Connect), "chatai.connection.check").OnClickShowingLoading(nameof(SettingsController.CheckEditedConnectionAsync))),
-                UIForm.Row(
-                    contextAuto,
-                    Number("chatai.generation.context.length", static x => x.Connection.Draft.ContextValue, SettingsController.ConnectionKind, 512, 1048576, 1024).EnabledWhen(contextAuto, false)
-                ),
+                contextAuto,
+                Number("chatai.generation.context.length", static x => x.Connection.Draft.ContextValue, SettingsController.ConnectionKind, 512, 1048576, 1024)
+                    .HiddenWhen(contextAuto),
                 BoundSelect("chatai.generation.format", static x => x.FormatOptions, static x => x.Connection.Draft.Instruct, SettingsController.ConnectionKind),
                 BoundSelect("chatai.generation.system-prompt", static x => x.SystemPromptOptions, static x => x.Connection.Draft.SystemPrompt, SettingsController.ConnectionKind),
                 BoundSelect("chatai.generation.prompt", static x => x.PromptOptions, static x => x.Connection.Draft.Prompt, SettingsController.ConnectionKind),

@@ -9,8 +9,8 @@ using NE.ChatAI.Storage;
 
 namespace NE.ChatAI.Chats;
 
-/// <summary>A chat as a list shows it: its name, its character, the character's tags, and its last message.</summary>
-public sealed record ChatSummary(string Id, string Name, string? CharacterId, string CharacterName, IReadOnlyList<string> Tags, DateTimeOffset LastAt, string LastText);
+/// <summary>A chat as a list shows it: its name, optional custom title, character, character's tags, and last message.</summary>
+public sealed record ChatSummary(string Id, string Name, string? Title, string? CharacterId, string CharacterName, IReadOnlyList<string> Tags, DateTimeOffset LastAt, string LastText);
 
 /// <summary>The chats in the data folder: listed newest first, started with a character, and their messages kept.</summary>
 public sealed class ChatLibrary(DataFolder data, TimeProvider time)
@@ -42,6 +42,7 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
         return new ChatSummary(
             id,
             chat.Name,
+            chat.Title,
             chat.Character,
             character?.Name ?? string.Empty,
             character?.Tags ?? [],
@@ -85,7 +86,7 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
 
         Character? character = chat.Character is string characterId ? await data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
         var name = $"{character?.Name ?? chat.Name} {time.GetUtcNow().ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
-        Chat branched = ChatEditing.UpTo(chat, messageId) with { Name = name, Background = null };
+        Chat branched = ChatEditing.UpTo(chat, messageId) with { Name = name, Title = null, Background = null };
         var branchedId = await data.Chats.CreateAsync(branched, cancellationToken).ConfigureAwait(false);
         var copiedBackground = ChatPictures.Copy(data, chat.Background, branchedId);
         IReadOnlyList<ChatVisual> copiedVisuals = GalleryPictures.CopyReferencedChatMedia(data, branched.Visuals, branchedId);

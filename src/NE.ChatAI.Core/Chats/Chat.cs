@@ -191,6 +191,10 @@ public sealed record ChatVisual
 /// <summary>A chat with a character: its messages, what scenarios wrote into it, and every model call made for it.</summary>
 public sealed record Chat : NamedDocument
 {
+    /// <summary>Optional user-defined chat title shown in the chats panel instead of the last-activity timestamp.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Title { get; init; }
+
     public string? Character { get; init; }
 
     public string? Persona { get; init; }

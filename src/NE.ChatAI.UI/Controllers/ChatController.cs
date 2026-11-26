@@ -134,6 +134,7 @@ internal sealed partial class ChatController : ShellController
     public const string FeedId = "chatai-feed";
     public const string ComposerId = "chatai-composer";
     public const string ComposerFormId = "chatai-composer-form";
+    public const string StopButtonId = "chatai-stop";
     public const string StageSplitId = "chatai-stage-split";
     public const string StageSplitterId = "chatai-stage-splitter";
     public const int WindowSize = 30;
@@ -190,6 +191,15 @@ internal sealed partial class ChatController : ShellController
 
     [RecursiveMember]
     public partial UIPhrase SendTooltip { get; set; } = new(UIStandardAction.Send.Title);
+
+    [RecursiveMember]
+    public partial UIVisibility SendDraftVisibility { get; set; } = UIVisibility.Visible;
+
+    [RecursiveMember]
+    public partial UIVisibility SendEmptyVisibility { get; set; } = UIVisibility.Collapsed;
+
+    [RecursiveMember]
+    public partial UIVisibility StopVisibility { get; set; } = UIVisibility.Collapsed;
 
     [RecursiveMember]
     public partial UIPhrase? EmptyFeed { get; set; } = new UIPhrase("chatai.chat.none");
@@ -378,6 +388,7 @@ internal sealed partial class ChatController : ShellController
 
             needsWindow = !_generating && Messages.Items.Count == 0 && (_chat.Messages.Count > 0 || Messages.Live is not null);
             RefreshMessageAuthors();
+            ShowLastActions();
         }, cancellationToken).ConfigureAwait(false);
 
         if (needsWindow)
@@ -431,6 +442,14 @@ internal sealed partial class ChatController : ShellController
         await ShowChatListsAsync(cancellationToken).ConfigureAwait(false);
 
         return UICommandResult.Ok();
+    }
+
+    protected override Task OnPanelChatRenamedAsync(string chatId, string? title, CancellationToken cancellationToken)
+    {
+        if (_chat is not null && OpenChatId == chatId && !_generating)
+            _chat = _chat with { Title = title };
+
+        return Task.CompletedTask;
     }
 
     protected override async Task<UICommandResult> OnPanelChatDeletedAsync(string chatId, CancellationToken cancellationToken)
@@ -640,6 +659,16 @@ internal sealed partial class ChatController : ShellController
         }
 
         RefreshScenarioMenuEnabled();
+        UpdateSendButtons();
+    }
+
+    private void UpdateSendButtons()
+    {
+        var canSendEmpty = !_generating && _chat is { Messages.Count: > 0 } && _chat.Messages[^1].Role == MessageRole.User;
+
+        SendDraftVisibility = !_generating && !canSendEmpty ? UIVisibility.Visible : UIVisibility.Collapsed;
+        SendEmptyVisibility = !_generating && canSendEmpty ? UIVisibility.Visible : UIVisibility.Collapsed;
+        StopVisibility = _generating ? UIVisibility.Visible : UIVisibility.Collapsed;
     }
 
     [UICommand]
@@ -796,6 +825,7 @@ internal sealed partial class ChatController : ShellController
 
         SendIcon = action.Icon;
         SendTooltip = new UIPhrase(action.Title);
+        UpdateSendButtons();
     }
 
     private ReplyJob AppendUserMessageAndBeginReply(ActiveProfile profile, string chatId, string text, int? beforeSendGenerationStart = null)

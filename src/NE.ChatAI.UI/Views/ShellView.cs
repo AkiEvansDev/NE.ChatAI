@@ -78,15 +78,22 @@ internal abstract class ShellView : UIViewBase
                     subheader: null,
                     GenerationPanel.Create(),
                     footer: new WrapPanelComponent()
-                        .SetSpacing(16)
-                        .SetLineSpacing(8)
-                        .AddChild(new LinkComponent().SetTitle("chatai.nav.settings").SetIcon(AppIcons.Outline(AppIcons.Settings)).SetUrl(AppRoutes.Settings))
-                        .AddChild(new LinkComponent().SetTitle("chatai.nav.worlds").SetIcon(AppIcons.Outline(AppIcons.Bindings)).SetUrl(AppRoutes.Worlds))
-                        .AddChild(new LinkComponent().SetTitle("chatai.nav.scenarios").SetIcon(AppIcons.Outline(AppIcons.Scenarios)).SetUrl(AppRoutes.Scenarios))
-                        .AddChild(new LinkComponent().SetTitle("chatai.nav.plugins").SetIcon(AppIcons.Outline(AppIcons.Plugins)).SetUrl(AppRoutes.Plugins)),
+                        .SetSpacing(4)
+                        .SetLineSpacing(4)
+                        .AddChild(CreateDrawerNavButton("chatai.nav.settings", AppIcons.Settings, AppRoutes.Settings))
+                        .AddChild(CreateDrawerNavButton("chatai.nav.worlds", AppIcons.Bindings, AppRoutes.Worlds))
+                        .AddChild(CreateDrawerNavButton("chatai.nav.scenarios", AppIcons.Scenarios, AppRoutes.Scenarios))
+                        .AddChild(CreateDrawerNavButton("chatai.nav.plugins", AppIcons.Plugins, AppRoutes.Plugins)),
                     pinnable: true
                 )
                 .OnDrawerOpen(nameof(ShellController.LoadGenerationPanel));
+
+    private static ButtonComponent CreateDrawerNavButton(string title, string icon, string url)
+        => UIButtons.Ghost(title, AppIcons.Outline(icon))
+            .SetSize(UISize.Small)
+            .SetTitleColor(UIThemeColor.Muted)
+            .SetIconColor(UIThemeColor.Muted)
+            .SetUrl(url);
 
     protected virtual IVisualComponent? CreatePageLeftSide()
         => null;
@@ -96,7 +103,7 @@ internal abstract class ShellView : UIViewBase
                 ChatsPanelId,
                 UISide.Right,
                 ChatsPanel.CreateHeading(),
-                ChatsPanel.CreateSearch(),
+                subheader: null,
                 ChatsPanel.CreateBody(),
                 footer: null,
                 pinnable: true,
