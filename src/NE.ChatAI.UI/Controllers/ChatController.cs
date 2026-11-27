@@ -148,6 +148,9 @@ internal sealed partial class ChatController : ShellController
     private bool _generating;
     private ReplyKind? _liveKind;
     private CancellationTokenSource? _generation;
+    private long _openVersion;
+    private CancellationTokenSource? _openCts;
+    private Task _pendingOpen = Task.CompletedTask;
 
     private Chat? _chat;
     private Character? _character;
@@ -200,6 +203,12 @@ internal sealed partial class ChatController : ShellController
 
     [RecursiveMember]
     public partial UIVisibility StopVisibility { get; set; } = UIVisibility.Collapsed;
+
+    [RecursiveMember]
+    public partial UIVisibility FeedVisibility { get; set; } = UIVisibility.Visible;
+
+    [RecursiveMember]
+    public partial UIVisibility ChatLoadingVisibility { get; set; } = UIVisibility.Collapsed;
 
     [RecursiveMember]
     public partial UIPhrase? EmptyFeed { get; set; } = new UIPhrase("chatai.chat.none");
@@ -310,17 +319,194 @@ internal sealed partial class ChatController : ShellController
         item.Checked = _hasActiveStage && !_stageHiddenByUser;
     }
 
-    protected override async Task<UICommandResult> ShowChatAsync(string chatId, CancellationToken cancellationToken)
+    internal Task WaitForOpenAsync()
+        => _pendingOpen;
+
+    protected override Task<UICommandResult> ShowChatAsync(string chatId, CancellationToken cancellationToken)
     {
-        if (chatId == OpenChatId)
-            return UICommandResult.Ok();
+        if (chatId == OpenChatId && _chat is not null && ChatLoadingVisibility == UIVisibility.Collapsed)
+            return Task.FromResult(UICommandResult.Ok());
 
         if (_generating)
-            return Notify("chatai.chat.busy", UIColorStyle.Info);
+            return Task.FromResult(Notify("chatai.chat.busy", UIColorStyle.Info));
 
-        return await OpenAsync(chatId, cancellationToken).ConfigureAwait(false)
-            ? UICommandResult.Ok([new PushAddressEffect(new Dictionary<string, object?> { [AppRoutes.ChatParameter] = chatId })])
-            : Notify("chatai.chats.chat-gone", UIColorStyle.Warning);
+        var version = CancelPendingOpen();
+
+        OpenChatId = chatId;
+        _chat = null;
+        _editingId = null;
+        _editingNew = false;
+        _liveKind = null;
+        _askedId = null;
+        _editingRecordId = null;
+        _streamingRecords.Clear();
+        _draftGenerationId = null;
+        _draftContinuations.Clear();
+        FeedVisibility = UIVisibility.Collapsed;
+        ChatLoadingVisibility = UIVisibility.Visible;
+
+        if (CharacterOfChat(chatId) is string characterId)
+            FollowChatImmediate(characterId);
+        else
+            ShowCards();
+
+        TaskCompletionSource done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingOpen = done.Task;
+        Context.Runtime.Start(lifetime => LoadOpenedChatAsync(chatId, version, done, lifetime));
+
+        return Task.FromResult(UICommandResult.Ok([new PushAddressEffect(new Dictionary<string, object?> { [AppRoutes.ChatParameter] = chatId })]));
+    }
+
+    private long CancelPendingOpen()
+    {
+        _openVersion++;
+        CancellationTokenSource? pending = _openCts;
+        _openCts = null;
+
+        if (pending is not null)
+        {
+            try
+            {
+                pending.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        return _openVersion;
+    }
+
+    private async Task LoadOpenedChatAsync(string chatId, long version, TaskCompletionSource done, CancellationToken lifetime)
+    {
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+        CancellationToken token = cts.Token;
+
+        try
+        {
+            var superseded = false;
+
+            await Context.Runtime.InvokeAsync(() =>
+            {
+                if (_openVersion != version || _generating)
+                {
+                    superseded = true;
+                    return;
+                }
+
+                _openCts = cts;
+            }, token).ConfigureAwait(false);
+
+            if (superseded)
+                return;
+
+            Chat? chat = await Chats.ReadAsync(chatId, token).ConfigureAwait(false);
+
+            if (chat is null)
+            {
+                var notifyMissing = false;
+
+                await Context.Runtime.InvokeAsync(() =>
+                {
+                    if (_openVersion != version)
+                        return;
+
+                    ChatLoadingVisibility = UIVisibility.Collapsed;
+                    FeedVisibility = UIVisibility.Visible;
+                    notifyMissing = true;
+                }, CancellationToken.None).ConfigureAwait(false);
+
+                if (notifyMissing)
+                    await Context.SendEffectsToAllAsync([new ShowNotificationEffect("chatai.chats.chat-gone", UIColorStyle.Warning)], CancellationToken.None).ConfigureAwait(false);
+
+                return;
+            }
+
+            AppSettings settings = await Data.ReadSettingsAsync(token).ConfigureAwait(false);
+            Character? character = chat.Character is string characterId ? await Data.Characters.ReadAsync(characterId, token).ConfigureAwait(false) : null;
+            var personaId = ChatLibrary.ResolvePersonaId(Data, chat, character, DefaultPersonaId);
+            Persona? persona = personaId is null ? null : await Data.Personas.ReadAsync(personaId, token).ConfigureAwait(false);
+            List<StoredDocument<Scenario>> orderedScenarios = ScenarioExecutor.Order((await Data.Scenarios.ListAsync(token).ConfigureAwait(false)).Items);
+
+            var stale = false;
+            var needsChatReload = false;
+
+            await Context.Runtime.InvokeAsync(() =>
+            {
+                if (_openVersion != version || _generating)
+                {
+                    stale = true;
+                    return;
+                }
+
+                _chat = chat;
+                _stageHiddenByUser = false;
+                ChatSeed = chat.Seed;
+                _globalImageTags = settings.ImageTags;
+                ApplyChatSurface(settings.MessageBackground);
+                _character = character;
+                _personaId = personaId;
+                _persona = persona;
+                OpenChatId = chatId;
+                OpenCharacterId = chat.Character;
+                ActivePersonaId = _personaId;
+                ActiveWorldId = ResolveActiveWorldId();
+                ChatBackground.Show(Pictures.ChatBackgroundOf(chatId));
+                RefreshVisuals();
+                EmptyFeed = new UIPhrase("chatai.chat.empty");
+                needsChatReload = !HasChatSummary(chatId);
+
+                if (!needsChatReload)
+                    FollowChatImmediate(chat.Character);
+
+                Messages.Attach(() => _chat?.Messages ?? [], ItemOf);
+                ShowLastActions();
+                RefreshLoadedStatistics();
+                ApplyChatLists(settings.Phrases, orderedScenarios);
+            }, token).ConfigureAwait(false);
+
+            if (stale)
+                return;
+
+            if (needsChatReload)
+                await LoadChatsPanelAsync(token).ConfigureAwait(false);
+
+            await Messages.LoadWindowAsync(new UIItemWindowRequest(UIItemAnchor.End, WindowSize), token).ConfigureAwait(false);
+
+            var stillCurrent = false;
+
+            await Context.Runtime.InvokeAsync(() =>
+            {
+                if (_openVersion != version)
+                    return;
+
+                stillCurrent = true;
+                ChatLoadingVisibility = UIVisibility.Collapsed;
+                FeedVisibility = UIVisibility.Visible;
+            }, CancellationToken.None).ConfigureAwait(false);
+
+            if (stillCurrent && settings.LastChat != chatId)
+                await Data.WriteSettingsAsync(settings with { LastChat = chatId }, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested || lifetime.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            try
+            {
+                await Context.Runtime.InvokeAsync(() =>
+                {
+                    if (ReferenceEquals(_openCts, cts))
+                        _openCts = null;
+                }, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            _ = done.TrySetResult();
+        }
     }
 
     protected override async Task OnCardChangedAsync(CancellationToken cancellationToken)
@@ -473,6 +659,9 @@ internal sealed partial class ChatController : ShellController
 
     private async Task ClearOpenChatAsync(CancellationToken cancellationToken)
     {
+        _ = CancelPendingOpen();
+        ChatLoadingVisibility = UIVisibility.Collapsed;
+        FeedVisibility = UIVisibility.Visible;
         _chat = null;
         _character = null;
         _persona = null;
@@ -503,6 +692,10 @@ internal sealed partial class ChatController : ShellController
 
     private async Task<bool> OpenAsync(string chatId, CancellationToken cancellationToken)
     {
+        _ = CancelPendingOpen();
+        ChatLoadingVisibility = UIVisibility.Collapsed;
+        FeedVisibility = UIVisibility.Visible;
+
         if (await Chats.ReadAsync(chatId, cancellationToken).ConfigureAwait(false) is not Chat chat)
             return false;
 

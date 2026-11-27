@@ -32,12 +32,18 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
             .. chats.Items
                 .Select(stored => Summarize(stored.Id, stored.Document, stored.Document.Character is string id ? byId.GetValueOrDefault(id) : null))
                 .OrderByDescending(static summary => summary.LastAt)
+                .ThenByDescending(static summary => summary.Id, StringComparer.Ordinal)
         ];
     }
 
-    private static ChatSummary Summarize(string id, Chat chat, Character? character)
+    public static ChatSummary Summarize(string id, Chat chat, Character? character)
     {
+        ArgumentNullException.ThrowIfNull(chat);
+
         ChatMessage? last = chat.Messages.Count == 0 ? null : chat.Messages[^1];
+        DateTimeOffset lastAt = last is not null && chat.Created is DateTimeOffset created
+            ? (last.At >= created ? last.At : created)
+            : last?.At ?? chat.Created ?? DateTimeOffset.MinValue;
 
         return new ChatSummary(
             id,
@@ -46,7 +52,7 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
             chat.Character,
             character?.Name ?? string.Empty,
             character?.Tags ?? [],
-            last?.At ?? chat.Created ?? DateTimeOffset.MinValue,
+            lastAt,
             last?.Current.Text ?? string.Empty
         );
     }
@@ -69,7 +75,7 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
             Name = $"{character.Name} {now.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}",
             Character = characterId,
             Persona = personaId,
-            Created = greetings.Count == 0 ? now : null,
+            Created = now,
             Messages = messages
         };
 
@@ -85,8 +91,9 @@ public sealed class ChatLibrary(DataFolder data, TimeProvider time)
             return null;
 
         Character? character = chat.Character is string characterId ? await data.Characters.ReadAsync(characterId, cancellationToken).ConfigureAwait(false) : null;
-        var name = $"{character?.Name ?? chat.Name} {time.GetUtcNow().ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
-        Chat branched = ChatEditing.UpTo(chat, messageId) with { Name = name, Title = null, Background = null };
+        DateTimeOffset now = time.GetUtcNow();
+        var name = $"{character?.Name ?? chat.Name} {now.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
+        Chat branched = ChatEditing.UpTo(chat, messageId) with { Name = name, Title = null, Background = null, Created = now };
         var branchedId = await data.Chats.CreateAsync(branched, cancellationToken).ConfigureAwait(false);
         var copiedBackground = ChatPictures.Copy(data, chat.Background, branchedId);
         IReadOnlyList<ChatVisual> copiedVisuals = GalleryPictures.CopyReferencedChatMedia(data, branched.Visuals, branchedId);

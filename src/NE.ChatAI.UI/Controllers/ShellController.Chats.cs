@@ -40,6 +40,26 @@ internal sealed partial class CardRow : RecursiveObservable, IBindableItem, ICon
     public partial UIVisibility ActiveVisibility { get; set; } = UIVisibility.Collapsed;
 }
 
+/// <summary>A chat in the chats panel: its title, single-line preview and active badge.</summary>
+internal sealed partial class ChatRow : RecursiveObservable, IBindableItem
+{
+    [RecursiveMember(false)]
+    public required string Id { get; init; }
+
+    [RecursiveMember]
+    public partial UIPhrase? Title { get; set; }
+
+    [RecursiveMember]
+    public partial UIPhrase? Description { get; set; }
+
+    [RecursiveMember]
+    public partial UIVisibility DescriptionVisibility { get; set; } = UIVisibility.Collapsed;
+
+    /// <summary>Shown on the chat currently open on the page.</summary>
+    [RecursiveMember]
+    public partial UIVisibility ActiveVisibility { get; set; } = UIVisibility.Collapsed;
+}
+
 /// <summary>
 /// The chats panel: the characters, the personas and the worlds — each with its active one first and the rest by name, narrowed by a
 /// search over their names and by their tags, and a new one made beside the search; a character picked shows its chats and opens
@@ -64,6 +84,7 @@ internal abstract partial class ShellController
 
     /// <summary>What the last read found, so the panel turns between a character and the list without reading the folder again.</summary>
     private IReadOnlyList<ChatSummary> _chats = [];
+    private long _chatsVersion;
     private Dictionary<string, UIThemeColor> _characterTagColors = [with(StringComparer.OrdinalIgnoreCase)];
     private Dictionary<string, UIThemeColor> _personaTagColors = [with(StringComparer.OrdinalIgnoreCase)];
     private Dictionary<string, UIThemeColor> _worldTagColors = [with(StringComparer.OrdinalIgnoreCase)];
@@ -146,11 +167,10 @@ internal abstract partial class ShellController
 
     /// <summary>The panel character's chats, the one last written to first.</summary>
     [RecursiveMember(false)]
-    public RecursiveCollection<MenuItem> ChatEntries { get; } = [];
+    public RecursiveCollection<ChatRow> ChatEntries { get; } = [];
 
-    /// <summary>The chat the page shows, marked in the list as it changes.</summary>
-    [RecursiveMember]
-    public partial string? OpenChatId { get; set; }
+    /// <summary>The chat the page shows, marked with the active badge in the list as it changes.</summary>
+    public string? OpenChatId { get; protected set; }
 
     protected ChatLibrary Chats => Context.Services.GetRequiredService<ChatLibrary>();
 
@@ -158,16 +178,31 @@ internal abstract partial class ShellController
 
     protected async Task LoadChatsAsync(CancellationToken cancellationToken)
     {
-        AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        ChatsSnapshot snapshot = await ReadChatsSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        ApplyChatsSnapshot(snapshot);
+    }
 
-        KnownCharacters = (await Data.Characters.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
-        _chats = await Chats.ListAsync(KnownCharacters, cancellationToken).ConfigureAwait(false);
-        KnownPersonas = (await Data.Personas.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
-        KnownWorlds = (await Data.Worlds.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
-        _characterTagColors = TagBadges.ColorsOf(settings, TagScope.Character);
-        _personaTagColors = TagBadges.ColorsOf(settings, TagScope.Persona);
-        _worldTagColors = TagBadges.ColorsOf(settings, TagScope.World);
-        DefaultPersonaId = settings.Persona is string persona && KnownPersonas.Any(stored => stored.Id == persona) ? persona : null;
+    private async Task<ChatsSnapshot> ReadChatsSnapshotAsync(CancellationToken cancellationToken)
+    {
+        AppSettings settings = await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<StoredDocument<Character>> characters = (await Data.Characters.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+        IReadOnlyList<ChatSummary> chats = await Chats.ListAsync(characters, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<StoredDocument<Persona>> personas = (await Data.Personas.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+        IReadOnlyList<StoredDocument<World>> worlds = (await Data.Worlds.ListAsync(cancellationToken).ConfigureAwait(false)).Items;
+
+        return new ChatsSnapshot(settings, characters, chats, personas, worlds);
+    }
+
+    private void ApplyChatsSnapshot(ChatsSnapshot snapshot, long? expectedVersion = null)
+    {
+        KnownCharacters = snapshot.Characters;
+        _chats = expectedVersion is long version && version != _chatsVersion ? MergeNewerChatActivity(snapshot.Chats, _chats) : snapshot.Chats;
+        KnownPersonas = snapshot.Personas;
+        KnownWorlds = snapshot.Worlds;
+        _characterTagColors = TagBadges.ColorsOf(snapshot.Settings, TagScope.Character);
+        _personaTagColors = TagBadges.ColorsOf(snapshot.Settings, TagScope.Persona);
+        _worldTagColors = TagBadges.ColorsOf(snapshot.Settings, TagScope.World);
+        DefaultPersonaId = snapshot.Settings.Persona is string persona && KnownPersonas.Any(stored => stored.Id == persona) ? persona : null;
 
         ShowTagFilter();
         ShowCards();
@@ -178,6 +213,40 @@ internal abstract partial class ShellController
 
         OnCardsLoaded();
     }
+
+    private static List<ChatSummary> MergeNewerChatActivity(IReadOnlyList<ChatSummary> loaded, IReadOnlyList<ChatSummary> current)
+    {
+        Dictionary<string, ChatSummary> byId = new(current.Count, StringComparer.Ordinal);
+
+        for (var i = 0; i < current.Count; i++)
+            byId[current[i].Id] = current[i];
+
+        List<ChatSummary> merged = [with(loaded.Count)];
+
+        for (var i = 0; i < loaded.Count; i++)
+        {
+            ChatSummary item = loaded[i];
+            merged.Add(byId.TryGetValue(item.Id, out ChatSummary? existing) && existing.LastAt > item.LastAt
+                ? item with { LastAt = existing.LastAt, LastText = existing.LastText }
+                : item);
+        }
+
+        merged.Sort(static (a, b) =>
+        {
+            var byTime = b.LastAt.CompareTo(a.LastAt);
+            return byTime != 0 ? byTime : string.CompareOrdinal(b.Id, a.Id);
+        });
+
+        return merged;
+    }
+
+    private sealed record ChatsSnapshot(
+        AppSettings Settings,
+        IReadOnlyList<StoredDocument<Character>> Characters,
+        IReadOnlyList<ChatSummary> Chats,
+        IReadOnlyList<StoredDocument<Persona>> Personas,
+        IReadOnlyList<StoredDocument<World>> Worlds
+    );
 
     /// <summary>Notifies subclasses whenever characters, personas and worlds are reloaded.</summary>
     protected virtual void OnCardsLoaded()
@@ -236,6 +305,7 @@ internal abstract partial class ShellController
         ShowCharacters();
         ShowPersonas();
         ShowWorlds();
+        SyncActiveChat();
     }
 
     /// <summary>The characters, the active chat's one first, then the rest by name.</summary>
@@ -333,6 +403,12 @@ internal abstract partial class ShellController
         WorldsEmpty = new UIPhrase(KnownWorlds.Count == 0 ? "chatai.chats.no-worlds" : "chatai.chats.no-match");
     }
 
+    private void SyncActiveChat()
+    {
+        for (var i = 0; i < ChatEntries.Count; i++)
+            ChatEntries[i].ActiveVisibility = ChatEntries[i].Id == OpenChatId ? UIVisibility.Visible : UIVisibility.Collapsed;
+    }
+
     /// <summary>The panel's character with its chats; a character gone, or none, and the panel shows the list instead.</summary>
     private void ShowPanelCharacter()
     {
@@ -383,21 +459,31 @@ internal abstract partial class ShellController
         {
             ChatSummary chat = chats[i];
             UIPhrase title = EntryTitle(chat);
-            UIPhrase description = UIPhrase.Text(Preview(chat.LastText));
-            var selected = chat.Id == OpenChatId;
+            var preview = Preview(chat.LastText);
+            UIPhrase description = UIPhrase.Text(preview);
+            UIVisibility descriptionVisibility = preview.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed;
+            UIVisibility activeVisibility = chat.Id == OpenChatId ? UIVisibility.Visible : UIVisibility.Collapsed;
 
-            if (ChatEntries.TryGet(chat.Id, out MenuItem? existing))
+            if (ChatEntries.TryGet(chat.Id, out ChatRow? existing))
             {
                 existing.Title = title;
                 existing.Description = description;
-                existing.Selected = selected;
+                existing.DescriptionVisibility = descriptionVisibility;
+                existing.ActiveVisibility = activeVisibility;
 
                 if (!string.Equals(ChatEntries[i].Id, chat.Id, StringComparison.Ordinal))
                     _ = ChatEntries.Move(chat.Id, i);
             }
             else
             {
-                ChatEntries.Insert(i, new MenuItem { Id = chat.Id, Title = title, Description = description, Selected = selected });
+                ChatEntries.Insert(i, new ChatRow
+                {
+                    Id = chat.Id,
+                    Title = title,
+                    Description = description,
+                    DescriptionVisibility = descriptionVisibility,
+                    ActiveVisibility = activeVisibility
+                });
             }
         }
     }
@@ -415,6 +501,21 @@ internal abstract partial class ShellController
         var text = UIInlineMarkup.ToPlainText(lastText).ReplaceLineEndings(" ").Trim();
 
         return text.Length <= PreviewLength ? text : string.Concat(text.AsSpan(0, PreviewLength), "…");
+    }
+
+    protected string? CharacterOfChat(string chatId)
+        => _chats.FirstOrDefault(chat => chat.Id == chatId)?.CharacterId;
+
+    protected bool HasChatSummary(string chatId)
+        => _chats.Any(chat => chat.Id == chatId);
+
+    protected void FollowChatImmediate(string? characterId)
+    {
+        OpenCharacterId = characterId;
+        _panelCharacterId = characterId;
+        _panelShowingList = false;
+        ShowCards();
+        ShowPanelCharacter();
     }
 
     /// <summary>
@@ -440,30 +541,85 @@ internal abstract partial class ShellController
 
     protected void ShowLastWords(string chatId, string lastText, bool bumpToTop = false)
     {
-        if (!ChatEntries.TryGet(chatId, out MenuItem? entry))
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        ChatSummary? updatedSummary = UpdateChatSummary(chatId, lastText, bumpToTop, now);
+
+        if (!ChatEntries.TryGet(chatId, out ChatRow? entry))
             return;
 
-        entry.Description = UIPhrase.Text(Preview(lastText));
+        var preview = Preview(lastText);
+        entry.Description = UIPhrase.Text(preview);
+        entry.DescriptionVisibility = preview.Length > 0 ? UIVisibility.Visible : UIVisibility.Collapsed;
 
         if (bumpToTop)
         {
-            ChatSummary? summary = _chats.FirstOrDefault(chat => chat.Id == chatId);
-
-            if (string.IsNullOrWhiteSpace(summary?.Title))
-                entry.Title = UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(DateTimeOffset.UtcNow, UITimestampFormat.Relative)));
+            if (string.IsNullOrWhiteSpace(updatedSummary?.Title))
+                entry.Title = UIPhrase.Of("chatai.chats.at", ("at", new UIMoment(now, UITimestampFormat.Relative)));
 
             _ = ChatEntries.Move(chatId, 0);
         }
     }
 
-    /// <summary>The chats panel opening reads the chats as they are now and restores the open chat's character unless the reader stepped back to the list.</summary>
-    [UICommand]
-    public Task LoadChatsPanelAsync(CancellationToken cancellationToken)
+    private ChatSummary? UpdateChatSummary(string chatId, string lastText, bool bumpToTop, DateTimeOffset now)
     {
-        if (!_panelShowingList)
-            _panelCharacterId = OpenCharacterId;
+        var index = -1;
 
-        return LoadChatsAsync(cancellationToken);
+        for (var i = 0; i < _chats.Count; i++)
+        {
+            if (string.Equals(_chats[i].Id, chatId, StringComparison.Ordinal))
+            {
+                index = i;
+                break;
+            }
+        }
+
+        if (index < 0)
+            return null;
+
+        ChatSummary current = _chats[index];
+        ChatSummary updated = bumpToTop
+            ? current with { LastAt = now, LastText = lastText }
+            : current with { LastText = lastText };
+
+        List<ChatSummary> next = [.. _chats];
+
+        if (bumpToTop && index > 0)
+        {
+            next.RemoveAt(index);
+            next.Insert(0, updated);
+        }
+        else
+        {
+            next[index] = updated;
+        }
+
+        _chats = next;
+        _chatsVersion++;
+        return updated;
+    }
+
+    /// <summary>The chats panel opening reads the chats in the background without blocking row clicks, restoring the open chat's character unless the reader stepped back to the list.</summary>
+    [UICommand(ConcurrencyMode = UICommandConcurrencyMode.Background)]
+    public async Task LoadChatsPanelAsync(CancellationToken cancellationToken)
+    {
+        string? previousPanelCharacterId = null;
+        var versionBefore = 0L;
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            previousPanelCharacterId = _panelCharacterId;
+            versionBefore = _chatsVersion;
+        }, cancellationToken).ConfigureAwait(false);
+
+        ChatsSnapshot snapshot = await ReadChatsSnapshotAsync(cancellationToken).ConfigureAwait(false);
+
+        await Context.Runtime.InvokeAsync(() =>
+        {
+            if (!_panelShowingList && string.Equals(_panelCharacterId, previousPanelCharacterId, StringComparison.Ordinal))
+                _panelCharacterId = OpenCharacterId;
+
+            ApplyChatsSnapshot(snapshot, versionBefore);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The panel turned to the characters, the personas or the worlds; the search and that list's tags narrow it.</summary>
@@ -629,7 +785,13 @@ internal abstract partial class ShellController
             return Notify("chatai.chats.character-gone", UIColorStyle.Warning);
 
         if (ChatEntries.Count > 0)
-            return await ShowChatAsync(ChatEntries[0].Id, cancellationToken).ConfigureAwait(false);
+        {
+            var targetChatId = characterId == OpenCharacterId && OpenChatId is string current && ChatEntries.Any(entry => entry.Id == current)
+                ? current
+                : ChatEntries[0].Id;
+
+            return await ShowChatAsync(targetChatId, cancellationToken).ConfigureAwait(false);
+        }
 
         if (IsGenerating)
             return Notify("chatai.chat.busy", UIColorStyle.Info);
@@ -637,11 +799,31 @@ internal abstract partial class ShellController
         if (await StartPanelChatAsync(cancellationToken).ConfigureAwait(false) is not string chatId)
             return Notify("chatai.chats.character-gone", UIColorStyle.Warning);
 
-        _chats = await Chats.ListAsync(KnownCharacters, cancellationToken).ConfigureAwait(false);
+        await PrependCreatedChatAsync(chatId, characterId, cancellationToken).ConfigureAwait(false);
         ShowCards();
         ShowPanelCharacter();
 
         return await ShowChatAsync(chatId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task PrependCreatedChatAsync(string chatId, string characterId, CancellationToken cancellationToken)
+    {
+        if (await Chats.ReadAsync(chatId, cancellationToken).ConfigureAwait(false) is not Chat created)
+            return;
+
+        Character? character = KnownCharacters.FirstOrDefault(stored => stored.Id == characterId)?.Document;
+        ChatSummary summary = ChatLibrary.Summarize(chatId, created, character);
+        List<ChatSummary> next = [with(_chats.Count + 1)];
+        next.Add(summary);
+
+        for (var i = 0; i < _chats.Count; i++)
+        {
+            if (!string.Equals(_chats[i].Id, chatId, StringComparison.Ordinal))
+                next.Add(_chats[i]);
+        }
+
+        _chats = next;
+        _chatsVersion++;
     }
 
     private async Task<string?> StartPanelChatAsync(CancellationToken cancellationToken)
@@ -763,7 +945,7 @@ internal abstract partial class ShellController
         if (await StartPanelChatAsync(cancellationToken).ConfigureAwait(false) is not string chatId)
             return Notify("chatai.chats.character-gone", UIColorStyle.Warning);
 
-        _chats = await Chats.ListAsync(KnownCharacters, cancellationToken).ConfigureAwait(false);
+        await PrependCreatedChatAsync(chatId, _panelCharacterId, cancellationToken).ConfigureAwait(false);
         ShowCards();
         ShowPanelCharacter();
 

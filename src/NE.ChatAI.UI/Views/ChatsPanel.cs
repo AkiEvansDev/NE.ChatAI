@@ -7,7 +7,7 @@ namespace NE.ChatAI.Views;
 
 internal static class ChatsPanel
 {
-    // Matches a card's name plus one row of tag badges (24 + 4 + 16), keeping rows uniform with or without tags.
+    // Matches a card's name (24px) plus one row of tag badges (16px) and 4px bottom optical balance, keeping rows uniform with or without tags.
     private const double AvatarSize = 44;
     private const double HeaderAvatarSize = 34;
     public const string SearchId = "chatai-card-search";
@@ -117,7 +117,7 @@ internal static class ChatsPanel
             .SetColumn(24, UIGridUnit.Auto())
             .SetPadding(UIThickness.Symmetric(0, 2))
             .AddChild(Avatar<CardRow>(static x => x.Avatar, UIBindingScope.Relative).SetMargin(UIThickness.All(0, 0, 12, 0)).SetPlacement(1, 1, 1, 1))
-            .AddChild(UILayout.Stack(4,
+            .AddChild(UILayout.Stack(0,
                     UILayout.Row(8,
                         new TextComponent().BindTitle<CardRow>(static x => x.Name, UIBindingScope.Relative).AsSubtitle(),
                         new BadgeComponent()
@@ -127,20 +127,16 @@ internal static class ChatsPanel
                             .SetTitleType(UITextAppearance.Caption)
                             .SetVerticalAlignment(UIAlignment.Center)
                             .BindVisibility<CardRow>(static x => x.DefaultVisibility, UIBindingScope.Relative),
-                        new BadgeComponent()
-                            .SetTitle("chatai.chats.active")
-                            .SetVariant(UIBadgeVariant.Surface)
-                            .SetColor(UIThemeColor.Success)
-                            .SetTitleType(UITextAppearance.Caption)
-                            .SetVerticalAlignment(UIAlignment.Center)
-                            .BindVisibility<CardRow>(static x => x.ActiveVisibility, UIBindingScope.Relative)
+                        CreateActiveBadge<CardRow>(static x => x.ActiveVisibility)
                     ),
+                    // Subtitle's 24px line height carries ~5px top leading and ~3px descender air, so 0px gap + 4px bottom margin balances the 16px tag pills against the 44px avatar.
                     new ItemsViewComponent()
                         .SetVerticalScroll(UIScrollMode.Disabled)
                         .BindItems<CardRow>(static x => x.Tags, UIBindingScope.Relative)
                         .SetLayoutType(UIItemsLayoutType.Wrap)
                         .SetSpacing(4)
                         .SetShowEmptyTemplate(false)
+                        .SetMargin(UIThickness.All(0, 0, 0, 4))
                         .SetTemplate(CreateTagBadge())
                 )
                 .SetVerticalAlignment(UIAlignment.Center)
@@ -151,6 +147,15 @@ internal static class ChatsPanel
                 .SetPlacement(24, 1, 1, 1)
             );
     }
+
+    private static BadgeComponent CreateActiveBadge<TSource>(Expression<Func<TSource, object?>> visibility)
+        => new BadgeComponent()
+            .SetTitle("chatai.chats.active")
+            .SetVariant(UIBadgeVariant.Surface)
+            .SetColor(UIThemeColor.Success)
+            .SetTitleType(UITextAppearance.Caption)
+            .SetVerticalAlignment(UIAlignment.Center)
+            .BindVisibility(visibility, UIBindingScope.Relative);
 
     private static BadgeComponent CreateTagBadge()
         => new BadgeComponent()
@@ -166,10 +171,8 @@ internal static class ChatsPanel
                 .SetVerticalScroll(UIScrollMode.Disabled)
                 .SetRowHoverable(true)
                 .SetRowBleed(true)
-                .SetSelectionMode(UISelectionMode.One)
-                .BindSelectedKey<ShellController>(static x => x.OpenChatId, mode: UIBindingMode.OneWay)
                 .BindItems<ShellController>(static x => x.ChatEntries)
-                .FilterBy(ChatSearchId, IInputComponent.ValueProperty, nameof(MenuItem.Title))
+                .FilterBy(ChatSearchId, IInputComponent.ValueProperty, nameof(ChatRow.Title))
                 .SetSpacing(4)
                 .ConfigureDefaultEmptyTemplate(static empty => empty.SetTitle("chatai.chats.none").SetTitleWrap(true))
                 .SetTemplate(CreateChatRow())
@@ -188,13 +191,23 @@ internal static class ChatsPanel
             .SetColumn(24, UIGridUnit.Auto())
             .SetPadding(UIThickness.Symmetric(0, 2))
             .SetMinHeight(UILayoutLength.Absolute(AvatarSize + 4))
-            .AddChild(new TextComponent()
-                .AsSubtitle()
-                .SetTitleWrap(false)
-                .SetWrapMode(UITextWrapMode.NoWrap)
-                .SetDescriptionPlain(true)
-                .BindTitle<MenuItem>(static x => x.Title, UIBindingScope.Relative)
-                .BindDescription<MenuItem>(static x => x.Description, UIBindingScope.Relative)
+            .AddChild(UILayout.Stack(0,
+                    UILayout.Row(8,
+                            new TextComponent()
+                                .AsSubtitle()
+                                .SetTitleWrap(false)
+                                .SetMinWidth(UILayoutLength.Absolute(0))
+                                .BindTitle<ChatRow>(static x => x.Title, UIBindingScope.Relative),
+                            CreateActiveBadge<ChatRow>(static x => x.ActiveVisibility)
+                        )
+                        .SetWrap(false),
+                    new TextComponent()
+                        .SetWrapMode(UITextWrapMode.NoWrap)
+                        .SetDescriptionPlain(true)
+                        .BindDescription<ChatRow>(static x => x.Description, UIBindingScope.Relative)
+                        .BindVisibility<ChatRow>(static x => x.DescriptionVisibility, UIBindingScope.Relative)
+                )
+                .SetMinWidth(UILayoutLength.Absolute(0))
                 .SetVerticalAlignment(UIAlignment.Center)
                 .SetPlacement(1, 1, 23, 1)
             )

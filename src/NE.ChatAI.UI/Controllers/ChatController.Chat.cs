@@ -63,21 +63,23 @@ internal sealed partial class ChatController
         IReadOnlyList<string> savedPhrases = (await Data.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).Phrases;
         List<StoredDocument<Scenario>> orderedScenarios = ScenarioExecutor.Order((await Data.Scenarios.ListAsync(cancellationToken).ConfigureAwait(false)).Items);
 
-        await Context.Runtime.InvokeAsync(() =>
-        {
-            ShowPersonas();
+        await Context.Runtime.InvokeAsync(() => ApplyChatLists(savedPhrases, orderedScenarios), cancellationToken).ConfigureAwait(false);
+    }
 
-            MenuItem phrases = ExtraOf(PhrasesAction);
-            phrases.Items.Clear();
+    private void ApplyChatLists(IReadOnlyList<string> savedPhrases, List<StoredDocument<Scenario>> orderedScenarios)
+    {
+        ShowPersonas();
 
-            for (var i = 0; i < savedPhrases.Count; i++)
-                phrases.Items.Add(new MenuItem { Id = PhrasePrefix + i.ToString(CultureInfo.InvariantCulture), Title = Shortened(savedPhrases[i]), Value = UIPhrase.Text(savedPhrases[i]), IsContent = true });
+        MenuItem phrases = ExtraOf(PhrasesAction);
+        phrases.Items.Clear();
 
-            phrases.Enabled = phrases.Items.Count > 0 && _chat is not null;
-            _knownScenarios = orderedScenarios;
-            RebuildScenarioMenu();
-            RefreshRealizedRecords();
-        }, cancellationToken).ConfigureAwait(false);
+        for (var i = 0; i < savedPhrases.Count; i++)
+            phrases.Items.Add(new MenuItem { Id = PhrasePrefix + i.ToString(CultureInfo.InvariantCulture), Title = Shortened(savedPhrases[i]), Value = UIPhrase.Text(savedPhrases[i]), IsContent = true });
+
+        phrases.Enabled = phrases.Items.Count > 0 && _chat is not null;
+        _knownScenarios = orderedScenarios;
+        RebuildScenarioMenu();
+        RefreshRealizedRecords();
     }
 
     private void ShowPersonas()

@@ -107,7 +107,16 @@ internal sealed class ChatView : ShellView, IUIViewDefinition
             .SetMinHeight(UILayoutLength.Absolute(0))
             .SetMaxWidth(UILayoutLength.Absolute(ChatColumnWidth))
             .SetHorizontalAlignment(UIAlignment.Center)
-            .AddChild(CreateFeed().SetPlacement(1, 1, 24, 1))
+            .AddChild(CreateFeed()
+                .BindVisibility<ChatController>(static x => x.FeedVisibility)
+                .SetPlacement(1, 1, 24, 1)
+            )
+            .AddChild(new SpinnerComponent()
+                .SetHorizontalAlignment(UIAlignment.Center)
+                .SetVerticalAlignment(UIAlignment.Center)
+                .BindVisibility<ChatController>(static x => x.ChatLoadingVisibility)
+                .SetPlacement(1, 1, 24, 1)
+            )
             .AddChild(CreateComposer().SetPlacement(1, 2, 24, 1));
 
     // Messages vary widely in height, so use a top loading ring instead of fixed-height skeleton rows.

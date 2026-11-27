@@ -81,7 +81,6 @@ internal abstract class ShellView : UIViewBase
                         .SetSpacing(4)
                         .SetLineSpacing(4)
                         .AddChild(CreateDrawerNavButton("chatai.nav.settings", AppIcons.Settings, AppRoutes.Settings))
-                        .AddChild(CreateDrawerNavButton("chatai.nav.worlds", AppIcons.Bindings, AppRoutes.Worlds))
                         .AddChild(CreateDrawerNavButton("chatai.nav.scenarios", AppIcons.Scenarios, AppRoutes.Scenarios))
                         .AddChild(CreateDrawerNavButton("chatai.nav.plugins", AppIcons.Plugins, AppRoutes.Plugins)),
                     pinnable: true
