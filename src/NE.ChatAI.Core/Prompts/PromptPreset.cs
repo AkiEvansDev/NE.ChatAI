@@ -43,7 +43,7 @@ public sealed record PromptPreset : NamedDocument
     /// <summary>The top of the prompt in SillyTavern's syntax, <c>{{macro}}</c> and <c>{{#if macro}}…{{/if}}</c>; each macro is a block.</summary>
     public string StoryString { get; init; } = DefaultStoryString;
 
-    /// <summary>What stands between the example messages and before each of them.</summary>
+    /// <summary>What stands before each example dialogue; when empty, dialogues are separated by a blank line.</summary>
     public string ExampleSeparator { get; init; } = "***";
 
     /// <summary>What stands between the story and the chat's history.</summary>

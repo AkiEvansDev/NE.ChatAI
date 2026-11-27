@@ -218,7 +218,7 @@ public static class PromptBuilder
             ["wiAfter"] = after,
             ["loreBefore"] = before,
             ["loreAfter"] = after,
-            ["mesExamples"] = Examples(examplesRaw, spec.Prompt.ExampleSeparator),
+            ["mesExamples"] = Examples(examplesRaw, Macros.Render(spec.Prompt.ExampleSeparator, names)),
             ["mesExamplesRaw"] = examplesRaw
         };
     }
@@ -233,7 +233,9 @@ public static class PromptBuilder
 
         IEnumerable<string> dialogues = examples.Split(ExampleStart, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        return string.Join('\n', dialogues.Select(dialogue => separator.Length == 0 ? dialogue : $"{separator}\n{dialogue}"));
+        return separator.Length == 0
+            ? string.Join("\n\n", dialogues)
+            : string.Join('\n', dialogues.Select(dialogue => $"{separator}\n{dialogue}"));
     }
 
     private static void Contribute(Dictionary<string, StringBuilder> contributions, string macro, string value)
